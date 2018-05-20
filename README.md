@@ -20,13 +20,17 @@ Run `python setup.py install` to build and install pylvgl. The pre-built source-
   
 ## Road-map
 
-To be implemented:
+Already implemented:
 
 * Parsing of LittlevGL source code
 * Python bindings for all LittlevGL objects
 * Python constants for all LittlevGL enum constants
+
+To be implemented:
+
 * Destruction / deletion of items
 * Support for styles
+* Objects should inherit from the correct type; currently the all inherit from Obj
 * ...
 
 
