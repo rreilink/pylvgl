@@ -25,13 +25,21 @@ Already implemented:
 * Parsing of LittlevGL source code
 * Python bindings for all LittlevGL objects
 * Python constants for all LittlevGL enum constants
+* Support for styles
 
 To be implemented:
 
+* Action callbacks
 * Destruction / deletion of items
-* Support for styles
 * Objects should inherit from the correct type; currently the all inherit from Obj
 * ...
 
+## Limitations
 
+* lvgl.Style objects cannot be created from within Python, since the management of the underlying lv_style_t structs is troublesome. LittlevGL keeps references to those style objects, and as such it cannot be determined when it would be safe to free that data. In the current implementation, lvgl.Style objects are references to lv_style_t structs that have already been defined at C-level.
 
+* The bindings-generator currently assumes a 16 bit-per-pixel screen configuration. This is checked in the generated lvglmodule.c at compile-time.
+
+## Developer info
+
+`bindingsgen.py` is the Python script that does the parsing of the LittleVGL source code and generates `lvglmodule.c`. It uses regex-based parsing that is far from standard-C compliant, but it is simple and it suffices to parse the LittleVGL source code. It uses `lvglmodule_template.c` as a template.

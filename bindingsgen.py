@@ -1,4 +1,4 @@
-from collections import namedtuple
+from collections import namedtuple, Counter
 from itertools import chain
 import re
 import glob
@@ -6,13 +6,16 @@ import glob
 FunctionDef = namedtuple('FunctionDef', 'name restype args customcode')
 Argument = namedtuple('Argument', 'name type')
 EnumItem = namedtuple('EnumItem', 'name value')
+StructItem = namedtuple('StructItem', 'name type')
 
-def parse(filename, functions, enums):
+def preprocess(filename):
     '''
-    Parse H-file given by filename; add all function definitions to functions
-    dict (dict of name->FunctionDef namedtuples) and add all enum definitions to
-    enums dict (dict of name->list of EnumItem namedtuples)
+    Preprocess H-file given by filename, stripping comments, preprocessor 
+    directives, returning everything within the 'extern "C" {' ... '}'
+    clause
+    
     '''
+    
     with open(filename, 'r') as file:
         c = file.read()
         
@@ -21,7 +24,19 @@ def parse(filename, functions, enums):
     c = re.sub('#.*', '', c)                          # strip preprocessor  
     
     c = re.findall('extern "C" {(.*)}', c, re.DOTALL)[0] # strip extern "C" { }
+    
+    return c
+    
 
+def parse(filename, functions, enums):
+    '''
+    Parse H-file given by filename; add all function definitions to functions
+    dict (dict of name->FunctionDef namedtuples) and add all enum definitions to
+    enums dict (dict of name->list of EnumItem namedtuples)
+    '''
+
+    c = preprocess(filename)
+    
     # Remove all enum definitions and store them (as str) into cenums list
     cenums = []
     c = re.sub('typedef\s+enum\s+{(.*?)}\s*([a-zA-Z0-9_]+);', lambda x: cenums.append(x.groups()) or '', c, flags = re.DOTALL)
@@ -47,7 +62,7 @@ def parse(filename, functions, enums):
 
 
     # Find method definitions
-    for static, restype, ptr, name, argsstr, end in re.findall('(static\s+inline\s+)?(bool|void|lv_[a-zA-Z0-9_]+_t)(\s+\*)?\s+([a-zA-Z0-9_]+)\((.*?)\)\s*({|;)', c):
+    for static, restype, resptr, name, argsstr, end in re.findall('(static\s+inline\s+)?(bool|void|lv_[a-zA-Z0-9_]+_t)(\s+\*)?\s+([a-zA-Z0-9_]+)\((.*?)\)\s*({}|;)', c):
 
         if '(' in argsstr:
             print(f'{name} cannot be bound since it has a function pointer as argument')
@@ -57,13 +72,13 @@ def parse(filename, functions, enums):
             for arg in argsstr.split(','):
                 arg = arg.strip()
                 
-                const, argtype, ptr, argname = re.match(
+                const, argtype, argptr, argname = re.match(
                         '(const\s+)?([A-Za-z0-9_]+)\s*(\*+| )\s*([A-Za-z0-9_]+)$', arg).groups()
-                argtype += ptr.strip()
+                argtype += argptr.strip()
                 
                 args.append(Argument(argname, argtype))
 
-        functions[name]=(FunctionDef(name, restype + ptr.strip(), args, None))
+        functions[name]=(FunctionDef(name, restype + resptr.strip(), args, False))
         
     return functions, enums
 
@@ -94,48 +109,22 @@ skipfunctions = {
     'lv_obj_set_free_num',
     'lv_obj_get_free_num',
     'lv_obj_allocate_ext_attr',
+    'lv_obj_get_ext_attr',
     
     # Do not work since they require lv_obj_t == NULL which is not implemented
     # lv_obj_getchildren is implemented instead which returns a list
     'lv_obj_get_child',
     'lv_obj_get_child_back',
     
+    # Not compatible since it is like a 'class method' (it does not have 
+    # lv_obj_t* as first argument). Implemented as lvgl.report_style_mod
+    'lv_obj_report_style_mod',
     }
 
 #
-# Custom code for certain functions
+# Mark which functions have a custom implementation (in lvglmodule_template.c)
 #
-
-# lv_obj_get_child and lv_obj_get_child_back are not really Pythonic. This
-# implementation returns a list of children
-functions['lv_obj_get_children'] = FunctionDef('lv_obj_get_children', None, None, '''
-    lv_obj_t *child = NULL;
-    pylv_obj_Object *pychild;
-    PyObject *ret = PyList_New(0);
-    if (!ret) return NULL;
-    
-    while (1) {
-        child = lv_obj_get_child(self->ref, child);
-        if (!child) break;
-        pychild = lv_obj_get_free_ptr(child);
-        
-        if (!pychild) {
-            // Child is not known to Python, create a new Object instance
-            pychild = PyObject_New(pylv_obj_Object, &pylv_obj_Type);
-            pychild -> ref = child;
-            lv_obj_set_free_ptr(child, pychild);
-        }
-        
-        // Child that is known in Python
-        if (PyList_Append(ret, (PyObject *)pychild)) { // PyList_Append increases refcount
-            // If PyList_Append fails, how to clean up?
-            return NULL;
-        }
-    }
-    
-    return ret;
-
-''')
+functions['lv_obj_get_children'] = FunctionDef('lv_obj_get_children', None, None, True)
 
 
 allfunctions = functions
@@ -167,9 +156,12 @@ functions = list(chain(*objects.values()))
 # Writing of the output file
 
 typeconv = {
-    'lv_obj_t*': ('O!', '!'), # special case: conversion from/to Python object
+    'lv_obj_t*': ('O!', 'pylv_Object *'),     # special case: conversion from/to Python object
+    'lv_style_t*': ('O!', 'Style_Object *'), # special case: conversion from/to Python Style object
     'bool':      ('p', 'int'),
     'uint8_t':   ('b', 'unsigned char'),
+    'lv_opa_t':  ('b', 'unsigned char'),
+    'lv_color_t': ('H', 'unsigned short int'),
     'char':      ('c', 'char'),
     'char*':     ('s', 'char *'),
     'lv_coord_t':('h', 'short int'),
@@ -179,11 +171,20 @@ typeconv = {
     
     }
 
-def functioncode(function):
-    notImplementedCode = '    PyErr_SetString(PyExc_NotImplementedError, "not implemented");\n    return NULL;'
+argtypes_miss = Counter()
+restypes_miss = Counter()
+
+def functioncode(function, objectname):
+    startCode = f'''
+static PyObject*
+py{function.name}(pylv_Object *self, PyObject *args, PyObject *kwds)
+{{
+'''
+
+    notImplementedCode = startCode + '    PyErr_SetString(PyExc_NotImplementedError, "not implemented");\n    return NULL;\n}\n'
 
     if function.customcode:
-        return function.customcode
+        return '' # Custom implementation is in lvglmodule_template.c
     
     argnames = []
     argctypes = []
@@ -195,35 +196,50 @@ def functioncode(function):
             try:
                 fmt, ctype = typeconv[argtype]
             except KeyError:
-                print(f'{function.name}: Type not found >{argtype}< ')
-                return notImplementedCode
+                print(f'{function.name}: Argument type not found >{argtype}< ')
+                argtypes_miss.update((argtype,))
+                return notImplementedCode;
         argnames.append(argname)
         argctypes.append(ctype)
         argfmt += fmt
     
-    assert argctypes and argctypes[0] == '!'
     
-    retfmt, retctype = typeconv.get(function.restype, (None, None))
-    
+    if function.restype == 'void':
+        resfmt, resctype = None, None
+    else:
+        if function.restype in enums:
+            resfmt, resctype = 'i', 'int'
+        else:
+            try:
+                resfmt, resctype = typeconv[function.restype]
+            except KeyError:
+                print(f'{function.name}: Return type not found >{function.restype}< ')
+                restypes_miss.update((function.restype,))
+                return notImplementedCode            
+
+    # First argument should always be a reference to the object itself
+    assert argctypes and argctypes[0] == 'pylv_Object *'
     argnames.pop(0)
     argctypes.pop(0)
     argfmt = argfmt[2:]
     
-    code = ''
+    code = startCode
     kwlist = ''.join('"%s", ' % name for name in argnames)
     code += f'    static char *kwlist[] = {{{kwlist}NULL}};\n';
     
     crefvarlist = ''
     cvarlist = ''
     for name, ctype in zip(argnames, argctypes):
-        if ctype == '!' : # Object, convert from Python
-            print(f'lv_obj_t for {function.name}')
-            code += f'     pylv_obj_Object * {name};\n'
+        code += f'    {ctype} {name};\n'
+        if ctype == 'pylv_Object *' : # Object, convert from Python
             crefvarlist += f', &pylv_obj_Type, &{name}'
             cvarlist += f', {name}->ref'
-
+        
+        elif ctype == 'Style_Object *': # Style object
+            crefvarlist += f', &Style_Type, &{name}'
+            cvarlist += f', {name}->ref'
+            
         else:
-            code += f'    {ctype} {name};\n'
             crefvarlist += f', &{name}'
             cvarlist += f', {name}'
     
@@ -231,7 +247,7 @@ def functioncode(function):
     
     callcode = f'{function.name}(self->ref{cvarlist})'
     
-    if retctype == '!':
+    if resctype == 'pylv_Object *':
         # Result of function is an lv_obj; find the corresponding Python
         # object using lv_obj_get_free_ptr
         code += f'''
@@ -248,99 +264,59 @@ def functioncode(function):
         return NULL;
     }}
 '''
-        
-    elif retctype is None:
+    
+    elif resctype == 'Style_Object *':
+        code += f'    return Style_From_lv_style({callcode});\n'
+        xcode = f'''
+    lv_style_t *result = {callcode};
+    if (!result) Py_RETURN_NONE;
+    
+    Style_Object *retobj = PyObject_New(Style_Object, &Style_Type);
+    if (retobj) retobj->ref = result;
+    return (PyObject *)retobj;
+'''
+    
+    elif resctype is None:
         code += f'    {callcode};\n'
         code += f'    Py_RETURN_NONE;\n'
     else:
-        code += f'    {retctype} result = {callcode};\n';
-        code += f'    return Py_BuildValue("{retfmt}", result);\n'
+        code += f'    {resctype} result = {callcode};\n';
+        code += f'    return Py_BuildValue("{resfmt}", result);\n'
    
             
         
-    return code;
+    return code + '}\n';
 
 
-with open('lvglmodule.c', 'w') as file:
-    file.write('''
-#include "Python.h"
-#include "lvgl/lvgl.h"
+#
+# Object definition, methods and method table for each object
+#
+objectdefcode = ''
 
-/* Forward declaration of type objects */
-''')
+for obj, functions in objects.items():
+
+    # Method definitions for the object methods (see also functioncode function)
+    for func in functions:
+        objectdefcode += functioncode(func, obj)
+
+    # Method table
+    objectdefcode += f'static PyMethodDef py{obj}_methods[] = {{\n'
     
-    for obj in objects:
-        file.write(f'static PyTypeObject py{obj}_Type;\n')
+    for func in functions:
+        methodname = func.name[len(obj)+1:]
+        
+        objectdefcode += f'    {{"{methodname}", (PyCFunction) py{func.name}, METH_VARARGS | METH_KEYWORDS, NULL}},\n'
 
-    file.write('''
-/* Methods and object definitions */
-''')
-
-    #
-    # Object definition, Type definition, methods and method table for each object
-    #
-    for obj, functions in objects.items():
-        file.write(f'''
-
-typedef struct {{
-    PyObject_HEAD
-    lv_obj_t *ref;
-}} py{obj}_Object;
-
-static void
-py{obj}_dealloc(pylv_obj_Object *self) 
-{{
-    // TODO: delete lvgl object? How to manage whether it has references in LittlevGL?
-
-}}
-
-static int
-py{obj}_init(py{obj}_Object *self, PyObject *args, PyObject *kwds) 
-{{
-    static char *kwlist[] = {{"parent", "copy", NULL}};
-    pylv_obj_Object *parent;
-    py{obj}_Object *copy=NULL;
+    objectdefcode += '    {NULL}  /* Sentinel */\n};'
     
-    if (!PyArg_ParseTupleAndKeywords(args, kwds, "O!|O!", kwlist, &pylv_obj_Type, &parent, &py{obj}_Type, &copy)) {{
-        return -1;
-    }}   
-    self->ref = {obj}_create(parent->ref, copy ? copy->ref : NULL);
-    lv_obj_set_free_ptr(self->ref, self);
-
-    return 0;
-}}
-
-''')
-
-        # Method definitions for the object methods (see also functioncode function)
-        for func in functions:
-            file.write(f'''
-static PyObject*
-py{func.name}(py{obj}_Object *self, PyObject *args, PyObject *kwds)
-{{
-{functioncode(func)}
-}}
-            
-''')
-
-        # Method table
-        file.write(f'static PyMethodDef py{obj}_methods[] = {{\n')
-        
-        for func in functions:
-            methodname = func.name[len(obj)+1:]
-            
-            file.write(f'    {{"{methodname}", (PyCFunction) py{func.name}, METH_VARARGS | METH_KEYWORDS, NULL}},\n')
+    objclass = obj[3:].title()
     
-        file.write('    {NULL}  /* Sentinel */\n};')
-        
-        objclass = obj[3:].title()
-        
-        file.write(f'''
+    objectdefcode += f'''
 static PyTypeObject py{obj}_Type = {{
     PyVarObject_HEAD_INIT(NULL, 0)
     .tp_name = "lvgl.{objclass}",
     .tp_doc = "lvgl {obj[3:]}",
-    .tp_basicsize = sizeof(py{obj}_Object),
+    .tp_basicsize = sizeof(pylv_Object),
     .tp_itemsize = 0,
     .tp_flags = Py_TPFLAGS_DEFAULT | Py_TPFLAGS_BASETYPE,
     .tp_new = PyType_GenericNew,
@@ -348,126 +324,105 @@ static PyTypeObject py{obj}_Type = {{
     .tp_dealloc = (destructor) py{obj}_dealloc,
     .tp_methods = py{obj}_methods,
 }};
-''')
+'''
 
 
+fields = {}
+fields['OBJECT_DEFINITIONS'] = objectdefcode
+
+enumcode = ''
+# Adding of the enum constants to the module
+for name, items in enums.items():
+    for name, value in items:
+        assert name.startswith('LV_')
+        enumcode += (f'    PyModule_AddObject(module, "{name[3:]}", PyLong_FromLong({value}));\n')
+
+fields['ENUM_ASSIGNMENTS'] = enumcode
+
+# Style
+def generate_style_getset_table(stylestruct):
+
+    # Recursively flatten struct-within-struct:
+    # `struct { int a; int b;} c;` becomes `int c.a; int c.b;`
+    # (which is invalid C-code but it is parsed appropriately later)
+    def flatten_struct_contents(match):
+        contents, name = match.groups()
+        contents = re.sub(r'([A-Za-z0-9_\.]+\s*(:\s*[0-9]+\s*)?;)', name + r'.\1', contents)
+        return contents
     
-    file.write('''
-
-static PyObject *
-pylv_scr_act(PyObject *self, PyObject *args) {
-    return lv_obj_get_free_ptr(lv_scr_act());
-}
-
-static PyObject *
-poll(PyObject *self, PyObject *args) {
-    lv_tick_inc(1);
-    lv_task_handler();
-    Py_RETURN_NONE;
-}
-
-static PyMethodDef lvglMethods[] = {
-    {"scr_act",  pylv_scr_act, METH_NOARGS, NULL},
-    {"poll", poll, METH_NOARGS, NULL},
-    {NULL, NULL, 0, NULL}        /* Sentinel */
-};
-
-
-
-static struct PyModuleDef lvglmodule = {
-    PyModuleDef_HEAD_INIT,
-    "lvgl",   /* name of module */
-    NULL, /* module documentation, may be NULL */
-    -1,       /* size of per-interpreter state of the module,
-                 or -1 if the module keeps state in global variables. */
-    lvglMethods
-};
-
-
-char framebuffer[LV_HOR_RES * LV_VER_RES * 2];
-int redraw = 0;
-
-
-/* disp_flush should copy from the VDB (virtual display buffer to the screen.
- * In our case, we copy to the framebuffer
- */
-static void disp_flush(int32_t x1, int32_t y1, int32_t x2, int32_t y2, const lv_color_t * color_p) {
-
-    char *dest = framebuffer + ((y1)*LV_HOR_RES + x1) * 2;
-    char *src = (char *) color_p;
+    while True:
+        stylestruct, replacements = re.subn(r'struct\s{([^{}]*)}\s*([a-zA-Z0-9_]*);', flatten_struct_contents, stylestruct)
+        if not replacements:
+            break
     
-    for(int32_t y = y1; y<=y2; y++) {
-        memcpy(dest, src, 2*(x2-x1+1));
-        src += 2*(x2-x1+1);
-        dest += 2*LV_HOR_RES;
-    }
-    redraw++;
+    # Generate the table of getters and setters
+    # The closure field of PyGetSetDef is used as offset into the lv_style_t struct
+    table = ''
+    t_types = {
+        'uint8_t:1': None,
+        'uint8_t': 'uint8',
+        'lv_color_t': 'uint16',
+        'lv_opa_t': 'uint8',
+        'lv_coord_t': 'int16',
+        'lv_border_part_t': None,
+        'const lv_font_t *': None,
     
-    lv_flush_ready();
-}
+        }
+    for statement in stylestruct.strip().split(';'):
+        if not statement:
+            continue
+        type, name, bits = re.match(r'\s*(.*)\s+([A-Za-z0-9_\.]+)\s*(:\s*[0-9]+\s*)?', statement, re.DOTALL).groups()
 
-static lv_disp_drv_t driver = {0};
-
-PyMODINIT_FUNC
-PyInit_lvgl(void) {
-
-    PyObject *module = NULL;
-    
-    module = PyModule_Create(&lvglmodule);
-    if (!module) goto error;
-''')
-
-    # Initialization of the types
-    for obj in objects:
-        if obj != 'lv_obj':
-            file.write(f'    py{obj}_Type.tp_base = &pylv_obj_Type;\n')
-        file.write(f'    if (PyType_Ready(&py{obj}_Type) < 0) return NULL;\n')
-
-
-    # Adding of the types to the module
-    for obj in objects:
-        objclass = obj[3:].title()
-        file.write(f'    Py_INCREF(&py{obj}_Type);\n')
-        file.write(f'    PyModule_AddObject(module, "{objclass}", (PyObject *) &py{obj}_Type);\n')
-     
-    # Adding of the enum constants to the module
-    for name, items in enums.items():
-        for name, value in items:
-            assert name.startswith('LV_')
-            file.write(f'    PyModule_AddObject(module, "{name[3:]}", PyLong_FromLong({value}));\n')
+        t_type = t_types[type+(bits or '')]
         
-    file.write('''
+        if t_type:
+            table += f'   {{"{name.replace(".", "_")}", (getter) Style_get_{t_type}, (setter) Style_set_{t_type}, "{name}", (void*)offsetof(lv_style_t, {name})}},\n'
 
-    PyModule_AddObject(module, "framebuffer", PyMemoryView_FromMemory(framebuffer, LV_HOR_RES * LV_VER_RES * 2, PyBUF_READ));
-    PyModule_AddObject(module, "HOR_RES", PyLong_FromLong(LV_HOR_RES));
-    PyModule_AddObject(module, "VER_RES", PyLong_FromLong(LV_VER_RES));
+    return table
 
-    driver.disp_flush = disp_flush;
+style_h_code = preprocess('lvgl/lv_core/lv_style.h')
+stylestruct = re.findall(r'typedef\s+struct\s*{(.*?)}\s*lv_style_t\s*;', style_h_code, re.DOTALL)[0]
 
-    lv_init();
+fields['STYLE_GETSET'] = generate_style_getset_table(stylestruct)
+
+# Create module attributes for the existing styles defined in lv_style.h
+style_assignments = ''
+for style in re.findall('extern\s+lv_style_t\s+lv_([A-Za-z0-9_]+)\s*;', style_h_code):
+    style_assignments += f'    PyModule_AddObject(module, "{style}",Style_From_lv_style(&lv_{style}));\n'
     
-    lv_disp_drv_register(&driver);
+
+fields['STYLE_ASSIGNMENTS'] = style_assignments
+
+#
+# Fill in the template
+#
+with open('lvglmodule_template.c') as templatefile:
+    template = templatefile.read()
 
 
-
-    // Create a Python object for the active screen lv_obj and register it
-    pylv_obj_Object * pyact = PyObject_New(pylv_obj_Object, &pylv_obj_Type);
-    lv_obj_t *act = lv_scr_act();
-    pyact -> ref = act;
-    lv_obj_set_free_ptr(act, pyact);
-
-
-    return module;
+def substitute_per_object(match):
+    '''
+    Given a template, fill it in for each object and return the concatenated result
+    '''
     
-error:
-    Py_XDECREF(module);
-    return NULL;
-}
-''')
+    template = match.group(1)
+    ret = ''
+    for obj in objects:
+        assert obj.startswith('lv_')
+        ret += template.format(
+            obj = obj, 
+            typename = obj[3:].title(),
+            base = '&pylv_obj_Type' if obj != 'lv_obj' else 'NULL'
+            )
 
+    return ret
 
+# Substitute per-object sections
+modulecode = re.sub(r'<<<(.*?)>>>', substitute_per_object, template, flags = re.DOTALL)
 
+# Substitute general fields
+modulecode = re.sub(r'<<(.*?)>>', lambda x: fields[x.group(1)], modulecode)
 
-
-
+with open('lvglmodule.c', 'w') as modulefile:
+    modulefile.write(modulecode)
 

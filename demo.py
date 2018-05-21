@@ -24,8 +24,17 @@ t.start(100)
 
 # Build a GUI
 # run this script using -i to try commands interactively
-b = lvgl.Btn(lvgl.scr_act())
-l = lvgl.Label(b)
-l.set_text('Push')
+b1 = lvgl.Btn(lvgl.scr_act())
+b1.set_size(150,50)
+b1.align(b1.get_parent(), lvgl.ALIGN_IN_TOP_MID, 0, 10)
 
+l1 = lvgl.Label(b1)
+l1.set_text('Push 1')
+
+s1 = lvgl.Slider(lvgl.scr_act())
+s1.align(b1, lvgl.ALIGN_OUT_BOTTOM_MID, 0, 10)
+
+style = l1.get_style()
+style.text_color = 0x003f;
+l1.refresh_style()
 
