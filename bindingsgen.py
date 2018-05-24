@@ -1,9 +1,18 @@
+'''
+Generate the Python bindings module for LittlevGL
+
+
+This script requires Python >=3.6 for formatted string literals and order-
+preserving dictionaries
+'''
+
+
 from collections import namedtuple, Counter
 from itertools import chain
 import re
 import glob
 
-FunctionDef = namedtuple('FunctionDef', 'name restype args customcode')
+FunctionDef = namedtuple('FunctionDef', 'name restype args contents customcode')
 Argument = namedtuple('Argument', 'name type')
 EnumItem = namedtuple('EnumItem', 'name value')
 StructItem = namedtuple('StructItem', 'name type')
@@ -20,13 +29,31 @@ def preprocess(filename):
         c = file.read()
         
     # C-code preprocessing
-    c = re.sub('/\*.*?\*/', '', c, flags = re.DOTALL) # strip comments
-    c = re.sub('#.*', '', c)                          # strip preprocessor  
+    c = re.sub(r'/\*.*?\*/', '', c, flags = re.DOTALL) # strip comments
+    c = re.sub(r'^\s*#.*', '', c, flags = re.MULTILINE)                          # strip preprocessor  
     
-    c = re.findall('extern "C" {(.*)}', c, re.DOTALL)[0] # strip extern "C" { }
+    c = re.sub(r'.*extern "C" {(.*)}.*', r'\1', c, flags = re.DOTALL) # get contents of extern "C" { } if exists (otherwise keep all code)
+    cc = c
+    c = re.sub(r'"([^"\\]|(\\\\)*\\.)*"', '""', c, flags=re.DOTALL)     # strip strings (replace by empty strings)
+
+    assert '@' not in c
     
-    return c
+    # Replace all closing braces } at top-level by @
     
+    result = ''
+    level = 0
+    for ch in c:
+        if ch == '{':
+            level += 1
+        elif ch == '}':
+            assert level > 0
+            level -= 1
+            if level == 0:
+                ch = '@'
+        result += ch
+  
+    return result
+        
 
 def parse(filename, functions, enums):
     '''
@@ -39,17 +66,15 @@ def parse(filename, functions, enums):
     
     # Remove all enum definitions and store them (as str) into cenums list
     cenums = []
-    c = re.sub('typedef\s+enum\s+{(.*?)}\s*([a-zA-Z0-9_]+);', lambda x: cenums.append(x.groups()) or '', c, flags = re.DOTALL)
+    c = re.sub(r'typedef\s+enum\s+{(.*?)@\s*([a-zA-Z0-9_]+);', lambda x: cenums.append(x.groups()) or '', c, flags = re.DOTALL)
 
-    c = re.sub('{.*?}', '{}', c, flags = re.DOTALL)   # strip internals of struct and functions
-    
     
     # Process enums
     for enumcode, enumname in cenums:
         value = 0
         values = []
         for item in enumcode.split(','):
-            item = re.sub('\s+', '', item) # remove all whitespace (also internal)
+            item = re.sub(r'\s+', '', item) # remove all whitespace (also internal)
             if not item:
                 break
             name, sep, valuestr = item.partition('=')
@@ -60,37 +85,65 @@ def parse(filename, functions, enums):
         
         enums[enumname] = values
 
+    
 
     # Find method definitions
-    for static, restype, resptr, name, argsstr, end in re.findall('(static\s+inline\s+)?(bool|void|lv_[a-zA-Z0-9_]+_t)(\s+\*)?\s+([a-zA-Z0-9_]+)\((.*?)\)\s*({}|;)', c):
+    for static, restype, resptr, name, argsstr, contents in re.findall(r'(static\s+inline\s+)?(bool|void|lv_\w+_t)(\s+\*)?\s+(\w+)\(([\w\s*&,()]*?)\)\s*(?:{([^@]*)@|;)', c, re.DOTALL):
 
         if '(' in argsstr:
             print(f'{name} cannot be bound since it has a function pointer as argument')
             continue
+            
         args = []
         if argsstr.strip() != 'void':
             for arg in argsstr.split(','):
                 arg = arg.strip()
                 
                 const, argtype, argptr, argname = re.match(
-                        '(const\s+)?([A-Za-z0-9_]+)\s*(\*+| )\s*([A-Za-z0-9_]+)$', arg).groups()
+                        r'(const\s+)?([A-Za-z0-9_]+)\s*(\*+| )\s*([A-Za-z0-9_]+)$', arg).groups()
                 argtype += argptr.strip()
                 
                 args.append(Argument(argname, argtype))
 
-        functions[name]=(FunctionDef(name, restype + resptr.strip(), args, False))
-        
-    return functions, enums
+        functions[name]=(FunctionDef(name, restype + resptr.strip(), args, contents, False))
+
 
 
 def objectname(functionname):
-    match =  re.match('(lv_[a-zA-Z0-9]+)_[a-zA-Z0-9_]+', function.name)
+    match =  re.match(r'(lv_[a-zA-Z0-9]+)_[a-zA-Z0-9_]+', function.name)
     return match.group(1) if match else None
-    
+
+# Use C-files to get class hierarchy    
+functions_c = {}
+enums_c = {}
+for filename in [f for f in glob.glob('lvgl/lv_objx/*.c') if not f.endswith('lv_objx_templ.c')]:
+    parse(filename, functions_c, enums_c)
+
+ancestors = {}
+for function in functions_c.values():
+    if function.name.endswith('_create'):
+        results = re.findall('(lv_[A-Za-z0-9_]+)_create\s*\(\s*par', function.contents)
+        assert len(results) == 1
+        ancestors[function.name[:-7]] = results[0]
+
+# Sort the ancestors dictorary such that no object comes before its anchestor
+sortedancestors = {'lv_obj': None}
+while ancestors:
+    remaining = list(ancestors.items())
+    for obj, anch in remaining:
+        if anch in sortedancestors:
+            sortedancestors[obj] = anch
+            ancestors.pop(obj)
+
+ancestors = sortedancestors
+
+# Use H-files to get external function definitions    
 functions = {}
 enums = {}
 for filename in ['lvgl/lv_core/lv_obj.h'] + [f for f in glob.glob('lvgl/lv_objx/*.h') if not f.endswith('lv_objx_templ.h')]:
     parse(filename, functions, enums)
+
+assert(len(functions) == 328)
 
 skipfunctions = {
     # Not present in the C-files, only in the headers
@@ -124,7 +177,7 @@ skipfunctions = {
 #
 # Mark which functions have a custom implementation (in lvglmodule_template.c)
 #
-functions['lv_obj_get_children'] = FunctionDef('lv_obj_get_children', None, None, True)
+functions['lv_obj_get_children'] = FunctionDef('lv_obj_get_children', None, None, None, True)
 
 
 allfunctions = functions
@@ -134,10 +187,7 @@ allfunctions = functions
 #
 
 # Step 1: determine which objects exist based on the _create functions
-objects = {}
-for function in functions.values():
-    if function.name.endswith('_create'):
-        objects[objectname(function.name)] = []
+objects = {obj: [] for obj in sortedancestors}
 
 #functions = sorted(f for f in functions.values() if not any(re.match(exp, f.name) for exp in skipfunctions))
 
@@ -148,9 +198,6 @@ for function in functions.values():
         print(function.name)
     elif not function.name.endswith('_create') and function.name not in skipfunctions:
         objectfunctions.append(function)
-
-# Step 3: collect only those functions that belong to objects, store in a list
-functions = list(chain(*objects.values()))
 
 
 # Writing of the output file
@@ -281,7 +328,10 @@ py{function.name}(pylv_Object *self, PyObject *args, PyObject *kwds)
         code += f'    Py_RETURN_NONE;\n'
     else:
         code += f'    {resctype} result = {callcode};\n';
-        code += f'    return Py_BuildValue("{resfmt}", result);\n'
+        if resfmt == 'p': # Py_BuildValue does not support 'p' (which is supported by PyArg_ParseTuple..)
+            code += '    if (result) {Py_RETURN_TRUE;} else {Py_RETURN_FALSE;}\n'
+        else:
+            code += f'    return Py_BuildValue("{resfmt}", result);\n'
    
             
         
@@ -381,13 +431,13 @@ def generate_style_getset_table(stylestruct):
     return table
 
 style_h_code = preprocess('lvgl/lv_core/lv_style.h')
-stylestruct = re.findall(r'typedef\s+struct\s*{(.*?)}\s*lv_style_t\s*;', style_h_code, re.DOTALL)[0]
+stylestruct = re.findall(r'typedef\s+struct\s*{(.*?)@\s*lv_style_t\s*;', style_h_code, re.DOTALL)[0]
 
 fields['STYLE_GETSET'] = generate_style_getset_table(stylestruct)
 
 # Create module attributes for the existing styles defined in lv_style.h
 style_assignments = ''
-for style in re.findall('extern\s+lv_style_t\s+lv_([A-Za-z0-9_]+)\s*;', style_h_code):
+for style in re.findall(r'extern\s+lv_style_t\s+lv_([A-Za-z0-9_]+)\s*;', style_h_code):
     style_assignments += f'    PyModule_AddObject(module, "{style}",Style_From_lv_style(&lv_{style}));\n'
     
 
@@ -409,10 +459,15 @@ def substitute_per_object(match):
     ret = ''
     for obj in objects:
         assert obj.startswith('lv_')
+        if obj == 'lv_obj':
+            base = 'NULL'
+        else:
+            base = '&py' + ancestors[obj] + '_Type'
+        
         ret += template.format(
             obj = obj, 
             typename = obj[3:].title(),
-            base = '&pylv_obj_Type' if obj != 'lv_obj' else 'NULL'
+            base = base,
             )
 
     return ret
