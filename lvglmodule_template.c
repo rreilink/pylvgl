@@ -6,10 +6,7 @@
 #error Only 16 bits color depth is currently supported
 #endif
 
-typedef struct {
-    PyObject_HEAD
-    lv_obj_t *ref;
-} pylv_Object;
+<<OBJECT_STRUCTS>>
 
 /****************************************************************
  * Forward declaration of type objects                          *
@@ -100,7 +97,6 @@ Style_set_uint8(Style_Object *self, PyObject *value, void *closure)
 
 
 static PyGetSetDef Style_getsetters[] = {
-//    {"text_color", (getter) Style_get_uint16, (setter) Style_set_uint16, "text_color", (void*)offsetof(lv_style_t, text.color)},
 <<STYLE_GETSET>>
     {NULL},
 };
@@ -152,10 +148,10 @@ Style_From_lv_style(lv_style_t *style) {
  */
  
 static PyObject*
-pylv_obj_get_children(pylv_Object *self, PyObject *args, PyObject *kwds)
+pylv_obj_get_children(pylv_Obj *self, PyObject *args, PyObject *kwds)
 {
     lv_obj_t *child = NULL;
-    pylv_Object *pychild;
+    pylv_Obj *pychild;
     PyObject *ret = PyList_New(0);
     if (!ret) return NULL;
     
@@ -166,7 +162,7 @@ pylv_obj_get_children(pylv_Object *self, PyObject *args, PyObject *kwds)
         
         if (!pychild) {
             // Child is not known to Python, create a new Object instance
-            pychild = PyObject_New(pylv_Object, &pylv_obj_Type);
+            pychild = PyObject_New(pylv_Obj, &pylv_obj_Type);
             pychild -> ref = child;
             lv_obj_set_free_ptr(child, pychild);
         }
@@ -182,24 +178,25 @@ pylv_obj_get_children(pylv_Object *self, PyObject *args, PyObject *kwds)
 }
 
 
+
 /****************************************************************
  * Methods and object definitions                               *
  ****************************************************************/
 
 <<<
 static void
-py{obj}_dealloc(pylv_Object *self) 
+py{obj}_dealloc({pylv_Obj} *self) 
 {{
     // TODO: delete lvgl object? How to manage whether it has references in LittlevGL?
 
 }}
 
 static int
-py{obj}_init(pylv_Object *self, PyObject *args, PyObject *kwds) 
+py{obj}_init({pylv_Obj} *self, PyObject *args, PyObject *kwds) 
 {{
     static char *kwlist[] = {{"parent", "copy", NULL}};
-    pylv_Object *parent;
-    pylv_Object *copy=NULL;
+    pylv_Obj *parent;
+    {pylv_Obj} *copy=NULL;
     
     if (!PyArg_ParseTupleAndKeywords(args, kwds, "O!|O!", kwlist, &pylv_obj_Type, &parent, &py{obj}_Type, &copy)) {{
         return -1;
@@ -335,7 +332,7 @@ PyInit_lvgl(void) {
 
 
     // Create a Python object for the active screen lv_obj and register it
-    pylv_Object * pyact = PyObject_New(pylv_Object, &pylv_obj_Type);
+    pylv_Obj * pyact = PyObject_New(pylv_Obj, &pylv_obj_Type);
     lv_obj_t *act = lv_scr_act();
     pyact -> ref = act;
     lv_obj_set_free_ptr(act, pyact);
