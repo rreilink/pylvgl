@@ -31,7 +31,6 @@ To be implemented:
 
 * Action callbacks
 * Destruction / deletion of items
-* Objects should inherit from the correct type; currently the all inherit from Obj
 * ...
 
 ## Limitations
