@@ -176,11 +176,9 @@ skipfunctions = {
 #
 # Mark which functions have a custom implementation (in lvglmodule_template.c)
 #
-for custom in ('lv_obj_get_children', ):
+for custom in ('lv_obj_get_children', 'lv_btnm_set_map'):
     functions[custom] = FunctionDef(custom, None, None, None, True)
 
-
-allfunctions = functions
 
 #
 # Grouping of functions with objects and selection of functions
@@ -221,7 +219,7 @@ for function in functions.values():
 
 # Step 3: custom options
 objects['lv_obj'].structfields.extend(['PyObject_HEAD', 'lv_obj_t *ref;'])
-
+objects['lv_btnm'].structfields.append('const char **map;')
 
 typeconv = {
     'lv_obj_t*': ('O!', 'pylv_Obj *'),     # special case: conversion from/to Python object

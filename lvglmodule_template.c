@@ -17,6 +17,110 @@ static PyTypeObject py{obj}_Type;
 >>>
 
 /****************************************************************
+ * Helper functons                                              *  
+ ****************************************************************/
+
+/* Given an iterable of bytes, return a char** pointer which contains:
+ *
+ * - A ""-terminated char** table pointing to strings
+ * - the data of those strings
+ *
+ * buildstringmap returns NULL and sets an exception when an error occurs.
+ *
+ * The returned buffer must be freed using PyMem_Free if it is no longer used
+ */
+
+
+static const char **buildstringmap(PyObject *arg) {
+
+    PyObject *iterator = NULL;
+    PyObject *item;
+    PyObject *list = NULL;
+    char *data;
+    char **ptrs = 0;
+    char *str;
+    Py_ssize_t length;
+    
+    int nitems = 0, totalbytes = 0;
+    int error = 0;
+    
+    iterator =  PyObject_GetIter(arg);
+    if (!iterator) goto error;
+    
+    list = PyList_New(0);
+    if (!list) goto error;
+
+    while (!error && (item = PyIter_Next(iterator))) {
+
+
+        if (!PyBytes_Check(item)) {
+            PyErr_SetString(PyExc_ValueError, "items must be bytes objects");
+            error = 1;
+        } else {
+            totalbytes += PyBytes_GET_SIZE(item) + 1; // +1 for terminating \0
+            nitems ++;
+            if (PyList_Append(list, item) != 0) {
+                error = 1;
+            }
+        }
+
+        Py_DECREF(item);
+    }
+
+    Py_DECREF(iterator);
+    iterator = NULL;
+    
+    if (PyErr_Occurred()) goto error;
+    
+    // Add final empty string
+    item = PyBytes_FromString("");
+    if (!item) goto error;
+    totalbytes += 1;
+    nitems++;
+    error = PyList_Append(list, item);
+    Py_DECREF(item);
+    if (error) goto error;
+
+    // We now have a list of bytes object, and know we need totalbytes of data
+    // We additionally need (nitems) * sizeof (char *) for the pointers to the strings
+    ptrs = (char**) PyMem_Malloc(totalbytes + (nitems * sizeof(char *)));
+    if (!ptrs) goto error;
+    
+    data = (char*)&ptrs[nitems]; // points to first char after the char** list
+    
+    for(int i = 0; i<nitems; i++) {
+        if (PyBytes_AsStringAndSize(PyList_GetItem(list, i), &str, &length)!=0) goto error;
+        length += 1; // length including terminating \0
+        if (length > totalbytes) {
+            PyErr_SetString(PyExc_AssertionError, "length <= totalbytes");
+        }
+    
+        memcpy(data, str, length);
+        ptrs[i] = data;
+
+        data += length;
+        totalbytes -= length;
+    }
+
+    if (totalbytes) {
+        PyErr_SetString(PyExc_AssertionError, "totalbytes==0");
+        goto error;
+    }
+
+    Py_DECREF(list);
+    return (const char **)ptrs;
+    
+error:
+    PyMem_Free(ptrs);
+    Py_XDECREF(iterator);
+    Py_XDECREF(list);
+    
+    return NULL;
+    
+}
+
+
+/****************************************************************
  * Style class                                                  *  
  ****************************************************************/
 
@@ -178,6 +282,27 @@ pylv_obj_get_children(pylv_Obj *self, PyObject *args, PyObject *kwds)
 }
 
 
+static PyObject*
+pylv_btnm_set_map(pylv_Btnm *self, PyObject *args, PyObject *kwds)
+{
+    static char *kwlist[] = {"map", NULL};
+    PyObject *map;
+    const char **cmap;
+    
+    if (!PyArg_ParseTupleAndKeywords(args, kwds, "O", kwlist , &map)) return NULL;   
+       
+    cmap = buildstringmap(map);
+    if (!cmap) return NULL;
+    
+    lv_btnm_set_map(self->ref, cmap);
+
+    // Free the old map (if any) and store the new one to be able to free it later
+    if (self->map) PyMem_Free(self->map);
+    self->map = cmap;
+
+    Py_RETURN_NONE;
+    
+}
 
 /****************************************************************
  * Methods and object definitions                               *
