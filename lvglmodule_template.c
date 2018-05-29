@@ -6,14 +6,18 @@
 #error Only 16 bits color depth is currently supported
 #endif
 
-<<OBJECT_STRUCTS>>
+/****************************************************************
+ * Object struct definitions                                    *
+ ****************************************************************/
+
+<<<{structcode}>>>
 
 /****************************************************************
  * Forward declaration of type objects                          *
  ****************************************************************/
 
 <<<
-static PyTypeObject py{obj}_Type;
+static PyTypeObject py{name}_Type;
 >>>
 
 /****************************************************************
@@ -310,32 +314,45 @@ pylv_btnm_set_map(pylv_Btnm *self, PyObject *args, PyObject *kwds)
 
 <<<
 static void
-py{obj}_dealloc({pylv_Obj} *self) 
+py{name}_dealloc(pylv_{pyname} *self) 
 {{
     // TODO: delete lvgl object? How to manage whether it has references in LittlevGL?
 
 }}
 
 static int
-py{obj}_init({pylv_Obj} *self, PyObject *args, PyObject *kwds) 
+py{name}_init(pylv_{pyname} *self, PyObject *args, PyObject *kwds) 
 {{
     static char *kwlist[] = {{"parent", "copy", NULL}};
     pylv_Obj *parent;
-    {pylv_Obj} *copy=NULL;
+    pylv_{pyname} *copy=NULL;
     
-    if (!PyArg_ParseTupleAndKeywords(args, kwds, "O!|O!", kwlist, &pylv_obj_Type, &parent, &py{obj}_Type, &copy)) {{
+    if (!PyArg_ParseTupleAndKeywords(args, kwds, "O!|O!", kwlist, &pylv_obj_Type, &parent, &py{name}_Type, &copy)) {{
         return -1;
     }}   
-    self->ref = {obj}_create(parent->ref, copy ? copy->ref : NULL);
+    self->ref = {name}_create(parent->ref, copy ? copy->ref : NULL);
     lv_obj_set_free_ptr(self->ref, self);
 
     return 0;
 }}
+
+{methodscode}
+
+{methodtablecode}
+
+static PyTypeObject py{name}_Type = {{
+    PyVarObject_HEAD_INIT(NULL, 0)
+    .tp_name = "lvgl.{pyname}",
+    .tp_doc = "lvgl {pyname}",
+    .tp_basicsize = sizeof(pylv_{pyname}),
+    .tp_itemsize = 0,
+    .tp_flags = Py_TPFLAGS_DEFAULT | Py_TPFLAGS_BASETYPE,
+    .tp_new = PyType_GenericNew,
+    .tp_init = (initproc) py{name}_init,
+    .tp_dealloc = (destructor) py{name}_dealloc,
+    .tp_methods = py{name}_methods,
+}};
 >>>
-
-<<OBJECT_DEFINITIONS>>
-
-
 
 
 /****************************************************************
@@ -430,13 +447,13 @@ PyInit_lvgl(void) {
     if (PyType_Ready(&Style_Type) < 0) return NULL;
     
 <<<
-    py{obj}_Type.tp_base = {base};
-    if (PyType_Ready(&py{obj}_Type) < 0) return NULL;
+    py{name}_Type.tp_base = {base};
+    if (PyType_Ready(&py{name}_Type) < 0) return NULL;
 >>>
 
 <<<
-    Py_INCREF(&py{obj}_Type);
-    PyModule_AddObject(module, "{typename}", (PyObject *) &py{obj}_Type); 
+    Py_INCREF(&py{name}_Type);
+    PyModule_AddObject(module, "{pyname}", (PyObject *) &py{name}_Type); 
 >>>
 
     

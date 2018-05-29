@@ -6,6 +6,10 @@
 #error Only 16 bits color depth is currently supported
 #endif
 
+/****************************************************************
+ * Object struct definitions                                    *
+ ****************************************************************/
+
 typedef struct {
     PyObject_HEAD
     lv_obj_t *ref;
@@ -456,536 +460,6 @@ pylv_obj_init(pylv_Obj *self, PyObject *args, PyObject *kwds)
     return 0;
 }
 
-static void
-pylv_win_dealloc(pylv_Win *self) 
-{
-    // TODO: delete lvgl object? How to manage whether it has references in LittlevGL?
-
-}
-
-static int
-pylv_win_init(pylv_Win *self, PyObject *args, PyObject *kwds) 
-{
-    static char *kwlist[] = {"parent", "copy", NULL};
-    pylv_Obj *parent;
-    pylv_Win *copy=NULL;
-    
-    if (!PyArg_ParseTupleAndKeywords(args, kwds, "O!|O!", kwlist, &pylv_obj_Type, &parent, &pylv_win_Type, &copy)) {
-        return -1;
-    }   
-    self->ref = lv_win_create(parent->ref, copy ? copy->ref : NULL);
-    lv_obj_set_free_ptr(self->ref, self);
-
-    return 0;
-}
-
-static void
-pylv_label_dealloc(pylv_Label *self) 
-{
-    // TODO: delete lvgl object? How to manage whether it has references in LittlevGL?
-
-}
-
-static int
-pylv_label_init(pylv_Label *self, PyObject *args, PyObject *kwds) 
-{
-    static char *kwlist[] = {"parent", "copy", NULL};
-    pylv_Obj *parent;
-    pylv_Label *copy=NULL;
-    
-    if (!PyArg_ParseTupleAndKeywords(args, kwds, "O!|O!", kwlist, &pylv_obj_Type, &parent, &pylv_label_Type, &copy)) {
-        return -1;
-    }   
-    self->ref = lv_label_create(parent->ref, copy ? copy->ref : NULL);
-    lv_obj_set_free_ptr(self->ref, self);
-
-    return 0;
-}
-
-static void
-pylv_lmeter_dealloc(pylv_Lmeter *self) 
-{
-    // TODO: delete lvgl object? How to manage whether it has references in LittlevGL?
-
-}
-
-static int
-pylv_lmeter_init(pylv_Lmeter *self, PyObject *args, PyObject *kwds) 
-{
-    static char *kwlist[] = {"parent", "copy", NULL};
-    pylv_Obj *parent;
-    pylv_Lmeter *copy=NULL;
-    
-    if (!PyArg_ParseTupleAndKeywords(args, kwds, "O!|O!", kwlist, &pylv_obj_Type, &parent, &pylv_lmeter_Type, &copy)) {
-        return -1;
-    }   
-    self->ref = lv_lmeter_create(parent->ref, copy ? copy->ref : NULL);
-    lv_obj_set_free_ptr(self->ref, self);
-
-    return 0;
-}
-
-static void
-pylv_btnm_dealloc(pylv_Btnm *self) 
-{
-    // TODO: delete lvgl object? How to manage whether it has references in LittlevGL?
-
-}
-
-static int
-pylv_btnm_init(pylv_Btnm *self, PyObject *args, PyObject *kwds) 
-{
-    static char *kwlist[] = {"parent", "copy", NULL};
-    pylv_Obj *parent;
-    pylv_Btnm *copy=NULL;
-    
-    if (!PyArg_ParseTupleAndKeywords(args, kwds, "O!|O!", kwlist, &pylv_obj_Type, &parent, &pylv_btnm_Type, &copy)) {
-        return -1;
-    }   
-    self->ref = lv_btnm_create(parent->ref, copy ? copy->ref : NULL);
-    lv_obj_set_free_ptr(self->ref, self);
-
-    return 0;
-}
-
-static void
-pylv_chart_dealloc(pylv_Chart *self) 
-{
-    // TODO: delete lvgl object? How to manage whether it has references in LittlevGL?
-
-}
-
-static int
-pylv_chart_init(pylv_Chart *self, PyObject *args, PyObject *kwds) 
-{
-    static char *kwlist[] = {"parent", "copy", NULL};
-    pylv_Obj *parent;
-    pylv_Chart *copy=NULL;
-    
-    if (!PyArg_ParseTupleAndKeywords(args, kwds, "O!|O!", kwlist, &pylv_obj_Type, &parent, &pylv_chart_Type, &copy)) {
-        return -1;
-    }   
-    self->ref = lv_chart_create(parent->ref, copy ? copy->ref : NULL);
-    lv_obj_set_free_ptr(self->ref, self);
-
-    return 0;
-}
-
-static void
-pylv_cont_dealloc(pylv_Cont *self) 
-{
-    // TODO: delete lvgl object? How to manage whether it has references in LittlevGL?
-
-}
-
-static int
-pylv_cont_init(pylv_Cont *self, PyObject *args, PyObject *kwds) 
-{
-    static char *kwlist[] = {"parent", "copy", NULL};
-    pylv_Obj *parent;
-    pylv_Cont *copy=NULL;
-    
-    if (!PyArg_ParseTupleAndKeywords(args, kwds, "O!|O!", kwlist, &pylv_obj_Type, &parent, &pylv_cont_Type, &copy)) {
-        return -1;
-    }   
-    self->ref = lv_cont_create(parent->ref, copy ? copy->ref : NULL);
-    lv_obj_set_free_ptr(self->ref, self);
-
-    return 0;
-}
-
-static void
-pylv_led_dealloc(pylv_Led *self) 
-{
-    // TODO: delete lvgl object? How to manage whether it has references in LittlevGL?
-
-}
-
-static int
-pylv_led_init(pylv_Led *self, PyObject *args, PyObject *kwds) 
-{
-    static char *kwlist[] = {"parent", "copy", NULL};
-    pylv_Obj *parent;
-    pylv_Led *copy=NULL;
-    
-    if (!PyArg_ParseTupleAndKeywords(args, kwds, "O!|O!", kwlist, &pylv_obj_Type, &parent, &pylv_led_Type, &copy)) {
-        return -1;
-    }   
-    self->ref = lv_led_create(parent->ref, copy ? copy->ref : NULL);
-    lv_obj_set_free_ptr(self->ref, self);
-
-    return 0;
-}
-
-static void
-pylv_kb_dealloc(pylv_Kb *self) 
-{
-    // TODO: delete lvgl object? How to manage whether it has references in LittlevGL?
-
-}
-
-static int
-pylv_kb_init(pylv_Kb *self, PyObject *args, PyObject *kwds) 
-{
-    static char *kwlist[] = {"parent", "copy", NULL};
-    pylv_Obj *parent;
-    pylv_Kb *copy=NULL;
-    
-    if (!PyArg_ParseTupleAndKeywords(args, kwds, "O!|O!", kwlist, &pylv_obj_Type, &parent, &pylv_kb_Type, &copy)) {
-        return -1;
-    }   
-    self->ref = lv_kb_create(parent->ref, copy ? copy->ref : NULL);
-    lv_obj_set_free_ptr(self->ref, self);
-
-    return 0;
-}
-
-static void
-pylv_img_dealloc(pylv_Img *self) 
-{
-    // TODO: delete lvgl object? How to manage whether it has references in LittlevGL?
-
-}
-
-static int
-pylv_img_init(pylv_Img *self, PyObject *args, PyObject *kwds) 
-{
-    static char *kwlist[] = {"parent", "copy", NULL};
-    pylv_Obj *parent;
-    pylv_Img *copy=NULL;
-    
-    if (!PyArg_ParseTupleAndKeywords(args, kwds, "O!|O!", kwlist, &pylv_obj_Type, &parent, &pylv_img_Type, &copy)) {
-        return -1;
-    }   
-    self->ref = lv_img_create(parent->ref, copy ? copy->ref : NULL);
-    lv_obj_set_free_ptr(self->ref, self);
-
-    return 0;
-}
-
-static void
-pylv_bar_dealloc(pylv_Bar *self) 
-{
-    // TODO: delete lvgl object? How to manage whether it has references in LittlevGL?
-
-}
-
-static int
-pylv_bar_init(pylv_Bar *self, PyObject *args, PyObject *kwds) 
-{
-    static char *kwlist[] = {"parent", "copy", NULL};
-    pylv_Obj *parent;
-    pylv_Bar *copy=NULL;
-    
-    if (!PyArg_ParseTupleAndKeywords(args, kwds, "O!|O!", kwlist, &pylv_obj_Type, &parent, &pylv_bar_Type, &copy)) {
-        return -1;
-    }   
-    self->ref = lv_bar_create(parent->ref, copy ? copy->ref : NULL);
-    lv_obj_set_free_ptr(self->ref, self);
-
-    return 0;
-}
-
-static void
-pylv_line_dealloc(pylv_Line *self) 
-{
-    // TODO: delete lvgl object? How to manage whether it has references in LittlevGL?
-
-}
-
-static int
-pylv_line_init(pylv_Line *self, PyObject *args, PyObject *kwds) 
-{
-    static char *kwlist[] = {"parent", "copy", NULL};
-    pylv_Obj *parent;
-    pylv_Line *copy=NULL;
-    
-    if (!PyArg_ParseTupleAndKeywords(args, kwds, "O!|O!", kwlist, &pylv_obj_Type, &parent, &pylv_line_Type, &copy)) {
-        return -1;
-    }   
-    self->ref = lv_line_create(parent->ref, copy ? copy->ref : NULL);
-    lv_obj_set_free_ptr(self->ref, self);
-
-    return 0;
-}
-
-static void
-pylv_tabview_dealloc(pylv_Tabview *self) 
-{
-    // TODO: delete lvgl object? How to manage whether it has references in LittlevGL?
-
-}
-
-static int
-pylv_tabview_init(pylv_Tabview *self, PyObject *args, PyObject *kwds) 
-{
-    static char *kwlist[] = {"parent", "copy", NULL};
-    pylv_Obj *parent;
-    pylv_Tabview *copy=NULL;
-    
-    if (!PyArg_ParseTupleAndKeywords(args, kwds, "O!|O!", kwlist, &pylv_obj_Type, &parent, &pylv_tabview_Type, &copy)) {
-        return -1;
-    }   
-    self->ref = lv_tabview_create(parent->ref, copy ? copy->ref : NULL);
-    lv_obj_set_free_ptr(self->ref, self);
-
-    return 0;
-}
-
-static void
-pylv_mbox_dealloc(pylv_Mbox *self) 
-{
-    // TODO: delete lvgl object? How to manage whether it has references in LittlevGL?
-
-}
-
-static int
-pylv_mbox_init(pylv_Mbox *self, PyObject *args, PyObject *kwds) 
-{
-    static char *kwlist[] = {"parent", "copy", NULL};
-    pylv_Obj *parent;
-    pylv_Mbox *copy=NULL;
-    
-    if (!PyArg_ParseTupleAndKeywords(args, kwds, "O!|O!", kwlist, &pylv_obj_Type, &parent, &pylv_mbox_Type, &copy)) {
-        return -1;
-    }   
-    self->ref = lv_mbox_create(parent->ref, copy ? copy->ref : NULL);
-    lv_obj_set_free_ptr(self->ref, self);
-
-    return 0;
-}
-
-static void
-pylv_gauge_dealloc(pylv_Gauge *self) 
-{
-    // TODO: delete lvgl object? How to manage whether it has references in LittlevGL?
-
-}
-
-static int
-pylv_gauge_init(pylv_Gauge *self, PyObject *args, PyObject *kwds) 
-{
-    static char *kwlist[] = {"parent", "copy", NULL};
-    pylv_Obj *parent;
-    pylv_Gauge *copy=NULL;
-    
-    if (!PyArg_ParseTupleAndKeywords(args, kwds, "O!|O!", kwlist, &pylv_obj_Type, &parent, &pylv_gauge_Type, &copy)) {
-        return -1;
-    }   
-    self->ref = lv_gauge_create(parent->ref, copy ? copy->ref : NULL);
-    lv_obj_set_free_ptr(self->ref, self);
-
-    return 0;
-}
-
-static void
-pylv_page_dealloc(pylv_Page *self) 
-{
-    // TODO: delete lvgl object? How to manage whether it has references in LittlevGL?
-
-}
-
-static int
-pylv_page_init(pylv_Page *self, PyObject *args, PyObject *kwds) 
-{
-    static char *kwlist[] = {"parent", "copy", NULL};
-    pylv_Obj *parent;
-    pylv_Page *copy=NULL;
-    
-    if (!PyArg_ParseTupleAndKeywords(args, kwds, "O!|O!", kwlist, &pylv_obj_Type, &parent, &pylv_page_Type, &copy)) {
-        return -1;
-    }   
-    self->ref = lv_page_create(parent->ref, copy ? copy->ref : NULL);
-    lv_obj_set_free_ptr(self->ref, self);
-
-    return 0;
-}
-
-static void
-pylv_ta_dealloc(pylv_Ta *self) 
-{
-    // TODO: delete lvgl object? How to manage whether it has references in LittlevGL?
-
-}
-
-static int
-pylv_ta_init(pylv_Ta *self, PyObject *args, PyObject *kwds) 
-{
-    static char *kwlist[] = {"parent", "copy", NULL};
-    pylv_Obj *parent;
-    pylv_Ta *copy=NULL;
-    
-    if (!PyArg_ParseTupleAndKeywords(args, kwds, "O!|O!", kwlist, &pylv_obj_Type, &parent, &pylv_ta_Type, &copy)) {
-        return -1;
-    }   
-    self->ref = lv_ta_create(parent->ref, copy ? copy->ref : NULL);
-    lv_obj_set_free_ptr(self->ref, self);
-
-    return 0;
-}
-
-static void
-pylv_btn_dealloc(pylv_Btn *self) 
-{
-    // TODO: delete lvgl object? How to manage whether it has references in LittlevGL?
-
-}
-
-static int
-pylv_btn_init(pylv_Btn *self, PyObject *args, PyObject *kwds) 
-{
-    static char *kwlist[] = {"parent", "copy", NULL};
-    pylv_Obj *parent;
-    pylv_Btn *copy=NULL;
-    
-    if (!PyArg_ParseTupleAndKeywords(args, kwds, "O!|O!", kwlist, &pylv_obj_Type, &parent, &pylv_btn_Type, &copy)) {
-        return -1;
-    }   
-    self->ref = lv_btn_create(parent->ref, copy ? copy->ref : NULL);
-    lv_obj_set_free_ptr(self->ref, self);
-
-    return 0;
-}
-
-static void
-pylv_ddlist_dealloc(pylv_Ddlist *self) 
-{
-    // TODO: delete lvgl object? How to manage whether it has references in LittlevGL?
-
-}
-
-static int
-pylv_ddlist_init(pylv_Ddlist *self, PyObject *args, PyObject *kwds) 
-{
-    static char *kwlist[] = {"parent", "copy", NULL};
-    pylv_Obj *parent;
-    pylv_Ddlist *copy=NULL;
-    
-    if (!PyArg_ParseTupleAndKeywords(args, kwds, "O!|O!", kwlist, &pylv_obj_Type, &parent, &pylv_ddlist_Type, &copy)) {
-        return -1;
-    }   
-    self->ref = lv_ddlist_create(parent->ref, copy ? copy->ref : NULL);
-    lv_obj_set_free_ptr(self->ref, self);
-
-    return 0;
-}
-
-static void
-pylv_list_dealloc(pylv_List *self) 
-{
-    // TODO: delete lvgl object? How to manage whether it has references in LittlevGL?
-
-}
-
-static int
-pylv_list_init(pylv_List *self, PyObject *args, PyObject *kwds) 
-{
-    static char *kwlist[] = {"parent", "copy", NULL};
-    pylv_Obj *parent;
-    pylv_List *copy=NULL;
-    
-    if (!PyArg_ParseTupleAndKeywords(args, kwds, "O!|O!", kwlist, &pylv_obj_Type, &parent, &pylv_list_Type, &copy)) {
-        return -1;
-    }   
-    self->ref = lv_list_create(parent->ref, copy ? copy->ref : NULL);
-    lv_obj_set_free_ptr(self->ref, self);
-
-    return 0;
-}
-
-static void
-pylv_slider_dealloc(pylv_Slider *self) 
-{
-    // TODO: delete lvgl object? How to manage whether it has references in LittlevGL?
-
-}
-
-static int
-pylv_slider_init(pylv_Slider *self, PyObject *args, PyObject *kwds) 
-{
-    static char *kwlist[] = {"parent", "copy", NULL};
-    pylv_Obj *parent;
-    pylv_Slider *copy=NULL;
-    
-    if (!PyArg_ParseTupleAndKeywords(args, kwds, "O!|O!", kwlist, &pylv_obj_Type, &parent, &pylv_slider_Type, &copy)) {
-        return -1;
-    }   
-    self->ref = lv_slider_create(parent->ref, copy ? copy->ref : NULL);
-    lv_obj_set_free_ptr(self->ref, self);
-
-    return 0;
-}
-
-static void
-pylv_sw_dealloc(pylv_Sw *self) 
-{
-    // TODO: delete lvgl object? How to manage whether it has references in LittlevGL?
-
-}
-
-static int
-pylv_sw_init(pylv_Sw *self, PyObject *args, PyObject *kwds) 
-{
-    static char *kwlist[] = {"parent", "copy", NULL};
-    pylv_Obj *parent;
-    pylv_Sw *copy=NULL;
-    
-    if (!PyArg_ParseTupleAndKeywords(args, kwds, "O!|O!", kwlist, &pylv_obj_Type, &parent, &pylv_sw_Type, &copy)) {
-        return -1;
-    }   
-    self->ref = lv_sw_create(parent->ref, copy ? copy->ref : NULL);
-    lv_obj_set_free_ptr(self->ref, self);
-
-    return 0;
-}
-
-static void
-pylv_cb_dealloc(pylv_Cb *self) 
-{
-    // TODO: delete lvgl object? How to manage whether it has references in LittlevGL?
-
-}
-
-static int
-pylv_cb_init(pylv_Cb *self, PyObject *args, PyObject *kwds) 
-{
-    static char *kwlist[] = {"parent", "copy", NULL};
-    pylv_Obj *parent;
-    pylv_Cb *copy=NULL;
-    
-    if (!PyArg_ParseTupleAndKeywords(args, kwds, "O!|O!", kwlist, &pylv_obj_Type, &parent, &pylv_cb_Type, &copy)) {
-        return -1;
-    }   
-    self->ref = lv_cb_create(parent->ref, copy ? copy->ref : NULL);
-    lv_obj_set_free_ptr(self->ref, self);
-
-    return 0;
-}
-
-static void
-pylv_roller_dealloc(pylv_Roller *self) 
-{
-    // TODO: delete lvgl object? How to manage whether it has references in LittlevGL?
-
-}
-
-static int
-pylv_roller_init(pylv_Roller *self, PyObject *args, PyObject *kwds) 
-{
-    static char *kwlist[] = {"parent", "copy", NULL};
-    pylv_Obj *parent;
-    pylv_Roller *copy=NULL;
-    
-    if (!PyArg_ParseTupleAndKeywords(args, kwds, "O!|O!", kwlist, &pylv_obj_Type, &parent, &pylv_roller_Type, &copy)) {
-        return -1;
-    }   
-    self->ref = lv_roller_create(parent->ref, copy ? copy->ref : NULL);
-    lv_obj_set_free_ptr(self->ref, self);
-
-    return 0;
-}
-
-
 
 static PyObject*
 pylv_obj_invalidate(pylv_Obj *self, PyObject *args, PyObject *kwds)
@@ -1394,6 +868,8 @@ pylv_obj_get_group(pylv_Obj *self, PyObject *args, PyObject *kwds)
     PyErr_SetString(PyExc_NotImplementedError, "not implemented");
     return NULL;
 }
+
+
 static PyMethodDef pylv_obj_methods[] = {
     {"invalidate", (PyCFunction) pylv_obj_invalidate, METH_VARARGS | METH_KEYWORDS, NULL},
     {"set_parent", (PyCFunction) pylv_obj_set_parent, METH_VARARGS | METH_KEYWORDS, NULL},
@@ -1440,10 +916,11 @@ static PyMethodDef pylv_obj_methods[] = {
     {"get_children", (PyCFunction) pylv_obj_get_children, METH_VARARGS | METH_KEYWORDS, NULL},
     {NULL}  /* Sentinel */
 };
+
 static PyTypeObject pylv_obj_Type = {
     PyVarObject_HEAD_INIT(NULL, 0)
     .tp_name = "lvgl.Obj",
-    .tp_doc = "lvgl obj",
+    .tp_doc = "lvgl Obj",
     .tp_basicsize = sizeof(pylv_Obj),
     .tp_itemsize = 0,
     .tp_flags = Py_TPFLAGS_DEFAULT | Py_TPFLAGS_BASETYPE,
@@ -1452,6 +929,30 @@ static PyTypeObject pylv_obj_Type = {
     .tp_dealloc = (destructor) pylv_obj_dealloc,
     .tp_methods = pylv_obj_methods,
 };
+
+static void
+pylv_win_dealloc(pylv_Win *self) 
+{
+    // TODO: delete lvgl object? How to manage whether it has references in LittlevGL?
+
+}
+
+static int
+pylv_win_init(pylv_Win *self, PyObject *args, PyObject *kwds) 
+{
+    static char *kwlist[] = {"parent", "copy", NULL};
+    pylv_Obj *parent;
+    pylv_Win *copy=NULL;
+    
+    if (!PyArg_ParseTupleAndKeywords(args, kwds, "O!|O!", kwlist, &pylv_obj_Type, &parent, &pylv_win_Type, &copy)) {
+        return -1;
+    }   
+    self->ref = lv_win_create(parent->ref, copy ? copy->ref : NULL);
+    lv_obj_set_free_ptr(self->ref, self);
+
+    return 0;
+}
+
 
 static PyObject*
 pylv_win_add_btn(pylv_Obj *self, PyObject *args, PyObject *kwds)
@@ -1595,6 +1096,8 @@ pylv_win_focus(pylv_Obj *self, PyObject *args, PyObject *kwds)
     lv_win_focus(self->ref, obj->ref, anim_time);
     Py_RETURN_NONE;
 }
+
+
 static PyMethodDef pylv_win_methods[] = {
     {"add_btn", (PyCFunction) pylv_win_add_btn, METH_VARARGS | METH_KEYWORDS, NULL},
     {"close_action", (PyCFunction) pylv_win_close_action, METH_VARARGS | METH_KEYWORDS, NULL},
@@ -1612,10 +1115,11 @@ static PyMethodDef pylv_win_methods[] = {
     {"focus", (PyCFunction) pylv_win_focus, METH_VARARGS | METH_KEYWORDS, NULL},
     {NULL}  /* Sentinel */
 };
+
 static PyTypeObject pylv_win_Type = {
     PyVarObject_HEAD_INIT(NULL, 0)
     .tp_name = "lvgl.Win",
-    .tp_doc = "lvgl win",
+    .tp_doc = "lvgl Win",
     .tp_basicsize = sizeof(pylv_Win),
     .tp_itemsize = 0,
     .tp_flags = Py_TPFLAGS_DEFAULT | Py_TPFLAGS_BASETYPE,
@@ -1624,6 +1128,30 @@ static PyTypeObject pylv_win_Type = {
     .tp_dealloc = (destructor) pylv_win_dealloc,
     .tp_methods = pylv_win_methods,
 };
+
+static void
+pylv_label_dealloc(pylv_Label *self) 
+{
+    // TODO: delete lvgl object? How to manage whether it has references in LittlevGL?
+
+}
+
+static int
+pylv_label_init(pylv_Label *self, PyObject *args, PyObject *kwds) 
+{
+    static char *kwlist[] = {"parent", "copy", NULL};
+    pylv_Obj *parent;
+    pylv_Label *copy=NULL;
+    
+    if (!PyArg_ParseTupleAndKeywords(args, kwds, "O!|O!", kwlist, &pylv_obj_Type, &parent, &pylv_label_Type, &copy)) {
+        return -1;
+    }   
+    self->ref = lv_label_create(parent->ref, copy ? copy->ref : NULL);
+    lv_obj_set_free_ptr(self->ref, self);
+
+    return 0;
+}
+
 
 static PyObject*
 pylv_label_set_text(pylv_Obj *self, PyObject *args, PyObject *kwds)
@@ -1799,6 +1327,8 @@ pylv_label_cut_text(pylv_Obj *self, PyObject *args, PyObject *kwds)
     lv_label_cut_text(self->ref, pos, cnt);
     Py_RETURN_NONE;
 }
+
+
 static PyMethodDef pylv_label_methods[] = {
     {"set_text", (PyCFunction) pylv_label_set_text, METH_VARARGS | METH_KEYWORDS, NULL},
     {"set_array_text", (PyCFunction) pylv_label_set_array_text, METH_VARARGS | METH_KEYWORDS, NULL},
@@ -1820,10 +1350,11 @@ static PyMethodDef pylv_label_methods[] = {
     {"cut_text", (PyCFunction) pylv_label_cut_text, METH_VARARGS | METH_KEYWORDS, NULL},
     {NULL}  /* Sentinel */
 };
+
 static PyTypeObject pylv_label_Type = {
     PyVarObject_HEAD_INIT(NULL, 0)
     .tp_name = "lvgl.Label",
-    .tp_doc = "lvgl label",
+    .tp_doc = "lvgl Label",
     .tp_basicsize = sizeof(pylv_Label),
     .tp_itemsize = 0,
     .tp_flags = Py_TPFLAGS_DEFAULT | Py_TPFLAGS_BASETYPE,
@@ -1832,6 +1363,30 @@ static PyTypeObject pylv_label_Type = {
     .tp_dealloc = (destructor) pylv_label_dealloc,
     .tp_methods = pylv_label_methods,
 };
+
+static void
+pylv_lmeter_dealloc(pylv_Lmeter *self) 
+{
+    // TODO: delete lvgl object? How to manage whether it has references in LittlevGL?
+
+}
+
+static int
+pylv_lmeter_init(pylv_Lmeter *self, PyObject *args, PyObject *kwds) 
+{
+    static char *kwlist[] = {"parent", "copy", NULL};
+    pylv_Obj *parent;
+    pylv_Lmeter *copy=NULL;
+    
+    if (!PyArg_ParseTupleAndKeywords(args, kwds, "O!|O!", kwlist, &pylv_obj_Type, &parent, &pylv_lmeter_Type, &copy)) {
+        return -1;
+    }   
+    self->ref = lv_lmeter_create(parent->ref, copy ? copy->ref : NULL);
+    lv_obj_set_free_ptr(self->ref, self);
+
+    return 0;
+}
+
 
 static PyObject*
 pylv_lmeter_set_value(pylv_Obj *self, PyObject *args, PyObject *kwds)
@@ -1882,6 +1437,8 @@ pylv_lmeter_get_style_bg(pylv_Obj *self, PyObject *args, PyObject *kwds)
     if (!PyArg_ParseTupleAndKeywords(args, kwds, "", kwlist )) return NULL;
     return Style_From_lv_style(lv_lmeter_get_style_bg(self->ref));
 }
+
+
 static PyMethodDef pylv_lmeter_methods[] = {
     {"set_value", (PyCFunction) pylv_lmeter_set_value, METH_VARARGS | METH_KEYWORDS, NULL},
     {"set_range", (PyCFunction) pylv_lmeter_set_range, METH_VARARGS | METH_KEYWORDS, NULL},
@@ -1890,10 +1447,11 @@ static PyMethodDef pylv_lmeter_methods[] = {
     {"get_style_bg", (PyCFunction) pylv_lmeter_get_style_bg, METH_VARARGS | METH_KEYWORDS, NULL},
     {NULL}  /* Sentinel */
 };
+
 static PyTypeObject pylv_lmeter_Type = {
     PyVarObject_HEAD_INIT(NULL, 0)
     .tp_name = "lvgl.Lmeter",
-    .tp_doc = "lvgl lmeter",
+    .tp_doc = "lvgl Lmeter",
     .tp_basicsize = sizeof(pylv_Lmeter),
     .tp_itemsize = 0,
     .tp_flags = Py_TPFLAGS_DEFAULT | Py_TPFLAGS_BASETYPE,
@@ -1902,6 +1460,30 @@ static PyTypeObject pylv_lmeter_Type = {
     .tp_dealloc = (destructor) pylv_lmeter_dealloc,
     .tp_methods = pylv_lmeter_methods,
 };
+
+static void
+pylv_btnm_dealloc(pylv_Btnm *self) 
+{
+    // TODO: delete lvgl object? How to manage whether it has references in LittlevGL?
+
+}
+
+static int
+pylv_btnm_init(pylv_Btnm *self, PyObject *args, PyObject *kwds) 
+{
+    static char *kwlist[] = {"parent", "copy", NULL};
+    pylv_Obj *parent;
+    pylv_Btnm *copy=NULL;
+    
+    if (!PyArg_ParseTupleAndKeywords(args, kwds, "O!|O!", kwlist, &pylv_obj_Type, &parent, &pylv_btnm_Type, &copy)) {
+        return -1;
+    }   
+    self->ref = lv_btnm_create(parent->ref, copy ? copy->ref : NULL);
+    lv_obj_set_free_ptr(self->ref, self);
+
+    return 0;
+}
+
 
 static PyObject*
 pylv_btnm_set_action(pylv_Obj *self, PyObject *args, PyObject *kwds)
@@ -1947,6 +1529,8 @@ pylv_btnm_get_style(pylv_Obj *self, PyObject *args, PyObject *kwds)
     if (!PyArg_ParseTupleAndKeywords(args, kwds, "i", kwlist , &type)) return NULL;
     return Style_From_lv_style(lv_btnm_get_style(self->ref, type));
 }
+
+
 static PyMethodDef pylv_btnm_methods[] = {
     {"set_map", (PyCFunction) pylv_btnm_set_map, METH_VARARGS | METH_KEYWORDS, NULL},
     {"set_action", (PyCFunction) pylv_btnm_set_action, METH_VARARGS | METH_KEYWORDS, NULL},
@@ -1956,10 +1540,11 @@ static PyMethodDef pylv_btnm_methods[] = {
     {"get_style", (PyCFunction) pylv_btnm_get_style, METH_VARARGS | METH_KEYWORDS, NULL},
     {NULL}  /* Sentinel */
 };
+
 static PyTypeObject pylv_btnm_Type = {
     PyVarObject_HEAD_INIT(NULL, 0)
     .tp_name = "lvgl.Btnm",
-    .tp_doc = "lvgl btnm",
+    .tp_doc = "lvgl Btnm",
     .tp_basicsize = sizeof(pylv_Btnm),
     .tp_itemsize = 0,
     .tp_flags = Py_TPFLAGS_DEFAULT | Py_TPFLAGS_BASETYPE,
@@ -1968,6 +1553,30 @@ static PyTypeObject pylv_btnm_Type = {
     .tp_dealloc = (destructor) pylv_btnm_dealloc,
     .tp_methods = pylv_btnm_methods,
 };
+
+static void
+pylv_chart_dealloc(pylv_Chart *self) 
+{
+    // TODO: delete lvgl object? How to manage whether it has references in LittlevGL?
+
+}
+
+static int
+pylv_chart_init(pylv_Chart *self, PyObject *args, PyObject *kwds) 
+{
+    static char *kwlist[] = {"parent", "copy", NULL};
+    pylv_Obj *parent;
+    pylv_Chart *copy=NULL;
+    
+    if (!PyArg_ParseTupleAndKeywords(args, kwds, "O!|O!", kwlist, &pylv_obj_Type, &parent, &pylv_chart_Type, &copy)) {
+        return -1;
+    }   
+    self->ref = lv_chart_create(parent->ref, copy ? copy->ref : NULL);
+    lv_obj_set_free_ptr(self->ref, self);
+
+    return 0;
+}
+
 
 static PyObject*
 pylv_chart_add_series(pylv_Obj *self, PyObject *args, PyObject *kwds)
@@ -2123,6 +1732,8 @@ pylv_chart_refresh(pylv_Obj *self, PyObject *args, PyObject *kwds)
     lv_chart_refresh(self->ref);
     Py_RETURN_NONE;
 }
+
+
 static PyMethodDef pylv_chart_methods[] = {
     {"add_series", (PyCFunction) pylv_chart_add_series, METH_VARARGS | METH_KEYWORDS, NULL},
     {"set_div_line_count", (PyCFunction) pylv_chart_set_div_line_count, METH_VARARGS | METH_KEYWORDS, NULL},
@@ -2143,10 +1754,11 @@ static PyMethodDef pylv_chart_methods[] = {
     {"refresh", (PyCFunction) pylv_chart_refresh, METH_VARARGS | METH_KEYWORDS, NULL},
     {NULL}  /* Sentinel */
 };
+
 static PyTypeObject pylv_chart_Type = {
     PyVarObject_HEAD_INIT(NULL, 0)
     .tp_name = "lvgl.Chart",
-    .tp_doc = "lvgl chart",
+    .tp_doc = "lvgl Chart",
     .tp_basicsize = sizeof(pylv_Chart),
     .tp_itemsize = 0,
     .tp_flags = Py_TPFLAGS_DEFAULT | Py_TPFLAGS_BASETYPE,
@@ -2155,6 +1767,30 @@ static PyTypeObject pylv_chart_Type = {
     .tp_dealloc = (destructor) pylv_chart_dealloc,
     .tp_methods = pylv_chart_methods,
 };
+
+static void
+pylv_cont_dealloc(pylv_Cont *self) 
+{
+    // TODO: delete lvgl object? How to manage whether it has references in LittlevGL?
+
+}
+
+static int
+pylv_cont_init(pylv_Cont *self, PyObject *args, PyObject *kwds) 
+{
+    static char *kwlist[] = {"parent", "copy", NULL};
+    pylv_Obj *parent;
+    pylv_Cont *copy=NULL;
+    
+    if (!PyArg_ParseTupleAndKeywords(args, kwds, "O!|O!", kwlist, &pylv_obj_Type, &parent, &pylv_cont_Type, &copy)) {
+        return -1;
+    }   
+    self->ref = lv_cont_create(parent->ref, copy ? copy->ref : NULL);
+    lv_obj_set_free_ptr(self->ref, self);
+
+    return 0;
+}
+
 
 static PyObject*
 pylv_cont_set_layout(pylv_Obj *self, PyObject *args, PyObject *kwds)
@@ -2221,6 +1857,8 @@ pylv_cont_get_style(pylv_Obj *self, PyObject *args, PyObject *kwds)
     if (!PyArg_ParseTupleAndKeywords(args, kwds, "", kwlist )) return NULL;
     return Style_From_lv_style(lv_cont_get_style(self->ref));
 }
+
+
 static PyMethodDef pylv_cont_methods[] = {
     {"set_layout", (PyCFunction) pylv_cont_set_layout, METH_VARARGS | METH_KEYWORDS, NULL},
     {"set_fit", (PyCFunction) pylv_cont_set_fit, METH_VARARGS | METH_KEYWORDS, NULL},
@@ -2231,10 +1869,11 @@ static PyMethodDef pylv_cont_methods[] = {
     {"get_style", (PyCFunction) pylv_cont_get_style, METH_VARARGS | METH_KEYWORDS, NULL},
     {NULL}  /* Sentinel */
 };
+
 static PyTypeObject pylv_cont_Type = {
     PyVarObject_HEAD_INIT(NULL, 0)
     .tp_name = "lvgl.Cont",
-    .tp_doc = "lvgl cont",
+    .tp_doc = "lvgl Cont",
     .tp_basicsize = sizeof(pylv_Cont),
     .tp_itemsize = 0,
     .tp_flags = Py_TPFLAGS_DEFAULT | Py_TPFLAGS_BASETYPE,
@@ -2243,6 +1882,30 @@ static PyTypeObject pylv_cont_Type = {
     .tp_dealloc = (destructor) pylv_cont_dealloc,
     .tp_methods = pylv_cont_methods,
 };
+
+static void
+pylv_led_dealloc(pylv_Led *self) 
+{
+    // TODO: delete lvgl object? How to manage whether it has references in LittlevGL?
+
+}
+
+static int
+pylv_led_init(pylv_Led *self, PyObject *args, PyObject *kwds) 
+{
+    static char *kwlist[] = {"parent", "copy", NULL};
+    pylv_Obj *parent;
+    pylv_Led *copy=NULL;
+    
+    if (!PyArg_ParseTupleAndKeywords(args, kwds, "O!|O!", kwlist, &pylv_obj_Type, &parent, &pylv_led_Type, &copy)) {
+        return -1;
+    }   
+    self->ref = lv_led_create(parent->ref, copy ? copy->ref : NULL);
+    lv_obj_set_free_ptr(self->ref, self);
+
+    return 0;
+}
+
 
 static PyObject*
 pylv_led_set_bright(pylv_Obj *self, PyObject *args, PyObject *kwds)
@@ -2290,6 +1953,8 @@ pylv_led_set_style(pylv_Obj *self, PyObject *args, PyObject *kwds)
     lv_led_set_style(self->ref, style->ref);
     Py_RETURN_NONE;
 }
+
+
 static PyMethodDef pylv_led_methods[] = {
     {"set_bright", (PyCFunction) pylv_led_set_bright, METH_VARARGS | METH_KEYWORDS, NULL},
     {"on", (PyCFunction) pylv_led_on, METH_VARARGS | METH_KEYWORDS, NULL},
@@ -2298,10 +1963,11 @@ static PyMethodDef pylv_led_methods[] = {
     {"set_style", (PyCFunction) pylv_led_set_style, METH_VARARGS | METH_KEYWORDS, NULL},
     {NULL}  /* Sentinel */
 };
+
 static PyTypeObject pylv_led_Type = {
     PyVarObject_HEAD_INIT(NULL, 0)
     .tp_name = "lvgl.Led",
-    .tp_doc = "lvgl led",
+    .tp_doc = "lvgl Led",
     .tp_basicsize = sizeof(pylv_Led),
     .tp_itemsize = 0,
     .tp_flags = Py_TPFLAGS_DEFAULT | Py_TPFLAGS_BASETYPE,
@@ -2310,6 +1976,30 @@ static PyTypeObject pylv_led_Type = {
     .tp_dealloc = (destructor) pylv_led_dealloc,
     .tp_methods = pylv_led_methods,
 };
+
+static void
+pylv_kb_dealloc(pylv_Kb *self) 
+{
+    // TODO: delete lvgl object? How to manage whether it has references in LittlevGL?
+
+}
+
+static int
+pylv_kb_init(pylv_Kb *self, PyObject *args, PyObject *kwds) 
+{
+    static char *kwlist[] = {"parent", "copy", NULL};
+    pylv_Obj *parent;
+    pylv_Kb *copy=NULL;
+    
+    if (!PyArg_ParseTupleAndKeywords(args, kwds, "O!|O!", kwlist, &pylv_obj_Type, &parent, &pylv_kb_Type, &copy)) {
+        return -1;
+    }   
+    self->ref = lv_kb_create(parent->ref, copy ? copy->ref : NULL);
+    lv_obj_set_free_ptr(self->ref, self);
+
+    return 0;
+}
+
 
 static PyObject*
 pylv_kb_set_ta(pylv_Obj *self, PyObject *args, PyObject *kwds)
@@ -2426,6 +2116,8 @@ pylv_kb_get_style(pylv_Obj *self, PyObject *args, PyObject *kwds)
     if (!PyArg_ParseTupleAndKeywords(args, kwds, "i", kwlist , &type)) return NULL;
     return Style_From_lv_style(lv_kb_get_style(self->ref, type));
 }
+
+
 static PyMethodDef pylv_kb_methods[] = {
     {"set_ta", (PyCFunction) pylv_kb_set_ta, METH_VARARGS | METH_KEYWORDS, NULL},
     {"set_mode", (PyCFunction) pylv_kb_set_mode, METH_VARARGS | METH_KEYWORDS, NULL},
@@ -2441,10 +2133,11 @@ static PyMethodDef pylv_kb_methods[] = {
     {"get_style", (PyCFunction) pylv_kb_get_style, METH_VARARGS | METH_KEYWORDS, NULL},
     {NULL}  /* Sentinel */
 };
+
 static PyTypeObject pylv_kb_Type = {
     PyVarObject_HEAD_INIT(NULL, 0)
     .tp_name = "lvgl.Kb",
-    .tp_doc = "lvgl kb",
+    .tp_doc = "lvgl Kb",
     .tp_basicsize = sizeof(pylv_Kb),
     .tp_itemsize = 0,
     .tp_flags = Py_TPFLAGS_DEFAULT | Py_TPFLAGS_BASETYPE,
@@ -2453,6 +2146,30 @@ static PyTypeObject pylv_kb_Type = {
     .tp_dealloc = (destructor) pylv_kb_dealloc,
     .tp_methods = pylv_kb_methods,
 };
+
+static void
+pylv_img_dealloc(pylv_Img *self) 
+{
+    // TODO: delete lvgl object? How to manage whether it has references in LittlevGL?
+
+}
+
+static int
+pylv_img_init(pylv_Img *self, PyObject *args, PyObject *kwds) 
+{
+    static char *kwlist[] = {"parent", "copy", NULL};
+    pylv_Obj *parent;
+    pylv_Img *copy=NULL;
+    
+    if (!PyArg_ParseTupleAndKeywords(args, kwds, "O!|O!", kwlist, &pylv_obj_Type, &parent, &pylv_img_Type, &copy)) {
+        return -1;
+    }   
+    self->ref = lv_img_create(parent->ref, copy ? copy->ref : NULL);
+    lv_obj_set_free_ptr(self->ref, self);
+
+    return 0;
+}
+
 
 static PyObject*
 pylv_img_set_src(pylv_Obj *self, PyObject *args, PyObject *kwds)
@@ -2525,6 +2242,8 @@ pylv_img_get_upscale(pylv_Obj *self, PyObject *args, PyObject *kwds)
     int result = lv_img_get_upscale(self->ref);
     if (result) {Py_RETURN_TRUE;} else {Py_RETURN_FALSE;}
 }
+
+
 static PyMethodDef pylv_img_methods[] = {
     {"set_src", (PyCFunction) pylv_img_set_src, METH_VARARGS | METH_KEYWORDS, NULL},
     {"set_file", (PyCFunction) pylv_img_set_file, METH_VARARGS | METH_KEYWORDS, NULL},
@@ -2536,10 +2255,11 @@ static PyMethodDef pylv_img_methods[] = {
     {"get_upscale", (PyCFunction) pylv_img_get_upscale, METH_VARARGS | METH_KEYWORDS, NULL},
     {NULL}  /* Sentinel */
 };
+
 static PyTypeObject pylv_img_Type = {
     PyVarObject_HEAD_INIT(NULL, 0)
     .tp_name = "lvgl.Img",
-    .tp_doc = "lvgl img",
+    .tp_doc = "lvgl Img",
     .tp_basicsize = sizeof(pylv_Img),
     .tp_itemsize = 0,
     .tp_flags = Py_TPFLAGS_DEFAULT | Py_TPFLAGS_BASETYPE,
@@ -2548,6 +2268,30 @@ static PyTypeObject pylv_img_Type = {
     .tp_dealloc = (destructor) pylv_img_dealloc,
     .tp_methods = pylv_img_methods,
 };
+
+static void
+pylv_bar_dealloc(pylv_Bar *self) 
+{
+    // TODO: delete lvgl object? How to manage whether it has references in LittlevGL?
+
+}
+
+static int
+pylv_bar_init(pylv_Bar *self, PyObject *args, PyObject *kwds) 
+{
+    static char *kwlist[] = {"parent", "copy", NULL};
+    pylv_Obj *parent;
+    pylv_Bar *copy=NULL;
+    
+    if (!PyArg_ParseTupleAndKeywords(args, kwds, "O!|O!", kwlist, &pylv_obj_Type, &parent, &pylv_bar_Type, &copy)) {
+        return -1;
+    }   
+    self->ref = lv_bar_create(parent->ref, copy ? copy->ref : NULL);
+    lv_obj_set_free_ptr(self->ref, self);
+
+    return 0;
+}
+
 
 static PyObject*
 pylv_bar_set_value(pylv_Obj *self, PyObject *args, PyObject *kwds)
@@ -2600,6 +2344,8 @@ pylv_bar_get_style(pylv_Obj *self, PyObject *args, PyObject *kwds)
     if (!PyArg_ParseTupleAndKeywords(args, kwds, "i", kwlist , &type)) return NULL;
     return Style_From_lv_style(lv_bar_get_style(self->ref, type));
 }
+
+
 static PyMethodDef pylv_bar_methods[] = {
     {"set_value", (PyCFunction) pylv_bar_set_value, METH_VARARGS | METH_KEYWORDS, NULL},
     {"set_value_anim", (PyCFunction) pylv_bar_set_value_anim, METH_VARARGS | METH_KEYWORDS, NULL},
@@ -2608,10 +2354,11 @@ static PyMethodDef pylv_bar_methods[] = {
     {"get_style", (PyCFunction) pylv_bar_get_style, METH_VARARGS | METH_KEYWORDS, NULL},
     {NULL}  /* Sentinel */
 };
+
 static PyTypeObject pylv_bar_Type = {
     PyVarObject_HEAD_INIT(NULL, 0)
     .tp_name = "lvgl.Bar",
-    .tp_doc = "lvgl bar",
+    .tp_doc = "lvgl Bar",
     .tp_basicsize = sizeof(pylv_Bar),
     .tp_itemsize = 0,
     .tp_flags = Py_TPFLAGS_DEFAULT | Py_TPFLAGS_BASETYPE,
@@ -2620,6 +2367,30 @@ static PyTypeObject pylv_bar_Type = {
     .tp_dealloc = (destructor) pylv_bar_dealloc,
     .tp_methods = pylv_bar_methods,
 };
+
+static void
+pylv_line_dealloc(pylv_Line *self) 
+{
+    // TODO: delete lvgl object? How to manage whether it has references in LittlevGL?
+
+}
+
+static int
+pylv_line_init(pylv_Line *self, PyObject *args, PyObject *kwds) 
+{
+    static char *kwlist[] = {"parent", "copy", NULL};
+    pylv_Obj *parent;
+    pylv_Line *copy=NULL;
+    
+    if (!PyArg_ParseTupleAndKeywords(args, kwds, "O!|O!", kwlist, &pylv_obj_Type, &parent, &pylv_line_Type, &copy)) {
+        return -1;
+    }   
+    self->ref = lv_line_create(parent->ref, copy ? copy->ref : NULL);
+    lv_obj_set_free_ptr(self->ref, self);
+
+    return 0;
+}
+
 
 static PyObject*
 pylv_line_set_points(pylv_Obj *self, PyObject *args, PyObject *kwds)
@@ -2694,6 +2465,8 @@ pylv_line_get_upscale(pylv_Obj *self, PyObject *args, PyObject *kwds)
     int result = lv_line_get_upscale(self->ref);
     if (result) {Py_RETURN_TRUE;} else {Py_RETURN_FALSE;}
 }
+
+
 static PyMethodDef pylv_line_methods[] = {
     {"set_points", (PyCFunction) pylv_line_set_points, METH_VARARGS | METH_KEYWORDS, NULL},
     {"set_auto_size", (PyCFunction) pylv_line_set_auto_size, METH_VARARGS | METH_KEYWORDS, NULL},
@@ -2705,10 +2478,11 @@ static PyMethodDef pylv_line_methods[] = {
     {"get_upscale", (PyCFunction) pylv_line_get_upscale, METH_VARARGS | METH_KEYWORDS, NULL},
     {NULL}  /* Sentinel */
 };
+
 static PyTypeObject pylv_line_Type = {
     PyVarObject_HEAD_INIT(NULL, 0)
     .tp_name = "lvgl.Line",
-    .tp_doc = "lvgl line",
+    .tp_doc = "lvgl Line",
     .tp_basicsize = sizeof(pylv_Line),
     .tp_itemsize = 0,
     .tp_flags = Py_TPFLAGS_DEFAULT | Py_TPFLAGS_BASETYPE,
@@ -2717,6 +2491,30 @@ static PyTypeObject pylv_line_Type = {
     .tp_dealloc = (destructor) pylv_line_dealloc,
     .tp_methods = pylv_line_methods,
 };
+
+static void
+pylv_tabview_dealloc(pylv_Tabview *self) 
+{
+    // TODO: delete lvgl object? How to manage whether it has references in LittlevGL?
+
+}
+
+static int
+pylv_tabview_init(pylv_Tabview *self, PyObject *args, PyObject *kwds) 
+{
+    static char *kwlist[] = {"parent", "copy", NULL};
+    pylv_Obj *parent;
+    pylv_Tabview *copy=NULL;
+    
+    if (!PyArg_ParseTupleAndKeywords(args, kwds, "O!|O!", kwlist, &pylv_obj_Type, &parent, &pylv_tabview_Type, &copy)) {
+        return -1;
+    }   
+    self->ref = lv_tabview_create(parent->ref, copy ? copy->ref : NULL);
+    lv_obj_set_free_ptr(self->ref, self);
+
+    return 0;
+}
+
 
 static PyObject*
 pylv_tabview_add_tab(pylv_Obj *self, PyObject *args, PyObject *kwds)
@@ -2833,6 +2631,8 @@ pylv_tabview_get_style(pylv_Obj *self, PyObject *args, PyObject *kwds)
     if (!PyArg_ParseTupleAndKeywords(args, kwds, "i", kwlist , &type)) return NULL;
     return Style_From_lv_style(lv_tabview_get_style(self->ref, type));
 }
+
+
 static PyMethodDef pylv_tabview_methods[] = {
     {"add_tab", (PyCFunction) pylv_tabview_add_tab, METH_VARARGS | METH_KEYWORDS, NULL},
     {"set_tab_act", (PyCFunction) pylv_tabview_set_tab_act, METH_VARARGS | METH_KEYWORDS, NULL},
@@ -2846,10 +2646,11 @@ static PyMethodDef pylv_tabview_methods[] = {
     {"get_style", (PyCFunction) pylv_tabview_get_style, METH_VARARGS | METH_KEYWORDS, NULL},
     {NULL}  /* Sentinel */
 };
+
 static PyTypeObject pylv_tabview_Type = {
     PyVarObject_HEAD_INIT(NULL, 0)
     .tp_name = "lvgl.Tabview",
-    .tp_doc = "lvgl tabview",
+    .tp_doc = "lvgl Tabview",
     .tp_basicsize = sizeof(pylv_Tabview),
     .tp_itemsize = 0,
     .tp_flags = Py_TPFLAGS_DEFAULT | Py_TPFLAGS_BASETYPE,
@@ -2858,6 +2659,30 @@ static PyTypeObject pylv_tabview_Type = {
     .tp_dealloc = (destructor) pylv_tabview_dealloc,
     .tp_methods = pylv_tabview_methods,
 };
+
+static void
+pylv_mbox_dealloc(pylv_Mbox *self) 
+{
+    // TODO: delete lvgl object? How to manage whether it has references in LittlevGL?
+
+}
+
+static int
+pylv_mbox_init(pylv_Mbox *self, PyObject *args, PyObject *kwds) 
+{
+    static char *kwlist[] = {"parent", "copy", NULL};
+    pylv_Obj *parent;
+    pylv_Mbox *copy=NULL;
+    
+    if (!PyArg_ParseTupleAndKeywords(args, kwds, "O!|O!", kwlist, &pylv_obj_Type, &parent, &pylv_mbox_Type, &copy)) {
+        return -1;
+    }   
+    self->ref = lv_mbox_create(parent->ref, copy ? copy->ref : NULL);
+    lv_obj_set_free_ptr(self->ref, self);
+
+    return 0;
+}
+
 
 static PyObject*
 pylv_mbox_add_btns(pylv_Obj *self, PyObject *args, PyObject *kwds)
@@ -2951,6 +2776,8 @@ pylv_mbox_get_style(pylv_Obj *self, PyObject *args, PyObject *kwds)
     if (!PyArg_ParseTupleAndKeywords(args, kwds, "i", kwlist , &type)) return NULL;
     return Style_From_lv_style(lv_mbox_get_style(self->ref, type));
 }
+
+
 static PyMethodDef pylv_mbox_methods[] = {
     {"add_btns", (PyCFunction) pylv_mbox_add_btns, METH_VARARGS | METH_KEYWORDS, NULL},
     {"set_text", (PyCFunction) pylv_mbox_set_text, METH_VARARGS | METH_KEYWORDS, NULL},
@@ -2963,10 +2790,11 @@ static PyMethodDef pylv_mbox_methods[] = {
     {"get_style", (PyCFunction) pylv_mbox_get_style, METH_VARARGS | METH_KEYWORDS, NULL},
     {NULL}  /* Sentinel */
 };
+
 static PyTypeObject pylv_mbox_Type = {
     PyVarObject_HEAD_INIT(NULL, 0)
     .tp_name = "lvgl.Mbox",
-    .tp_doc = "lvgl mbox",
+    .tp_doc = "lvgl Mbox",
     .tp_basicsize = sizeof(pylv_Mbox),
     .tp_itemsize = 0,
     .tp_flags = Py_TPFLAGS_DEFAULT | Py_TPFLAGS_BASETYPE,
@@ -2975,6 +2803,30 @@ static PyTypeObject pylv_mbox_Type = {
     .tp_dealloc = (destructor) pylv_mbox_dealloc,
     .tp_methods = pylv_mbox_methods,
 };
+
+static void
+pylv_gauge_dealloc(pylv_Gauge *self) 
+{
+    // TODO: delete lvgl object? How to manage whether it has references in LittlevGL?
+
+}
+
+static int
+pylv_gauge_init(pylv_Gauge *self, PyObject *args, PyObject *kwds) 
+{
+    static char *kwlist[] = {"parent", "copy", NULL};
+    pylv_Obj *parent;
+    pylv_Gauge *copy=NULL;
+    
+    if (!PyArg_ParseTupleAndKeywords(args, kwds, "O!|O!", kwlist, &pylv_obj_Type, &parent, &pylv_gauge_Type, &copy)) {
+        return -1;
+    }   
+    self->ref = lv_gauge_create(parent->ref, copy ? copy->ref : NULL);
+    lv_obj_set_free_ptr(self->ref, self);
+
+    return 0;
+}
+
 
 static PyObject*
 pylv_gauge_set_needle_count(pylv_Obj *self, PyObject *args, PyObject *kwds)
@@ -3044,6 +2896,8 @@ pylv_gauge_get_style(pylv_Obj *self, PyObject *args, PyObject *kwds)
     if (!PyArg_ParseTupleAndKeywords(args, kwds, "", kwlist )) return NULL;
     return Style_From_lv_style(lv_gauge_get_style(self->ref));
 }
+
+
 static PyMethodDef pylv_gauge_methods[] = {
     {"set_needle_count", (PyCFunction) pylv_gauge_set_needle_count, METH_VARARGS | METH_KEYWORDS, NULL},
     {"set_value", (PyCFunction) pylv_gauge_set_value, METH_VARARGS | METH_KEYWORDS, NULL},
@@ -3054,10 +2908,11 @@ static PyMethodDef pylv_gauge_methods[] = {
     {"get_style", (PyCFunction) pylv_gauge_get_style, METH_VARARGS | METH_KEYWORDS, NULL},
     {NULL}  /* Sentinel */
 };
+
 static PyTypeObject pylv_gauge_Type = {
     PyVarObject_HEAD_INIT(NULL, 0)
     .tp_name = "lvgl.Gauge",
-    .tp_doc = "lvgl gauge",
+    .tp_doc = "lvgl Gauge",
     .tp_basicsize = sizeof(pylv_Gauge),
     .tp_itemsize = 0,
     .tp_flags = Py_TPFLAGS_DEFAULT | Py_TPFLAGS_BASETYPE,
@@ -3066,6 +2921,30 @@ static PyTypeObject pylv_gauge_Type = {
     .tp_dealloc = (destructor) pylv_gauge_dealloc,
     .tp_methods = pylv_gauge_methods,
 };
+
+static void
+pylv_page_dealloc(pylv_Page *self) 
+{
+    // TODO: delete lvgl object? How to manage whether it has references in LittlevGL?
+
+}
+
+static int
+pylv_page_init(pylv_Page *self, PyObject *args, PyObject *kwds) 
+{
+    static char *kwlist[] = {"parent", "copy", NULL};
+    pylv_Obj *parent;
+    pylv_Page *copy=NULL;
+    
+    if (!PyArg_ParseTupleAndKeywords(args, kwds, "O!|O!", kwlist, &pylv_obj_Type, &parent, &pylv_page_Type, &copy)) {
+        return -1;
+    }   
+    self->ref = lv_page_create(parent->ref, copy ? copy->ref : NULL);
+    lv_obj_set_free_ptr(self->ref, self);
+
+    return 0;
+}
+
 
 static PyObject*
 pylv_page_get_scrl(pylv_Obj *self, PyObject *args, PyObject *kwds)
@@ -3246,6 +3125,8 @@ pylv_page_focus(pylv_Obj *self, PyObject *args, PyObject *kwds)
     lv_page_focus(self->ref, obj->ref, anim_time);
     Py_RETURN_NONE;
 }
+
+
 static PyMethodDef pylv_page_methods[] = {
     {"get_scrl", (PyCFunction) pylv_page_get_scrl, METH_VARARGS | METH_KEYWORDS, NULL},
     {"set_rel_action", (PyCFunction) pylv_page_set_rel_action, METH_VARARGS | METH_KEYWORDS, NULL},
@@ -3267,10 +3148,11 @@ static PyMethodDef pylv_page_methods[] = {
     {"focus", (PyCFunction) pylv_page_focus, METH_VARARGS | METH_KEYWORDS, NULL},
     {NULL}  /* Sentinel */
 };
+
 static PyTypeObject pylv_page_Type = {
     PyVarObject_HEAD_INIT(NULL, 0)
     .tp_name = "lvgl.Page",
-    .tp_doc = "lvgl page",
+    .tp_doc = "lvgl Page",
     .tp_basicsize = sizeof(pylv_Page),
     .tp_itemsize = 0,
     .tp_flags = Py_TPFLAGS_DEFAULT | Py_TPFLAGS_BASETYPE,
@@ -3279,6 +3161,30 @@ static PyTypeObject pylv_page_Type = {
     .tp_dealloc = (destructor) pylv_page_dealloc,
     .tp_methods = pylv_page_methods,
 };
+
+static void
+pylv_ta_dealloc(pylv_Ta *self) 
+{
+    // TODO: delete lvgl object? How to manage whether it has references in LittlevGL?
+
+}
+
+static int
+pylv_ta_init(pylv_Ta *self, PyObject *args, PyObject *kwds) 
+{
+    static char *kwlist[] = {"parent", "copy", NULL};
+    pylv_Obj *parent;
+    pylv_Ta *copy=NULL;
+    
+    if (!PyArg_ParseTupleAndKeywords(args, kwds, "O!|O!", kwlist, &pylv_obj_Type, &parent, &pylv_ta_Type, &copy)) {
+        return -1;
+    }   
+    self->ref = lv_ta_create(parent->ref, copy ? copy->ref : NULL);
+    lv_obj_set_free_ptr(self->ref, self);
+
+    return 0;
+}
+
 
 static PyObject*
 pylv_ta_add_char(pylv_Obj *self, PyObject *args, PyObject *kwds)
@@ -3480,6 +3386,8 @@ pylv_ta_cursor_up(pylv_Obj *self, PyObject *args, PyObject *kwds)
     lv_ta_cursor_up(self->ref);
     Py_RETURN_NONE;
 }
+
+
 static PyMethodDef pylv_ta_methods[] = {
     {"add_char", (PyCFunction) pylv_ta_add_char, METH_VARARGS | METH_KEYWORDS, NULL},
     {"add_text", (PyCFunction) pylv_ta_add_text, METH_VARARGS | METH_KEYWORDS, NULL},
@@ -3503,10 +3411,11 @@ static PyMethodDef pylv_ta_methods[] = {
     {"cursor_up", (PyCFunction) pylv_ta_cursor_up, METH_VARARGS | METH_KEYWORDS, NULL},
     {NULL}  /* Sentinel */
 };
+
 static PyTypeObject pylv_ta_Type = {
     PyVarObject_HEAD_INIT(NULL, 0)
     .tp_name = "lvgl.Ta",
-    .tp_doc = "lvgl ta",
+    .tp_doc = "lvgl Ta",
     .tp_basicsize = sizeof(pylv_Ta),
     .tp_itemsize = 0,
     .tp_flags = Py_TPFLAGS_DEFAULT | Py_TPFLAGS_BASETYPE,
@@ -3515,6 +3424,30 @@ static PyTypeObject pylv_ta_Type = {
     .tp_dealloc = (destructor) pylv_ta_dealloc,
     .tp_methods = pylv_ta_methods,
 };
+
+static void
+pylv_btn_dealloc(pylv_Btn *self) 
+{
+    // TODO: delete lvgl object? How to manage whether it has references in LittlevGL?
+
+}
+
+static int
+pylv_btn_init(pylv_Btn *self, PyObject *args, PyObject *kwds) 
+{
+    static char *kwlist[] = {"parent", "copy", NULL};
+    pylv_Obj *parent;
+    pylv_Btn *copy=NULL;
+    
+    if (!PyArg_ParseTupleAndKeywords(args, kwds, "O!|O!", kwlist, &pylv_obj_Type, &parent, &pylv_btn_Type, &copy)) {
+        return -1;
+    }   
+    self->ref = lv_btn_create(parent->ref, copy ? copy->ref : NULL);
+    lv_obj_set_free_ptr(self->ref, self);
+
+    return 0;
+}
+
 
 static PyObject*
 pylv_btn_set_toggle(pylv_Obj *self, PyObject *args, PyObject *kwds)
@@ -3644,6 +3577,8 @@ pylv_btn_get_style(pylv_Obj *self, PyObject *args, PyObject *kwds)
     if (!PyArg_ParseTupleAndKeywords(args, kwds, "i", kwlist , &type)) return NULL;
     return Style_From_lv_style(lv_btn_get_style(self->ref, type));
 }
+
+
 static PyMethodDef pylv_btn_methods[] = {
     {"set_toggle", (PyCFunction) pylv_btn_set_toggle, METH_VARARGS | METH_KEYWORDS, NULL},
     {"set_state", (PyCFunction) pylv_btn_set_state, METH_VARARGS | METH_KEYWORDS, NULL},
@@ -3661,10 +3596,11 @@ static PyMethodDef pylv_btn_methods[] = {
     {"get_style", (PyCFunction) pylv_btn_get_style, METH_VARARGS | METH_KEYWORDS, NULL},
     {NULL}  /* Sentinel */
 };
+
 static PyTypeObject pylv_btn_Type = {
     PyVarObject_HEAD_INIT(NULL, 0)
     .tp_name = "lvgl.Btn",
-    .tp_doc = "lvgl btn",
+    .tp_doc = "lvgl Btn",
     .tp_basicsize = sizeof(pylv_Btn),
     .tp_itemsize = 0,
     .tp_flags = Py_TPFLAGS_DEFAULT | Py_TPFLAGS_BASETYPE,
@@ -3673,6 +3609,30 @@ static PyTypeObject pylv_btn_Type = {
     .tp_dealloc = (destructor) pylv_btn_dealloc,
     .tp_methods = pylv_btn_methods,
 };
+
+static void
+pylv_ddlist_dealloc(pylv_Ddlist *self) 
+{
+    // TODO: delete lvgl object? How to manage whether it has references in LittlevGL?
+
+}
+
+static int
+pylv_ddlist_init(pylv_Ddlist *self, PyObject *args, PyObject *kwds) 
+{
+    static char *kwlist[] = {"parent", "copy", NULL};
+    pylv_Obj *parent;
+    pylv_Ddlist *copy=NULL;
+    
+    if (!PyArg_ParseTupleAndKeywords(args, kwds, "O!|O!", kwlist, &pylv_obj_Type, &parent, &pylv_ddlist_Type, &copy)) {
+        return -1;
+    }   
+    self->ref = lv_ddlist_create(parent->ref, copy ? copy->ref : NULL);
+    lv_obj_set_free_ptr(self->ref, self);
+
+    return 0;
+}
+
 
 static PyObject*
 pylv_ddlist_set_options(pylv_Obj *self, PyObject *args, PyObject *kwds)
@@ -3805,6 +3765,8 @@ pylv_ddlist_open(pylv_Obj *self, PyObject *args, PyObject *kwds)
     lv_ddlist_open(self->ref, anim);
     Py_RETURN_NONE;
 }
+
+
 static PyMethodDef pylv_ddlist_methods[] = {
     {"set_options", (PyCFunction) pylv_ddlist_set_options, METH_VARARGS | METH_KEYWORDS, NULL},
     {"set_selected", (PyCFunction) pylv_ddlist_set_selected, METH_VARARGS | METH_KEYWORDS, NULL},
@@ -3822,10 +3784,11 @@ static PyMethodDef pylv_ddlist_methods[] = {
     {"open", (PyCFunction) pylv_ddlist_open, METH_VARARGS | METH_KEYWORDS, NULL},
     {NULL}  /* Sentinel */
 };
+
 static PyTypeObject pylv_ddlist_Type = {
     PyVarObject_HEAD_INIT(NULL, 0)
     .tp_name = "lvgl.Ddlist",
-    .tp_doc = "lvgl ddlist",
+    .tp_doc = "lvgl Ddlist",
     .tp_basicsize = sizeof(pylv_Ddlist),
     .tp_itemsize = 0,
     .tp_flags = Py_TPFLAGS_DEFAULT | Py_TPFLAGS_BASETYPE,
@@ -3834,6 +3797,30 @@ static PyTypeObject pylv_ddlist_Type = {
     .tp_dealloc = (destructor) pylv_ddlist_dealloc,
     .tp_methods = pylv_ddlist_methods,
 };
+
+static void
+pylv_list_dealloc(pylv_List *self) 
+{
+    // TODO: delete lvgl object? How to manage whether it has references in LittlevGL?
+
+}
+
+static int
+pylv_list_init(pylv_List *self, PyObject *args, PyObject *kwds) 
+{
+    static char *kwlist[] = {"parent", "copy", NULL};
+    pylv_Obj *parent;
+    pylv_List *copy=NULL;
+    
+    if (!PyArg_ParseTupleAndKeywords(args, kwds, "O!|O!", kwlist, &pylv_obj_Type, &parent, &pylv_list_Type, &copy)) {
+        return -1;
+    }   
+    self->ref = lv_list_create(parent->ref, copy ? copy->ref : NULL);
+    lv_obj_set_free_ptr(self->ref, self);
+
+    return 0;
+}
+
 
 static PyObject*
 pylv_list_add(pylv_Obj *self, PyObject *args, PyObject *kwds)
@@ -3958,6 +3945,8 @@ pylv_list_focus(pylv_Obj *self, PyObject *args, PyObject *kwds)
     lv_list_focus(self->ref, anim_en);
     Py_RETURN_NONE;
 }
+
+
 static PyMethodDef pylv_list_methods[] = {
     {"add", (PyCFunction) pylv_list_add, METH_VARARGS | METH_KEYWORDS, NULL},
     {"set_anim_time", (PyCFunction) pylv_list_set_anim_time, METH_VARARGS | METH_KEYWORDS, NULL},
@@ -3972,10 +3961,11 @@ static PyMethodDef pylv_list_methods[] = {
     {"focus", (PyCFunction) pylv_list_focus, METH_VARARGS | METH_KEYWORDS, NULL},
     {NULL}  /* Sentinel */
 };
+
 static PyTypeObject pylv_list_Type = {
     PyVarObject_HEAD_INIT(NULL, 0)
     .tp_name = "lvgl.List",
-    .tp_doc = "lvgl list",
+    .tp_doc = "lvgl List",
     .tp_basicsize = sizeof(pylv_List),
     .tp_itemsize = 0,
     .tp_flags = Py_TPFLAGS_DEFAULT | Py_TPFLAGS_BASETYPE,
@@ -3984,6 +3974,30 @@ static PyTypeObject pylv_list_Type = {
     .tp_dealloc = (destructor) pylv_list_dealloc,
     .tp_methods = pylv_list_methods,
 };
+
+static void
+pylv_slider_dealloc(pylv_Slider *self) 
+{
+    // TODO: delete lvgl object? How to manage whether it has references in LittlevGL?
+
+}
+
+static int
+pylv_slider_init(pylv_Slider *self, PyObject *args, PyObject *kwds) 
+{
+    static char *kwlist[] = {"parent", "copy", NULL};
+    pylv_Obj *parent;
+    pylv_Slider *copy=NULL;
+    
+    if (!PyArg_ParseTupleAndKeywords(args, kwds, "O!|O!", kwlist, &pylv_obj_Type, &parent, &pylv_slider_Type, &copy)) {
+        return -1;
+    }   
+    self->ref = lv_slider_create(parent->ref, copy ? copy->ref : NULL);
+    lv_obj_set_free_ptr(self->ref, self);
+
+    return 0;
+}
+
 
 static PyObject*
 pylv_slider_set_value(pylv_Obj *self, PyObject *args, PyObject *kwds)
@@ -4078,6 +4092,8 @@ pylv_slider_get_style(pylv_Obj *self, PyObject *args, PyObject *kwds)
     if (!PyArg_ParseTupleAndKeywords(args, kwds, "i", kwlist , &type)) return NULL;
     return Style_From_lv_style(lv_slider_get_style(self->ref, type));
 }
+
+
 static PyMethodDef pylv_slider_methods[] = {
     {"set_value", (PyCFunction) pylv_slider_set_value, METH_VARARGS | METH_KEYWORDS, NULL},
     {"set_value_anim", (PyCFunction) pylv_slider_set_value_anim, METH_VARARGS | METH_KEYWORDS, NULL},
@@ -4091,10 +4107,11 @@ static PyMethodDef pylv_slider_methods[] = {
     {"get_style", (PyCFunction) pylv_slider_get_style, METH_VARARGS | METH_KEYWORDS, NULL},
     {NULL}  /* Sentinel */
 };
+
 static PyTypeObject pylv_slider_Type = {
     PyVarObject_HEAD_INIT(NULL, 0)
     .tp_name = "lvgl.Slider",
-    .tp_doc = "lvgl slider",
+    .tp_doc = "lvgl Slider",
     .tp_basicsize = sizeof(pylv_Slider),
     .tp_itemsize = 0,
     .tp_flags = Py_TPFLAGS_DEFAULT | Py_TPFLAGS_BASETYPE,
@@ -4103,6 +4120,30 @@ static PyTypeObject pylv_slider_Type = {
     .tp_dealloc = (destructor) pylv_slider_dealloc,
     .tp_methods = pylv_slider_methods,
 };
+
+static void
+pylv_sw_dealloc(pylv_Sw *self) 
+{
+    // TODO: delete lvgl object? How to manage whether it has references in LittlevGL?
+
+}
+
+static int
+pylv_sw_init(pylv_Sw *self, PyObject *args, PyObject *kwds) 
+{
+    static char *kwlist[] = {"parent", "copy", NULL};
+    pylv_Obj *parent;
+    pylv_Sw *copy=NULL;
+    
+    if (!PyArg_ParseTupleAndKeywords(args, kwds, "O!|O!", kwlist, &pylv_obj_Type, &parent, &pylv_sw_Type, &copy)) {
+        return -1;
+    }   
+    self->ref = lv_sw_create(parent->ref, copy ? copy->ref : NULL);
+    lv_obj_set_free_ptr(self->ref, self);
+
+    return 0;
+}
+
 
 static PyObject*
 pylv_sw_on(pylv_Obj *self, PyObject *args, PyObject *kwds)
@@ -4164,6 +4205,8 @@ pylv_sw_get_style(pylv_Obj *self, PyObject *args, PyObject *kwds)
     if (!PyArg_ParseTupleAndKeywords(args, kwds, "i", kwlist , &type)) return NULL;
     return Style_From_lv_style(lv_sw_get_style(self->ref, type));
 }
+
+
 static PyMethodDef pylv_sw_methods[] = {
     {"on", (PyCFunction) pylv_sw_on, METH_VARARGS | METH_KEYWORDS, NULL},
     {"off", (PyCFunction) pylv_sw_off, METH_VARARGS | METH_KEYWORDS, NULL},
@@ -4174,10 +4217,11 @@ static PyMethodDef pylv_sw_methods[] = {
     {"get_style", (PyCFunction) pylv_sw_get_style, METH_VARARGS | METH_KEYWORDS, NULL},
     {NULL}  /* Sentinel */
 };
+
 static PyTypeObject pylv_sw_Type = {
     PyVarObject_HEAD_INIT(NULL, 0)
     .tp_name = "lvgl.Sw",
-    .tp_doc = "lvgl sw",
+    .tp_doc = "lvgl Sw",
     .tp_basicsize = sizeof(pylv_Sw),
     .tp_itemsize = 0,
     .tp_flags = Py_TPFLAGS_DEFAULT | Py_TPFLAGS_BASETYPE,
@@ -4186,6 +4230,30 @@ static PyTypeObject pylv_sw_Type = {
     .tp_dealloc = (destructor) pylv_sw_dealloc,
     .tp_methods = pylv_sw_methods,
 };
+
+static void
+pylv_cb_dealloc(pylv_Cb *self) 
+{
+    // TODO: delete lvgl object? How to manage whether it has references in LittlevGL?
+
+}
+
+static int
+pylv_cb_init(pylv_Cb *self, PyObject *args, PyObject *kwds) 
+{
+    static char *kwlist[] = {"parent", "copy", NULL};
+    pylv_Obj *parent;
+    pylv_Cb *copy=NULL;
+    
+    if (!PyArg_ParseTupleAndKeywords(args, kwds, "O!|O!", kwlist, &pylv_obj_Type, &parent, &pylv_cb_Type, &copy)) {
+        return -1;
+    }   
+    self->ref = lv_cb_create(parent->ref, copy ? copy->ref : NULL);
+    lv_obj_set_free_ptr(self->ref, self);
+
+    return 0;
+}
+
 
 static PyObject*
 pylv_cb_set_text(pylv_Obj *self, PyObject *args, PyObject *kwds)
@@ -4258,6 +4326,8 @@ pylv_cb_get_style(pylv_Obj *self, PyObject *args, PyObject *kwds)
     if (!PyArg_ParseTupleAndKeywords(args, kwds, "i", kwlist , &type)) return NULL;
     return Style_From_lv_style(lv_cb_get_style(self->ref, type));
 }
+
+
 static PyMethodDef pylv_cb_methods[] = {
     {"set_text", (PyCFunction) pylv_cb_set_text, METH_VARARGS | METH_KEYWORDS, NULL},
     {"set_checked", (PyCFunction) pylv_cb_set_checked, METH_VARARGS | METH_KEYWORDS, NULL},
@@ -4269,10 +4339,11 @@ static PyMethodDef pylv_cb_methods[] = {
     {"get_style", (PyCFunction) pylv_cb_get_style, METH_VARARGS | METH_KEYWORDS, NULL},
     {NULL}  /* Sentinel */
 };
+
 static PyTypeObject pylv_cb_Type = {
     PyVarObject_HEAD_INIT(NULL, 0)
     .tp_name = "lvgl.Cb",
-    .tp_doc = "lvgl cb",
+    .tp_doc = "lvgl Cb",
     .tp_basicsize = sizeof(pylv_Cb),
     .tp_itemsize = 0,
     .tp_flags = Py_TPFLAGS_DEFAULT | Py_TPFLAGS_BASETYPE,
@@ -4281,6 +4352,30 @@ static PyTypeObject pylv_cb_Type = {
     .tp_dealloc = (destructor) pylv_cb_dealloc,
     .tp_methods = pylv_cb_methods,
 };
+
+static void
+pylv_roller_dealloc(pylv_Roller *self) 
+{
+    // TODO: delete lvgl object? How to manage whether it has references in LittlevGL?
+
+}
+
+static int
+pylv_roller_init(pylv_Roller *self, PyObject *args, PyObject *kwds) 
+{
+    static char *kwlist[] = {"parent", "copy", NULL};
+    pylv_Obj *parent;
+    pylv_Roller *copy=NULL;
+    
+    if (!PyArg_ParseTupleAndKeywords(args, kwds, "O!|O!", kwlist, &pylv_obj_Type, &parent, &pylv_roller_Type, &copy)) {
+        return -1;
+    }   
+    self->ref = lv_roller_create(parent->ref, copy ? copy->ref : NULL);
+    lv_obj_set_free_ptr(self->ref, self);
+
+    return 0;
+}
+
 
 static PyObject*
 pylv_roller_set_options(pylv_Obj *self, PyObject *args, PyObject *kwds)
@@ -4385,6 +4480,8 @@ pylv_roller_get_style(pylv_Obj *self, PyObject *args, PyObject *kwds)
     if (!PyArg_ParseTupleAndKeywords(args, kwds, "i", kwlist , &type)) return NULL;
     return Style_From_lv_style(lv_roller_get_style(self->ref, type));
 }
+
+
 static PyMethodDef pylv_roller_methods[] = {
     {"set_options", (PyCFunction) pylv_roller_set_options, METH_VARARGS | METH_KEYWORDS, NULL},
     {"set_selected", (PyCFunction) pylv_roller_set_selected, METH_VARARGS | METH_KEYWORDS, NULL},
@@ -4399,10 +4496,11 @@ static PyMethodDef pylv_roller_methods[] = {
     {"get_style", (PyCFunction) pylv_roller_get_style, METH_VARARGS | METH_KEYWORDS, NULL},
     {NULL}  /* Sentinel */
 };
+
 static PyTypeObject pylv_roller_Type = {
     PyVarObject_HEAD_INIT(NULL, 0)
     .tp_name = "lvgl.Roller",
-    .tp_doc = "lvgl roller",
+    .tp_doc = "lvgl Roller",
     .tp_basicsize = sizeof(pylv_Roller),
     .tp_itemsize = 0,
     .tp_flags = Py_TPFLAGS_DEFAULT | Py_TPFLAGS_BASETYPE,
@@ -4411,8 +4509,6 @@ static PyTypeObject pylv_roller_Type = {
     .tp_dealloc = (destructor) pylv_roller_dealloc,
     .tp_methods = pylv_roller_methods,
 };
-
-
 
 
 

@@ -188,38 +188,6 @@ def objectname(functionname):
     match =  re.match(r'(lv_[a-zA-Z0-9]+)_[a-zA-Z0-9_]+', function.name)
     return match.group(1) if match else None
 
-class Object:
-    def __init__(self, name, ancestor):
-        self.name = name
-        self.ancestor = ancestor
-        self.functions = []
-        self.structfields = []
-    def PyObject_name(self):
-        return 'pylv_' + self.name[3:].title()
-
-    def __str__(self):
-        return self.name
-
-
-# Step 1: determine which objects exist based on the _create functions
-objects = {}
-for name, ancestor in sortedancestors.items():
-    objects[name] = Object(name, objects.get(ancestor))
-
-#functions = sorted(f for f in functions.values() if not any(re.match(exp, f.name) for exp in skipfunctions))
-
-# Step 2: distribute the functions over the objects
-for function in functions.values():
-    object = objects.get(objectname(function.name))
-    if object is None:
-        print(function.name)
-    elif not function.name.endswith('_create') and function.name not in skipfunctions:
-        object.functions.append(function)
-
-
-# Step 3: custom options
-objects['lv_obj'].structfields.extend(['PyObject_HEAD', 'lv_obj_t *ref;'])
-objects['lv_btnm'].structfields.append('const char **map;')
 
 typeconv = {
     'lv_obj_t*': ('O!', 'pylv_Obj *'),     # special case: conversion from/to Python object
@@ -239,6 +207,7 @@ typeconv = {
 
 argtypes_miss = Counter()
 restypes_miss = Counter()
+
 
 def functioncode(function, object):
     startCode = f'''
@@ -356,69 +325,81 @@ py{function.name}(pylv_Obj *self, PyObject *args, PyObject *kwds)
         
     return code + '}\n';
 
-
-#
-# Object definition, methods and method table for each object
-#
-objectdefcode = ''
-
-for obj in objects.values():
-
-    # Method definitions for the object methods (see also functioncode function)
-    for func in obj.functions:
-        objectdefcode += functioncode(func, obj)
-
-    # Method table
-    objectdefcode += f'static PyMethodDef py{obj}_methods[] = {{\n'
-    
-    for func in obj.functions:
-        methodname = func.name[len(obj.name)+1:]
+class Object:
+    def __init__(self, name, ancestor):
+        assert name.startswith('lv_')
         
-        objectdefcode += f'    {{"{methodname}", (PyCFunction) py{func.name}, METH_VARARGS | METH_KEYWORDS, NULL}},\n'
+        self.name = name
+        self.ancestor = ancestor
+        self.functions = []
+        self.structfields = []
+        
+        if self.name == 'lv_obj':
+            self.base = 'NULL'
+        else:
+            self.base = '&py' + self.ancestor.name + '_Type'
+    
+    def __getitem__(self, name):
+        '''
+        Allow an Object instance to be used in format, giving access to the fields
+        '''
+        return getattr(self, name)
 
-    objectdefcode += '    {NULL}  /* Sentinel */\n};'
+    @property
+    def pyname(self): # The name of the class in Python lv_obj --> Obj
+        return self.name[3:].title()   
+
+    @property
+    def structcode(self):    
+        if self.structfields:
+            structfields = (self.ancestor.structfields if self.ancestor else []) + self.structfields
+            structfieldscode = '\n    '.join(structfields)
+
+            # Additional fields (or pylv_Obj, the root object struct)
+            return f'typedef struct {{\n    {structfieldscode}\n}} pylv_{self.pyname};\n\n'
+        else:
+            # Same fields as ancestors, use typedef to generate new type name
+            return f'typedef pylv_{self.ancestor.pyname} pylv_{self.pyname};\n\n'
+
+    @property
+    def methodscode(self):
+        # Method definitions for the object methods (see also functioncode function)
+        return ''.join(functioncode(func, self) for func in self.functions)
     
-    objclass = obj.name[3:].title()
+    @property
+    def methodtablecode(self):
+        # Method table
+        methodtablecode = f'static PyMethodDef py{self.name}_methods[] = {{\n'
     
-    objectdefcode += f'''
-static PyTypeObject py{obj}_Type = {{
-    PyVarObject_HEAD_INIT(NULL, 0)
-    .tp_name = "lvgl.{objclass}",
-    .tp_doc = "lvgl {obj.name[3:]}",
-    .tp_basicsize = sizeof({obj.PyObject_name()}),
-    .tp_itemsize = 0,
-    .tp_flags = Py_TPFLAGS_DEFAULT | Py_TPFLAGS_BASETYPE,
-    .tp_new = PyType_GenericNew,
-    .tp_init = (initproc) py{obj}_init,
-    .tp_dealloc = (destructor) py{obj}_dealloc,
-    .tp_methods = py{obj}_methods,
-}};
-'''
+        for func in self.functions:
+            methodname = func.name[len(self.name)+1:]
+            
+            methodtablecode += f'    {{"{methodname}", (PyCFunction) py{func.name}, METH_VARARGS | METH_KEYWORDS, NULL}},\n'
+
+        methodtablecode += '    {NULL}  /* Sentinel */\n};'
+    
+        return methodtablecode
+
+
+# Step 1: determine which objects exist based on the _create functions
+objects = {}
+for name, ancestor in sortedancestors.items():
+    objects[name] = Object(name, objects.get(ancestor))
+
+# Step 2: distribute the functions over the objects
+for function in functions.values():
+    object = objects.get(objectname(function.name))
+    if object is None:
+        print(function.name)
+    elif not function.name.endswith('_create') and function.name not in skipfunctions:
+        object.functions.append(function)
+
+# Step 3: custom options
+objects['lv_btnm'].structfields.append('const char **map;')
+objects['lv_obj'].structfields.extend(['PyObject_HEAD', 'lv_obj_t *ref;'])
 
 
 fields = {}
-fields['OBJECT_DEFINITIONS'] = objectdefcode
-
-
-# Definition of object structs
-objectstructs = ''
-for obj in objects.values():
-    structfields = (obj.ancestor.structfields if obj.ancestor else []) + obj.structfields
-    structfieldscode = '\n    '.join(structfields)
-    if obj.ancestor and not obj.structfields:
-        # Same fields as ancestors
-        objectstructs += f'typedef {obj.ancestor.PyObject_name()} {obj.PyObject_name()};\n\n'
-    else:
-        # Additional fields (or pylv_Obj, the root object struct)
-        objectstructs += f'''\
-typedef struct {{
-    {structfieldscode}
-}} {obj.PyObject_name()};
-
-'''
-fields['OBJECT_STRUCTS'] = objectstructs
-
-
 
 enumcode = ''
 # Adding of the enum constants to the module
@@ -498,19 +479,7 @@ def substitute_per_object(match):
     template = match.group(1)
     ret = ''
     for obj in objects.values():
-        assert obj.name.startswith('lv_')
-        if obj.name == 'lv_obj':
-            base = 'NULL'
-        else:
-            base = '&py' + obj.ancestor.name + '_Type'
-        
-        ret += template.format(**{
-            'obj' :obj.name, 
-            'typename' : obj.name[3:].title(),
-            'base': base,
-            'pylv_Obj': obj.PyObject_name(),
-            }
-            )
+        ret += template.format_map(obj)
 
     return ret
 
