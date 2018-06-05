@@ -176,7 +176,7 @@ skipfunctions = {
 #
 # Mark which functions have a custom implementation (in lvglmodule_template.c)
 #
-for custom in ('lv_obj_get_children', 'lv_btnm_set_map'):
+for custom in ('lv_obj_get_children', 'lv_btnm_set_map', 'lv_list_add'):
     functions[custom] = FunctionDef(custom, None, None, None, True)
 
 
@@ -286,24 +286,21 @@ py{function.name}(pylv_Obj *self, PyObject *args, PyObject *kwds)
         # Result of function is an lv_obj; find the corresponding Python
         # object using lv_obj_get_free_ptr
         code += f'''
+        
+    if (lock) lock(lock_arg);
     lv_obj_t *result = {callcode};
+    PyObject *retobj = pyobj_from_lv(result);
+    if (unlock) unlock(unlock_arg);
     
-    if (!result) Py_RETURN_NONE;
-    
-    PyObject *retobj = lv_obj_get_free_ptr(result);
-    if (retobj) {{
-        Py_INCREF(retobj);
-        return retobj;
-    }} else {{
-        PyErr_SetString(PyExc_RuntimeError, "resulting object not known in Python");
-        return NULL;
-    }}
+    return retobj;
 '''
     
     elif resctype == 'Style_Object *':
         code += f'    return Style_From_lv_style({callcode});\n'
         xcode = f'''
+    if (lock) lock(lock_arg);    
     lv_style_t *result = {callcode};
+    if (unlock) unlock(unlock_arg);
     if (!result) Py_RETURN_NONE;
     
     Style_Object *retobj = PyObject_New(Style_Object, &Style_Type);
@@ -312,10 +309,18 @@ py{function.name}(pylv_Obj *self, PyObject *args, PyObject *kwds)
 '''
     
     elif resctype is None:
-        code += f'    {callcode};\n'
-        code += f'    Py_RETURN_NONE;\n'
+        code += f'''
+    if (lock) lock(lock_arg);         
+    {callcode};
+    if (unlock) unlock(unlock_arg);
+    Py_RETURN_NONE;
+'''
     else:
-        code += f'    {resctype} result = {callcode};\n';
+        code += f'''
+    if (lock) lock(lock_arg);         
+    {resctype} result = {callcode};
+    if (unlock) unlock(unlock_arg);
+'''
         if resfmt == 'p': # Py_BuildValue does not support 'p' (which is supported by PyArg_ParseTuple..)
             code += '    if (result) {Py_RETURN_TRUE;} else {Py_RETURN_FALSE;}\n'
         else:

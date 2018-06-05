@@ -24,6 +24,46 @@ static PyTypeObject py{name}_Type;
  * Helper functons                                              *  
  ****************************************************************/
 
+static void (*lock)(void*) = NULL;
+static void* lock_arg = 0;
+
+static void (*unlock)(void*) = NULL;
+static void* unlock_arg = 0;
+
+/* 
+ * This function itself is not thread-safe
+ */
+void lv_set_lock_unlock( void (*flock)(void *), void * flock_arg, 
+            void (*funlock)(void *), void * funlock_arg)
+{
+    lock_arg = flock_arg;
+    unlock_arg = funlock_arg;
+    lock = flock;
+    unlock = funlock;
+}
+
+PyObject * pyobj_from_lv(lv_obj_t *obj) {
+    pylv_Obj *pyobj;
+    if (!obj) {
+        Py_RETURN_NONE;
+    }
+    
+    pyobj = lv_obj_get_free_ptr(obj);
+    
+    if (pyobj) {
+        Py_INCREF(pyobj); // increase reference count of returned object
+    } else {
+        // Python object for this lv object does not yet exist. Create a new one
+        pyobj = PyObject_New(pylv_Obj, &pylv_obj_Type);
+        pyobj -> ref = obj;
+        lv_obj_set_free_ptr(obj, pyobj);
+    }
+    
+    return (PyObject *)pyobj;
+}
+
+
+
 /* Given an iterable of bytes, return a char** pointer which contains:
  *
  * - A ""-terminated char** table pointing to strings
@@ -128,6 +168,8 @@ error:
  * Style class                                                  *  
  ****************************************************************/
 
+static PyTypeObject Style_Type; // forward declaration of type
+
 typedef struct {
     PyObject_HEAD
     lv_style_t *ref;
@@ -135,8 +177,28 @@ typedef struct {
 
 
 static PyObject *Style_data(Style_Object *self, PyObject *args) {
-
     return PyMemoryView_FromMemory((void*)(self->ref), sizeof(*self->ref), PyBUF_WRITE);
+}
+
+static PyObject *Style_copy(Style_Object *self, PyObject *args) {
+    // Copy style
+    
+    Style_Object *ret = PyObject_New(Style_Object, &Style_Type);
+    if (!ret) return NULL;
+    
+    // This leaks memory (no PyMem_Free) but we have no way of knowing where the
+    // style is in use in lvgl. So to avoid crashes, better not free it is it may
+    // be in use.
+    ret->ref = PyMem_Malloc(sizeof(lv_style_t));
+    
+    if (!ret->ref) {
+        Py_DECREF(ret);
+        return NULL;
+    }
+    
+    memcpy(ret->ref, self->ref, sizeof(lv_style_t));
+    
+    return (PyObject *)ret;
 }
 
 static PyMemberDef Style_members[] = {
@@ -211,7 +273,8 @@ static PyGetSetDef Style_getsetters[] = {
 
 
 static PyMethodDef Style_methods[] = {
-    {"data", (PyCFunction) Style_data, METH_NOARGS, ""},
+    {"copy", (PyCFunction)Style_copy, METH_NOARGS, ""},
+    {"data", (PyCFunction)Style_data, METH_NOARGS, ""},
     {NULL}  /* Sentinel */
 };
 
@@ -229,7 +292,7 @@ static PyTypeObject Style_Type = {
     .tp_members = Style_members,
     .tp_methods = Style_methods,
     .tp_getset = Style_getsetters,
-    // Do not define tp_new to prevent creation of new instances from within Python
+    //no .tp_new to prevent creation of new instaces from Python
     .tp_repr = (reprfunc) Style_repr,
 };
 
@@ -263,6 +326,8 @@ pylv_obj_get_children(pylv_Obj *self, PyObject *args, PyObject *kwds)
     PyObject *ret = PyList_New(0);
     if (!ret) return NULL;
     
+    if (lock) lock(lock_arg);
+    
     while (1) {
         child = lv_obj_get_child(self->ref, child);
         if (!child) break;
@@ -277,10 +342,13 @@ pylv_obj_get_children(pylv_Obj *self, PyObject *args, PyObject *kwds)
         
         // Child that is known in Python
         if (PyList_Append(ret, (PyObject *)pychild)) { // PyList_Append increases refcount
-            // If PyList_Append fails, how to clean up?
-            return NULL;
+            Py_XDECREF(ret);
+            ret = NULL;
+            break;
         }
     }
+
+    if (unlock) unlock(unlock_arg);
     
     return ret;
 }
@@ -298,7 +366,9 @@ pylv_btnm_set_map(pylv_Btnm *self, PyObject *args, PyObject *kwds)
     cmap = buildstringmap(map);
     if (!cmap) return NULL;
     
+    if (lock) lock(lock_arg);
     lv_btnm_set_map(self->ref, cmap);
+    if (unlock) unlock(unlock_arg);
 
     // Free the old map (if any) and store the new one to be able to free it later
     if (self->map) PyMem_Free(self->map);
@@ -306,6 +376,31 @@ pylv_btnm_set_map(pylv_Btnm *self, PyObject *args, PyObject *kwds)
 
     Py_RETURN_NONE;
     
+}
+
+
+static PyObject*
+pylv_list_add(pylv_List *self, PyObject *args, PyObject *kwds)
+{
+    static char *kwlist[] = {"img_src", "txt", "rel_action", NULL};
+    PyObject *img_src;
+    const char *txt;
+    PyObject *rel_action;
+    PyObject *ret;
+    
+    if (!PyArg_ParseTupleAndKeywords(args, kwds, "OsO", kwlist , &img_src, &txt, &rel_action)) return NULL; 
+      
+    if ( img_src!=Py_None || rel_action!=Py_None) {
+        PyErr_SetString(PyExc_ValueError, "only img_src == None and rel_action == None is currently supported");
+        return NULL;
+    } 
+
+    if (lock) lock(lock_arg);
+    ret = pyobj_from_lv(lv_list_add(self->ref, NULL, txt, NULL));
+    if (unlock) unlock(unlock_arg);
+    
+    return ret;
+
 }
 
 /****************************************************************
@@ -324,14 +419,17 @@ static int
 py{name}_init(pylv_{pyname} *self, PyObject *args, PyObject *kwds) 
 {{
     static char *kwlist[] = {{"parent", "copy", NULL}};
-    pylv_Obj *parent;
+    pylv_Obj *parent=NULL;
     pylv_{pyname} *copy=NULL;
     
-    if (!PyArg_ParseTupleAndKeywords(args, kwds, "O!|O!", kwlist, &pylv_obj_Type, &parent, &py{name}_Type, &copy)) {{
+    if (!PyArg_ParseTupleAndKeywords(args, kwds, "|O!O!", kwlist, &pylv_obj_Type, &parent, &py{name}_Type, &copy)) {{
         return -1;
     }}   
-    self->ref = {name}_create(parent->ref, copy ? copy->ref : NULL);
+    
+    if (lock) lock(lock_arg);
+    self->ref = {name}_create(parent ? parent->ref : NULL, copy ? copy->ref : NULL);
     lv_obj_set_free_ptr(self->ref, self);
+    if (unlock) unlock(unlock_arg);
 
     return 0;
 }}
@@ -361,13 +459,29 @@ static PyTypeObject py{name}_Type = {{
 
 static PyObject *
 pylv_scr_act(PyObject *self, PyObject *args) {
-    return lv_obj_get_free_ptr(lv_scr_act());
+    return pyobj_from_lv(lv_scr_act());
 }
 
 static PyObject *
+pylv_scr_load(PyObject *self, PyObject *args, PyObject *kwds) {
+    static char *kwlist[] = {"scr", NULL};
+    pylv_Obj *scr;
+    if (!PyArg_ParseTupleAndKeywords(args, kwds, "O!", kwlist, &pylv_obj_Type, &scr)) return NULL;
+    if (lock) lock(lock_arg);
+    lv_scr_load(scr->ref);
+    if (unlock) unlock(unlock_arg);
+    
+    Py_RETURN_NONE;
+}
+
+
+static PyObject *
 poll(PyObject *self, PyObject *args) {
+    if (lock) lock(lock_arg);
     lv_tick_inc(1);
     lv_task_handler();
+    if (unlock) unlock(unlock_arg);
+    
     Py_RETURN_NONE;
 }
 
@@ -380,7 +494,10 @@ report_style_mod(PyObject *self, PyObject *args, PyObject *kwds) {
         return NULL;
     }
     
+    if (lock) unlock(lock_arg);
     lv_obj_report_style_mod(style ? style->ref: NULL);
+    if (unlock) unlock(unlock_arg);
+    
     Py_RETURN_NONE;
 }
 
@@ -417,6 +534,7 @@ static lv_disp_drv_t driver = {0};
 
 static PyMethodDef lvglMethods[] = {
     {"scr_act",  pylv_scr_act, METH_NOARGS, NULL},
+    {"scr_load", (PyCFunction)pylv_scr_load, METH_VARARGS | METH_KEYWORDS, NULL},
     {"poll", poll, METH_NOARGS, NULL},
     {"report_style_mod", (PyCFunction)report_style_mod, METH_VARARGS | METH_KEYWORDS, NULL},
     {NULL, NULL, 0, NULL}        /* Sentinel */
@@ -451,6 +569,9 @@ PyInit_lvgl(void) {
     if (PyType_Ready(&py{name}_Type) < 0) return NULL;
 >>>
 
+    Py_INCREF(&Style_Type);
+    PyModule_AddObject(module, "Style", (PyObject *) &Style_Type); 
+
 <<<
     Py_INCREF(&py{name}_Type);
     PyModule_AddObject(module, "{pyname}", (PyObject *) &py{name}_Type); 
@@ -470,15 +591,6 @@ PyInit_lvgl(void) {
     lv_init();
     
     lv_disp_drv_register(&driver);
-
-
-
-    // Create a Python object for the active screen lv_obj and register it
-    pylv_Obj * pyact = PyObject_New(pylv_Obj, &pylv_obj_Type);
-    lv_obj_t *act = lv_scr_act();
-    pyact -> ref = act;
-    lv_obj_set_free_ptr(act, pyact);
-
 
     return module;
     

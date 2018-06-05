@@ -35,14 +35,32 @@ l1.set_text('Push 1')
 s1 = lvgl.Slider(lvgl.scr_act())
 s1.align(b1, lvgl.ALIGN_OUT_BOTTOM_MID, 0, 10)
 
-# style = l1.get_style()
-# style.text_color = 0x003f;
-# l1.refresh_style()
+s1 = lvgl.scr_act()
+s2 = lvgl.Obj()
+lst = lvgl.List(s2)
+lst.set_width(320)
+lst.set_height(200)
+lst.set_sb_mode(lvgl.SB_MODE_AUTO)
 
-kbd =lvgl.Kb(lvgl.scr_act())
-s = kbd.get_style(lvgl.BTNM_STYLE_BG)
-s.body_padding_inner = 2
-kbd.refresh_style()
-kbd.set_map([b'test',b'hoi', b'\n', b'test2', b'\203test3'])
+# No spacing between items
+st1 = lst.get_style(lvgl.LIST_STYLE_SCRL).copy()
+st1.body_padding_inner = 0
+lst.set_style(lvgl.LIST_STYLE_SCRL, st1)
+
+style = lvgl.style_plain.copy() # copy
+style.body_main_color = 0xffff
+style.body_grad_color = 0xffff
+style.text_color = 0
+style.body_padding_ver = 0
+
+for st in [lvgl.LIST_STYLE_BTN_PR, lvgl.LIST_STYLE_BTN_REL, lvgl.LIST_STYLE_BTN_TGL_PR, lvgl.LIST_STYLE_BTN_TGL_REL]:
+    lst.set_style(st, style)
+
+
+
+items = [lst.add(None, f'Btn {i}', None) for i in range(20)]
+
+lvgl.scr_load(s2)
+
 
 app.exec_()
