@@ -582,6 +582,8 @@ PyInit_lvgl(void) {
     
 <<STYLE_ASSIGNMENTS>>
 
+<<SYMBOL_ASSIGNMENTS>>
+
     PyModule_AddObject(module, "framebuffer", PyMemoryView_FromMemory(framebuffer, LV_HOR_RES * LV_VER_RES * 2, PyBUF_READ));
     PyModule_AddObject(module, "HOR_RES", PyLong_FromLong(LV_HOR_RES));
     PyModule_AddObject(module, "VER_RES", PyLong_FromLong(LV_VER_RES));

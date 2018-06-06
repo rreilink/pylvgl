@@ -469,6 +469,15 @@ for style in re.findall(r'extern\s+lv_style_t\s+lv_([A-Za-z0-9_]+)\s*;', style_h
 
 fields['STYLE_ASSIGNMENTS'] = style_assignments
 
+# Find symbol definitions
+symbol_assignments = ''
+with open('lvgl/lv_misc/lv_fonts/lv_symbol_def.h') as file:
+    symbol_def_h_code = file.read()
+    for symbol_name, symbol_definition in re.findall(r'#define\s+(SYMBOL_\w+)\s+("\\xEF\\x80\\x[0-9A-Z]+")', symbol_def_h_code):
+        symbol_assignments += f'    PyModule_AddObject(module, "{symbol_name}", PyUnicode_FromString({symbol_definition}));\n'    
+        
+fields['SYMBOL_ASSIGNMENTS'] = symbol_assignments
+
 #
 # Fill in the template
 #

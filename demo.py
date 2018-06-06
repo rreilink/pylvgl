@@ -58,7 +58,7 @@ for st in [lvgl.LIST_STYLE_BTN_PR, lvgl.LIST_STYLE_BTN_REL, lvgl.LIST_STYLE_BTN_
 
 
 
-items = [lst.add(None, f'Btn {i}', None) for i in range(20)]
+items = [lst.add(None, lvgl.SYMBOL_FILE + f'Btn {i}', None) for i in range(20)]
 
 lvgl.scr_load(s2)
 

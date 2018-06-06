@@ -5707,6 +5707,58 @@ PyInit_lvgl(void) {
     PyModule_AddObject(module, "style_btn_ina",Style_From_lv_style(&lv_style_btn_ina));
 
 
+    PyModule_AddObject(module, "SYMBOL_AUDIO", PyUnicode_FromString("\xEF\x80\x80"));
+    PyModule_AddObject(module, "SYMBOL_VIDEO", PyUnicode_FromString("\xEF\x80\x81"));
+    PyModule_AddObject(module, "SYMBOL_LIST", PyUnicode_FromString("\xEF\x80\x82"));
+    PyModule_AddObject(module, "SYMBOL_OK", PyUnicode_FromString("\xEF\x80\x83"));
+    PyModule_AddObject(module, "SYMBOL_CLOSE", PyUnicode_FromString("\xEF\x80\x84"));
+    PyModule_AddObject(module, "SYMBOL_POWER", PyUnicode_FromString("\xEF\x80\x85"));
+    PyModule_AddObject(module, "SYMBOL_SETTINGS", PyUnicode_FromString("\xEF\x80\x86"));
+    PyModule_AddObject(module, "SYMBOL_TRASH", PyUnicode_FromString("\xEF\x80\x87"));
+    PyModule_AddObject(module, "SYMBOL_HOME", PyUnicode_FromString("\xEF\x80\x88"));
+    PyModule_AddObject(module, "SYMBOL_DOWNLOAD", PyUnicode_FromString("\xEF\x80\x89"));
+    PyModule_AddObject(module, "SYMBOL_DRIVE", PyUnicode_FromString("\xEF\x80\x8A"));
+    PyModule_AddObject(module, "SYMBOL_REFRESH", PyUnicode_FromString("\xEF\x80\x8B"));
+    PyModule_AddObject(module, "SYMBOL_MUTE", PyUnicode_FromString("\xEF\x80\x8C"));
+    PyModule_AddObject(module, "SYMBOL_VOLUME_MID", PyUnicode_FromString("\xEF\x80\x8D"));
+    PyModule_AddObject(module, "SYMBOL_VOLUME_MAX", PyUnicode_FromString("\xEF\x80\x8E"));
+    PyModule_AddObject(module, "SYMBOL_IMAGE", PyUnicode_FromString("\xEF\x80\x8F"));
+    PyModule_AddObject(module, "SYMBOL_EDIT", PyUnicode_FromString("\xEF\x80\x90"));
+    PyModule_AddObject(module, "SYMBOL_PREV", PyUnicode_FromString("\xEF\x80\x91"));
+    PyModule_AddObject(module, "SYMBOL_PLAY", PyUnicode_FromString("\xEF\x80\x92"));
+    PyModule_AddObject(module, "SYMBOL_PAUSE", PyUnicode_FromString("\xEF\x80\x93"));
+    PyModule_AddObject(module, "SYMBOL_STOP", PyUnicode_FromString("\xEF\x80\x94"));
+    PyModule_AddObject(module, "SYMBOL_NEXT", PyUnicode_FromString("\xEF\x80\x95"));
+    PyModule_AddObject(module, "SYMBOL_EJECT", PyUnicode_FromString("\xEF\x80\x96"));
+    PyModule_AddObject(module, "SYMBOL_LEFT", PyUnicode_FromString("\xEF\x80\x97"));
+    PyModule_AddObject(module, "SYMBOL_RIGHT", PyUnicode_FromString("\xEF\x80\x98"));
+    PyModule_AddObject(module, "SYMBOL_PLUS", PyUnicode_FromString("\xEF\x80\x99"));
+    PyModule_AddObject(module, "SYMBOL_MINUS", PyUnicode_FromString("\xEF\x80\x9A"));
+    PyModule_AddObject(module, "SYMBOL_WARNING", PyUnicode_FromString("\xEF\x80\x9B"));
+    PyModule_AddObject(module, "SYMBOL_SHUFFLE", PyUnicode_FromString("\xEF\x80\x9C"));
+    PyModule_AddObject(module, "SYMBOL_UP", PyUnicode_FromString("\xEF\x80\x9D"));
+    PyModule_AddObject(module, "SYMBOL_DOWN", PyUnicode_FromString("\xEF\x80\x9E"));
+    PyModule_AddObject(module, "SYMBOL_LOOP", PyUnicode_FromString("\xEF\x80\x9F"));
+    PyModule_AddObject(module, "SYMBOL_DIRECTORY", PyUnicode_FromString("\xEF\x80\xA0"));
+    PyModule_AddObject(module, "SYMBOL_UPLOAD", PyUnicode_FromString("\xEF\x80\xA1"));
+    PyModule_AddObject(module, "SYMBOL_CALL", PyUnicode_FromString("\xEF\x80\xA2"));
+    PyModule_AddObject(module, "SYMBOL_CUT", PyUnicode_FromString("\xEF\x80\xA3"));
+    PyModule_AddObject(module, "SYMBOL_COPY", PyUnicode_FromString("\xEF\x80\xA4"));
+    PyModule_AddObject(module, "SYMBOL_SAVE", PyUnicode_FromString("\xEF\x80\xA5"));
+    PyModule_AddObject(module, "SYMBOL_CHARGE", PyUnicode_FromString("\xEF\x80\xA6"));
+    PyModule_AddObject(module, "SYMBOL_BELL", PyUnicode_FromString("\xEF\x80\xA7"));
+    PyModule_AddObject(module, "SYMBOL_KEYBOARD", PyUnicode_FromString("\xEF\x80\xA8"));
+    PyModule_AddObject(module, "SYMBOL_GPS", PyUnicode_FromString("\xEF\x80\xA9"));
+    PyModule_AddObject(module, "SYMBOL_FILE", PyUnicode_FromString("\xEF\x80\xAA"));
+    PyModule_AddObject(module, "SYMBOL_WIFI", PyUnicode_FromString("\xEF\x80\xAB"));
+    PyModule_AddObject(module, "SYMBOL_BATTERY_FULL", PyUnicode_FromString("\xEF\x80\xAC"));
+    PyModule_AddObject(module, "SYMBOL_BATTERY_3", PyUnicode_FromString("\xEF\x80\xAD"));
+    PyModule_AddObject(module, "SYMBOL_BATTERY_2", PyUnicode_FromString("\xEF\x80\xAE"));
+    PyModule_AddObject(module, "SYMBOL_BATTERY_1", PyUnicode_FromString("\xEF\x80\xAF"));
+    PyModule_AddObject(module, "SYMBOL_BATTERY_EMPTY", PyUnicode_FromString("\xEF\x80\xB0"));
+    PyModule_AddObject(module, "SYMBOL_BLUETOOTH", PyUnicode_FromString("\xEF\x80\xB1"));
+
+
     PyModule_AddObject(module, "framebuffer", PyMemoryView_FromMemory(framebuffer, LV_HOR_RES * LV_VER_RES * 2, PyBUF_READ));
     PyModule_AddObject(module, "HOR_RES", PyLong_FromLong(LV_HOR_RES));
     PyModule_AddObject(module, "VER_RES", PyLong_FromLong(LV_VER_RES));
