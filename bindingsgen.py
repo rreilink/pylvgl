@@ -11,6 +11,9 @@ from collections import namedtuple, Counter
 from itertools import chain
 import re
 import glob
+import sys
+
+assert sys.version_info > (3,6)
 
 FunctionDef = namedtuple('FunctionDef', 'name restype args contents customcode')
 Argument = namedtuple('Argument', 'name type')
@@ -477,6 +480,19 @@ with open('lvgl/lv_misc/lv_fonts/lv_symbol_def.h') as file:
         symbol_assignments += f'    PyModule_AddObject(module, "{symbol_name}", PyUnicode_FromString({symbol_definition}));\n'    
         
 fields['SYMBOL_ASSIGNMENTS'] = symbol_assignments
+
+# Find font definitions
+
+font_assignments = ''
+with open('lv_conf.h') as file:
+    lv_conf_h = file.read()
+
+    for fontname, bpp in re.findall(r'#define USE_LV_(FONT_\w+)\s+(\d+)', lv_conf_h):
+        if int(bpp) != 0:
+            fontname = fontname.lower()
+            font_assignments += f'    PyModule_AddObject(module, "{fontname}", Font_From_lv_font(&lv_{fontname}));\n'
+
+fields['FONT_ASSIGNMENTS'] = font_assignments
 
 #
 # Fill in the template

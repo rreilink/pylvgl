@@ -1,4 +1,6 @@
 import lvgl
+import faulthandler
+faulthandler.enable()
 from PySide2 import QtGui, QtWidgets, QtCore
 app = QtWidgets.QApplication([])
 
@@ -58,9 +60,62 @@ for st in [lvgl.LIST_STYLE_BTN_PR, lvgl.LIST_STYLE_BTN_REL, lvgl.LIST_STYLE_BTN_
 
 
 
-items = [lst.add(None, lvgl.SYMBOL_FILE + f'Btn {i}', None) for i in range(20)]
+items = [lst.add(None, f'Btn {i}', None) for i in range(20)]
 
-lvgl.scr_load(s2)
 
+
+symbolstyle = lvgl.style_plain
+symbolstyle.text_font = lvgl.font_symbol_40
+symbolstyle.text_color = 0xffff
+
+class SymbolButton(lvgl.Btn):
+    def __init__(self, symbol, text, *args, **kwds):
+        super().__init__(*args, **kwds)
+        self.symbol = lvgl.Label(self)
+        self.symbol.set_text(symbol)
+        self.symbol.set_style(symbolstyle)
+        self.symbol.align(self, lvgl.ALIGN_CENTER,0,0)
+        
+        self.label = lvgl.Label(self)
+        self.label.set_text(text)
+        self.label.align(self, lvgl.ALIGN_CENTER,20,0)
+        
+        
+class MainMenu(lvgl.Obj):
+    def __init__(self, *args, **kwds):
+        super().__init__(*args, **kwds)
+        self.btnPrint = SymbolButton(lvgl.SYMBOL_PLAY, 'Print', self)
+        self.btnPrint.set_x(0)
+        self.btnPrint.set_y(0)
+        self.btnPrint.set_width(160)
+        self.btnPrint.set_height(90)
+        self.btnChange = SymbolButton(lvgl.SYMBOL_SHUFFLE, 'Change filament', self)
+        self.btnChange.set_x(160)
+        self.btnChange.set_y(0)
+        self.btnChange.set_width(160)
+        self.btnChange.set_height(90)
+        self.btnPreheat = SymbolButton(lvgl.SYMBOL_CHARGE, 'Preheat', self)
+        self.btnPreheat.set_x(0)
+        self.btnPreheat.set_y(90)
+        self.btnPreheat.set_width(160)
+        self.btnPreheat.set_height(90)
+        self.btnSettings = SymbolButton(lvgl.SYMBOL_SETTINGS, 'Settings', self)
+        self.btnSettings.set_x(160)
+        self.btnSettings.set_y(90)
+        self.btnSettings.set_width(160)
+        self.btnSettings.set_height(90)
+        self.lblStatus=lvgl.Label(self)
+        self.lblStatus.set_text('\uf026 heating')
+        self.lblStatus.align(self, lvgl.ALIGN_IN_BOTTOM_LEFT, 5, -5)
+        
+        
+        
+s3 = MainMenu()
+lvgl.scr_load(s3)
 
 app.exec_()
+
+#lvgl.font_dejavu_20
+#l1.get_style().text_font
+#lvgl.font_dejavu_20
+

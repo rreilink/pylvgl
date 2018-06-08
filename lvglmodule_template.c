@@ -165,6 +165,41 @@ error:
 
 
 /****************************************************************
+ * Font class                                                  *  
+ ****************************************************************/
+
+static PyTypeObject Font_Type; // forward declaration of type
+
+typedef struct {
+    PyObject_HEAD
+    const lv_font_t *ref;
+} Font_Object;
+
+static PyObject*
+Font_repr(Font_Object *self) {
+    return PyUnicode_FromFormat("<lvgl.Font object at %p referencing %p>", self, self->ref);
+}
+
+static PyTypeObject Font_Type = {
+    PyVarObject_HEAD_INIT(NULL, 0)
+    .tp_name = "lvgl.Font",
+    .tp_basicsize = sizeof(Font_Object),
+    .tp_itemsize = 0,
+    .tp_flags = Py_TPFLAGS_DEFAULT,
+    //no .tp_new to prevent creation of new instaces from Python
+    .tp_repr = (reprfunc) Font_repr,
+};
+
+static PyObject* 
+Font_From_lv_font(const lv_font_t *font) {
+    Font_Object *ret;
+
+    ret = PyObject_New(Font_Object, &Font_Type);
+    if (ret) ret->ref = font;
+    return (PyObject *)ret;
+}
+
+/****************************************************************
  * Style class                                                  *  
  ****************************************************************/
 
@@ -265,9 +300,28 @@ Style_set_uint8(Style_Object *self, PyObject *value, void *closure)
     return 0;
 }
 
+static PyObject *
+Style_get_font(Style_Object *self, void *closure) {
+    return Font_From_lv_font(self->ref->text.font);
+}
+
+
+static int
+Style_set_font(Style_Object *self, PyObject *value, void *closure)
+{
+    if (Py_TYPE(value) != &Font_Type) {
+        PyErr_Format(PyExc_TypeError, "lvgl.Style font attribute must be of type 'lvgl.Font', not '%.200s'", Py_TYPE(value)->tp_name);
+        return 1;
+    }
+    self->ref->text.font = ((Font_Object *)value)->ref;
+
+    return 0;
+}
+
 
 static PyGetSetDef Style_getsetters[] = {
 <<STYLE_GETSET>>
+    {"text_font", (getter) Style_get_font, (setter) Style_set_font, "text.font", NULL},
     {NULL},
 };
 
@@ -308,6 +362,8 @@ Style_From_lv_style(lv_style_t *style) {
     if (ret) ret->ref = style;
     return (PyObject *)ret;
 }
+
+
 
 /****************************************************************
  * Custom method implementations                                *
@@ -562,6 +618,8 @@ PyInit_lvgl(void) {
     module = PyModule_Create(&lvglmodule);
     if (!module) goto error;
     
+    if (PyType_Ready(&Font_Type) < 0) return NULL;
+
     if (PyType_Ready(&Style_Type) < 0) return NULL;
     
 <<<
@@ -581,6 +639,8 @@ PyInit_lvgl(void) {
 <<ENUM_ASSIGNMENTS>>
     
 <<STYLE_ASSIGNMENTS>>
+
+<<FONT_ASSIGNMENTS>>
 
 <<SYMBOL_ASSIGNMENTS>>
 
