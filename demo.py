@@ -4,26 +4,36 @@ faulthandler.enable()
 from PySide2 import QtGui, QtWidgets, QtCore
 app = QtWidgets.QApplication([])
 
-label = QtWidgets.QLabel();
-label.setMinimumSize(lvgl.HOR_RES, lvgl.VER_RES)
-label.setMaximumSize(lvgl.HOR_RES, lvgl.VER_RES)
+class LvglWindow(QtWidgets.QLabel):
+    def __init__(self):
+        super().__init__()
+        self.setMinimumSize(lvgl.HOR_RES, lvgl.VER_RES)
+        self.setMaximumSize(lvgl.HOR_RES, lvgl.VER_RES)
+        self.timer = QtCore.QTimer()
+        self.timer.timeout.connect(self.update)
+        self.timer.start(10)
 
-label.show()
-
-def update():
-    # Poll lvgl and display the framebuffer
-    for i in range(10):
+    def mousePressEvent(self, evt):
+        self.mouseMoveEvent(evt)
+    def mouseReleaseEvent(self, evt):
+        self.mouseMoveEvent(evt)
+    def mouseMoveEvent(self, evt):
+        pos = evt.pos()
+        lvgl.send_mouse_event(pos.x(), pos.y(), evt.buttons() & QtCore.Qt.LeftButton)
+    def update(self):
+        # Poll lvgl and display the framebuffer
         lvgl.poll()
-
-    data = bytes(lvgl.framebuffer)
-    img = QtGui.QImage(data, lvgl.HOR_RES, lvgl.VER_RES, QtGui.QImage.Format_RGB16) 
-    pm = QtGui.QPixmap.fromImage(img)
     
-    label.setPixmap(pm)
+        data = bytes(lvgl.framebuffer)
+        img = QtGui.QImage(data, lvgl.HOR_RES, lvgl.VER_RES, QtGui.QImage.Format_RGB16) 
+        pm = QtGui.QPixmap.fromImage(img)
+        
+        self.setPixmap(pm)
 
-t = QtCore.QTimer()
-t.timeout.connect(update)
-t.start(100)
+win = LvglWindow();
+win.show()
+
+
 
 # Build a GUI
 # run this script using -i to try commands interactively

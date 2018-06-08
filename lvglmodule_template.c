@@ -580,7 +580,42 @@ static void disp_flush(int32_t x1, int32_t y1, int32_t x2, int32_t y2, const lv_
     lv_flush_ready();
 }
 
-static lv_disp_drv_t driver = {0};
+static lv_disp_drv_t diplay_driver = {0};
+static lv_indev_drv_t indev_driver = {0};
+static int indev_driver_registered = 0;
+static int indev_x, indev_y, indev_state, indev_pending=0;
+
+bool indev_read(lv_indev_data_t *data) {
+    if (indev_pending) {
+        data->point.x = indev_x;
+        data->point.y = indev_y;
+        data->state = indev_state;
+    }
+    return false;
+}
+
+static PyObject *
+send_mouse_event(PyObject *self, PyObject *args, PyObject *kwds) {
+    static char *kwlist[] = {"x", "y", "pressed", NULL};
+    int x=0, y=0, pressed=0;
+    
+    if (!PyArg_ParseTupleAndKeywords(args, kwds, "iip", kwlist, &x, &y, &pressed)) {
+        return NULL;
+    }
+    
+    if (!indev_driver_registered) {
+        lv_indev_drv_init(&indev_driver);
+        indev_driver.type = LV_INDEV_TYPE_POINTER;
+        indev_driver.read = indev_read;
+        lv_indev_drv_register(&indev_driver);
+    }
+    indev_x = x;
+    indev_y = y;
+    indev_state = pressed ? LV_INDEV_STATE_PR : LV_INDEV_STATE_REL;
+    indev_pending = 1;
+    
+    Py_RETURN_NONE;
+}
 
 
 /****************************************************************
@@ -592,6 +627,7 @@ static PyMethodDef lvglMethods[] = {
     {"scr_act",  pylv_scr_act, METH_NOARGS, NULL},
     {"scr_load", (PyCFunction)pylv_scr_load, METH_VARARGS | METH_KEYWORDS, NULL},
     {"poll", poll, METH_NOARGS, NULL},
+    {"send_mouse_event", (PyCFunction)send_mouse_event, METH_VARARGS | METH_KEYWORDS, NULL},
     {"report_style_mod", (PyCFunction)report_style_mod, METH_VARARGS | METH_KEYWORDS, NULL},
     {NULL, NULL, 0, NULL}        /* Sentinel */
 };
@@ -648,11 +684,11 @@ PyInit_lvgl(void) {
     PyModule_AddObject(module, "HOR_RES", PyLong_FromLong(LV_HOR_RES));
     PyModule_AddObject(module, "VER_RES", PyLong_FromLong(LV_VER_RES));
 
-    driver.disp_flush = disp_flush;
+    diplay_driver.disp_flush = disp_flush;
 
     lv_init();
     
-    lv_disp_drv_register(&driver);
+    lv_disp_drv_register(&diplay_driver);
 
     return module;
     
