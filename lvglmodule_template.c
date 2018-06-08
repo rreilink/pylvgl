@@ -459,6 +459,49 @@ pylv_list_add(pylv_List *self, PyObject *args, PyObject *kwds)
 
 }
 
+<<BTN_CALLBACKS>>
+
+static PyObject *
+pylv_btn_get_action(pylv_Btn *self, PyObject *args, PyObject *kwds)
+{
+    static char *kwlist[] = {"type", NULL};
+    int type;
+    if (!PyArg_ParseTupleAndKeywords(args, kwds, "i", kwlist, &type)) return NULL;   
+    if (type<0 || type>= LV_BTN_ACTION_NUM) {
+        return PyErr_Format(PyExc_ValueError, "action type should be 0<=type<%d, got %d", LV_BTN_ACTION_NUM, type);
+    }
+    PyObject *action = self->actions[type];
+    if (!action) Py_RETURN_NONE;
+
+    Py_INCREF(action);
+    return action;
+}
+
+static PyObject *
+pylv_btn_set_action(pylv_Btn *self, PyObject *args, PyObject *kwds)
+{
+    static char *kwlist[] = {"type", "action", NULL};
+    PyObject *action, *tmp;
+    int type;
+    if (!PyArg_ParseTupleAndKeywords(args, kwds, "iO", kwlist , &type, &action)) return NULL;
+    if (type<0 || type>= LV_BTN_ACTION_NUM) {
+        return PyErr_Format(PyExc_ValueError, "action type should be 0<=type<%d, got %d", LV_BTN_ACTION_NUM, type);
+    }
+        
+    tmp = self->actions[type];
+    if (action == Py_None) {
+        self->actions[type] = NULL;
+    } else {
+        self->actions[type] = action;
+        Py_INCREF(action);
+        lv_btn_set_action(self->ref, type, pylv_btn_action_callbacks[type]);
+    }
+    Py_XDECREF(tmp); // Old action (tmp) could be NULL
+
+    Py_RETURN_NONE;
+}
+
+
 /****************************************************************
  * Methods and object definitions                               *
  ****************************************************************/

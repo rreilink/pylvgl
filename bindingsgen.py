@@ -20,6 +20,10 @@ Argument = namedtuple('Argument', 'name type')
 EnumItem = namedtuple('EnumItem', 'name value')
 StructItem = namedtuple('StructItem', 'name type')
 
+def stripstart(x, start):
+    assert x.startswith(start)
+    return x[len(start):]
+
 def preprocess(filename):
     '''
     Preprocess H-file given by filename, stripping comments, preprocessor 
@@ -111,7 +115,6 @@ def parse(filename, functions, enums):
         functions[name]=(FunctionDef(name, restype + resptr.strip(), args, contents, False))
 
 
-
 # Use C-files to get class hierarchy    
 functions_c = {}
 enums_c = {}
@@ -172,24 +175,54 @@ skipfunctions = {
     # lv_obj_t* as first argument). Implemented as lvgl.report_style_mod
     'lv_obj_report_style_mod',
     
-    # does nothing special; covered by superclass lv_btnm_set_map
-    'lv_kb_set_map',
-    }
+}
+
+def objectname(functionname):
+    match =  re.match(r'(lv_[a-zA-Z0-9]+)_[a-zA-Z0-9_]+', function.name)
+    return match.group(1) if match else None
+
+#
+# Filter (static inline) functions that only call the same function, but on their
+# anchestor. This is covered by Python inheritance so no need to implement those
+# functions
+#
+
+for function in functions.values():
+    # Analyze the contents of the function declaration (this would be empty for
+    # pure declarations since we have analyzed the H-file, not the c-file)
+    contents = function.contents.strip();
+    if not contents:
+        continue
+        
+    # Ignore the 'return ' statement
+    if contents.startswith('return '): contents = contents[6:].strip()
+    
+    # Determine the object of this function, and its ancestor object
+    objname = objectname(function.name)
+    ancestor = ancestors[objname]
+    methodname = stripstart(function.name, objname)
+    while ancestor:
+        # Determine what this same function call would look like, if it was
+        # called on its ancestor
+        callcode = ancestor + methodname + '(' + ', '.join(a.name for a in function.args) + ');'
+        
+        if callcode == contents: # Same? Then no need to implement Python code for this function
+            skipfunctions.add(function.name)
+            break
+
+        # Try the ancestor's ancestor
+        ancestor = ancestors[ancestor]
 
 #
 # Mark which functions have a custom implementation (in lvglmodule_template.c)
 #
-for custom in ('lv_obj_get_children', 'lv_btnm_set_map', 'lv_list_add'):
-    functions[custom] = FunctionDef(custom, None, None, None, True)
+for custom in ('lv_obj_get_children', 'lv_btnm_set_map', 'lv_list_add', 'lv_btn_set_action', 'lv_btn_get_action'):
+    functions[custom] = FunctionDef(custom, None, [], None, True)
 
 
 #
 # Grouping of functions with objects and selection of functions
 #
-
-def objectname(functionname):
-    match =  re.match(r'(lv_[a-zA-Z0-9]+)_[a-zA-Z0-9_]+', function.name)
-    return match.group(1) if match else None
 
 
 typeconv = {
@@ -333,6 +366,21 @@ py{function.name}(pylv_Obj *self, PyObject *args, PyObject *kwds)
         
     return code + '}\n';
 
+def actioncallbackcode(obj, action, attrname):
+    return f'''
+lv_res_t py{obj.name}_{action}_callback(lv_obj_t* obj) {{
+    pylv_{obj.pyname} *pyobj;
+    PyObject *handler;
+    pyobj = lv_obj_get_free_ptr(obj);
+    if (pyobj) {{
+        handler = pyobj->{attrname};
+        if (handler) PyObject_CallFunctionObjArgs(handler, NULL);
+        if (PyErr_Occurred()) PyErr_Print();
+    }}
+    return LV_RES_OK;
+}}
+'''
+
 class Object:
     def __init__(self, name, ancestor):
         assert name.startswith('lv_')
@@ -340,7 +388,7 @@ class Object:
         self.name = name
         self.ancestor = ancestor
         self.functions = []
-        self.structfields = []
+        self.customstructfields = []
         
         if self.name == 'lv_obj':
             self.base = 'NULL'
@@ -353,14 +401,36 @@ class Object:
         '''
         return getattr(self, name)
 
+    def get_std_actions(self):
+        actions = []
+        setterstart = self.name + '_set_'
+
+        for function in self.functions:
+            args = function.args
+            if len(args) == 2 and args[1].type == 'lv_action_t':
+                assert function.name.startswith(setterstart)
+                actions.append(function.name[len(setterstart):])
+                
+        
+        return actions
+
+    def get_structfields(self, recurse = False):
+        actionfields = [f'PyObject *{action};' for action in self.get_std_actions()]
+        myfields = actionfields + self.customstructfields
+        
+        if not myfields and not recurse:
+            return []
+        
+        return (self.ancestor.get_structfields(True) if self.ancestor else []) + myfields
+
     @property
     def pyname(self): # The name of the class in Python lv_obj --> Obj
         return self.name[3:].title()   
 
     @property
-    def structcode(self):    
-        if self.structfields:
-            structfields = (self.ancestor.structfields if self.ancestor else []) + self.structfields
+    def structcode(self):
+        structfields = self.get_structfields()   
+        if structfields:
             structfieldscode = '\n    '.join(structfields)
 
             # Additional fields (or pylv_Obj, the root object struct)
@@ -372,7 +442,55 @@ class Object:
     @property
     def methodscode(self):
         # Method definitions for the object methods (see also functioncode function)
-        return ''.join(functioncode(func, self) for func in self.functions)
+        code = ''
+        actiongetset = set()
+        for action in self.get_std_actions():
+            actiongetset.add(self.name + '_get_' + action)
+            actiongetset.add(self.name + '_set_' + action)
+            code += actioncallbackcode(self, action, action)
+            code += f'''
+
+static PyObject *
+py{self.name}_get_{action}(pylv_{self.pyname} *self, PyObject *args, PyObject *kwds)
+{{
+    static char *kwlist[] = {{NULL}};
+    if (!PyArg_ParseTupleAndKeywords(args, kwds, "", kwlist)) return NULL;   
+    
+    PyObject *action = self->{action};
+    if (!action) Py_RETURN_NONE;
+
+    Py_INCREF(action);
+    return action;
+}}
+
+static PyObject *
+py{self.name}_set_{action}(pylv_{self.pyname} *self, PyObject *args, PyObject *kwds)
+{{
+    static char *kwlist[] = {{"action", NULL}};
+    PyObject *action, *tmp;
+    if (!PyArg_ParseTupleAndKeywords(args, kwds, "O", kwlist , &action)) return NULL;
+    
+    tmp = self->{action};
+    if (action == Py_None) {{
+        self->{action} = NULL;
+    }} else {{
+        self->{action} = action;
+        Py_INCREF(action);
+        {self.name}_set_{action}(self->ref, py{self.name}_{action}_callback);
+    }}
+    Py_XDECREF(tmp); // Old action (tmp) could be NULL
+
+    Py_RETURN_NONE;
+}}
+
+            
+'''
+            
+        for func in self.functions:
+            if func.name not in actiongetset:
+                code += functioncode(func, self)
+                
+        return code
     
     @property
     def methodtablecode(self):
@@ -403,11 +521,24 @@ for function in functions.values():
         object.functions.append(function)
 
 # Step 3: custom options
-objects['lv_btnm'].structfields.append('const char **map;')
-objects['lv_obj'].structfields.extend(['PyObject_HEAD', 'lv_obj_t *ref;'])
-
-
 fields = {}
+
+objects['lv_btnm'].customstructfields.append('const char **map;')
+objects['lv_obj'].customstructfields.extend(['PyObject_HEAD', 'lv_obj_t *ref;'])
+objects['lv_btn'].customstructfields.append(f'PyObject *actions[LV_BTN_ACTION_NUM];')
+
+# Button callback handlers
+btncallbacks = ''
+btncallbacknames = []
+for i, btn_action in enumerate(enums['lv_btn_action_t'][:-1]): # last is LV_BNT_ACTION_NUM
+    assert btn_action.value == i
+    actionname = 'action_' + stripstart(btn_action.name, 'LV_BTN_ACTION_').lower()
+    btncallbacks += actioncallbackcode(objects['lv_btn'], actionname, f'actions[{i}]')
+    btncallbacknames.append(f'pylv_btn_{actionname}_callback')
+    
+btncallbacks += f'static lv_action_t pylv_btn_action_callbacks[LV_BTN_ACTION_NUM] = {{{", ".join(btncallbacknames)}}};'
+
+fields['BTN_CALLBACKS'] = btncallbacks
 
 enumcode = ''
 # Adding of the enum constants to the module

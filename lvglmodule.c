@@ -33,7 +33,13 @@ typedef pylv_Obj pylv_Cont;
 
 typedef pylv_Obj pylv_Led;
 
-typedef pylv_Btnm pylv_Kb;
+typedef struct {
+    PyObject_HEAD
+    lv_obj_t *ref;
+    const char **map;
+    PyObject *ok_action;
+    PyObject *hide_action;
+} pylv_Kb;
 
 typedef pylv_Obj pylv_Img;
 
@@ -47,21 +53,45 @@ typedef pylv_Cont pylv_Mbox;
 
 typedef pylv_Lmeter pylv_Gauge;
 
-typedef pylv_Cont pylv_Page;
+typedef struct {
+    PyObject_HEAD
+    lv_obj_t *ref;
+    PyObject *rel_action;
+    PyObject *pr_action;
+} pylv_Page;
 
 typedef pylv_Page pylv_Ta;
 
-typedef pylv_Cont pylv_Btn;
+typedef struct {
+    PyObject_HEAD
+    lv_obj_t *ref;
+    PyObject *actions[LV_BTN_ACTION_NUM];
+} pylv_Btn;
 
-typedef pylv_Page pylv_Ddlist;
+typedef struct {
+    PyObject_HEAD
+    lv_obj_t *ref;
+    PyObject *rel_action;
+    PyObject *pr_action;
+    PyObject *action;
+} pylv_Ddlist;
 
 typedef pylv_Page pylv_List;
 
-typedef pylv_Bar pylv_Slider;
+typedef struct {
+    PyObject_HEAD
+    lv_obj_t *ref;
+    PyObject *action;
+} pylv_Slider;
 
 typedef pylv_Slider pylv_Sw;
 
-typedef pylv_Btn pylv_Cb;
+typedef struct {
+    PyObject_HEAD
+    lv_obj_t *ref;
+    PyObject *actions[LV_BTN_ACTION_NUM];
+    PyObject *action;
+} pylv_Cb;
 
 typedef pylv_Ddlist pylv_Roller;
 
@@ -582,6 +612,97 @@ pylv_list_add(pylv_List *self, PyObject *args, PyObject *kwds)
     return ret;
 
 }
+
+
+lv_res_t pylv_btn_action_click_callback(lv_obj_t* obj) {
+    pylv_Btn *pyobj;
+    PyObject *handler;
+    pyobj = lv_obj_get_free_ptr(obj);
+    if (pyobj) {
+        handler = pyobj->actions[0];
+        if (handler) PyObject_CallFunctionObjArgs(handler, NULL);
+        if (PyErr_Occurred()) PyErr_Print();
+    }
+    return LV_RES_OK;
+}
+
+lv_res_t pylv_btn_action_pr_callback(lv_obj_t* obj) {
+    pylv_Btn *pyobj;
+    PyObject *handler;
+    pyobj = lv_obj_get_free_ptr(obj);
+    if (pyobj) {
+        handler = pyobj->actions[1];
+        if (handler) PyObject_CallFunctionObjArgs(handler, NULL);
+        if (PyErr_Occurred()) PyErr_Print();
+    }
+    return LV_RES_OK;
+}
+
+lv_res_t pylv_btn_action_long_pr_callback(lv_obj_t* obj) {
+    pylv_Btn *pyobj;
+    PyObject *handler;
+    pyobj = lv_obj_get_free_ptr(obj);
+    if (pyobj) {
+        handler = pyobj->actions[2];
+        if (handler) PyObject_CallFunctionObjArgs(handler, NULL);
+        if (PyErr_Occurred()) PyErr_Print();
+    }
+    return LV_RES_OK;
+}
+
+lv_res_t pylv_btn_action_long_pr_repeat_callback(lv_obj_t* obj) {
+    pylv_Btn *pyobj;
+    PyObject *handler;
+    pyobj = lv_obj_get_free_ptr(obj);
+    if (pyobj) {
+        handler = pyobj->actions[3];
+        if (handler) PyObject_CallFunctionObjArgs(handler, NULL);
+        if (PyErr_Occurred()) PyErr_Print();
+    }
+    return LV_RES_OK;
+}
+static lv_action_t pylv_btn_action_callbacks[LV_BTN_ACTION_NUM] = {pylv_btn_action_click_callback, pylv_btn_action_pr_callback, pylv_btn_action_long_pr_callback, pylv_btn_action_long_pr_repeat_callback};
+
+static PyObject *
+pylv_btn_get_action(pylv_Btn *self, PyObject *args, PyObject *kwds)
+{
+    static char *kwlist[] = {"type", NULL};
+    int type;
+    if (!PyArg_ParseTupleAndKeywords(args, kwds, "i", kwlist, &type)) return NULL;   
+    if (type<0 || type>= LV_BTN_ACTION_NUM) {
+        return PyErr_Format(PyExc_ValueError, "action type should be 0<=type<%d, got %d", LV_BTN_ACTION_NUM, type);
+    }
+    PyObject *action = self->actions[type];
+    if (!action) Py_RETURN_NONE;
+
+    Py_INCREF(action);
+    return action;
+}
+
+static PyObject *
+pylv_btn_set_action(pylv_Btn *self, PyObject *args, PyObject *kwds)
+{
+    static char *kwlist[] = {"type", "action", NULL};
+    PyObject *action, *tmp;
+    int type;
+    if (!PyArg_ParseTupleAndKeywords(args, kwds, "iO", kwlist , &type, &action)) return NULL;
+    if (type<0 || type>= LV_BTN_ACTION_NUM) {
+        return PyErr_Format(PyExc_ValueError, "action type should be 0<=type<%d, got %d", LV_BTN_ACTION_NUM, type);
+    }
+        
+    tmp = self->actions[type];
+    if (action == Py_None) {
+        self->actions[type] = NULL;
+    } else {
+        self->actions[type] = action;
+        Py_INCREF(action);
+        lv_btn_set_action(self->ref, type, pylv_btn_action_callbacks[type]);
+    }
+    Py_XDECREF(tmp); // Old action (tmp) could be NULL
+
+    Py_RETURN_NONE;
+}
+
 
 /****************************************************************
  * Methods and object definitions                               *
@@ -1546,19 +1667,6 @@ pylv_label_set_anim_speed(pylv_Obj *self, PyObject *args, PyObject *kwds)
 }
 
 static PyObject*
-pylv_label_set_style(pylv_Obj *self, PyObject *args, PyObject *kwds)
-{
-    static char *kwlist[] = {"style", NULL};
-    Style_Object * style;
-    if (!PyArg_ParseTupleAndKeywords(args, kwds, "O!", kwlist , &Style_Type, &style)) return NULL;
-
-    if (lock) lock(lock_arg);         
-    lv_label_set_style(self->ref, style->ref);
-    if (unlock) unlock(unlock_arg);
-    Py_RETURN_NONE;
-}
-
-static PyObject*
 pylv_label_get_long_mode(pylv_Obj *self, PyObject *args, PyObject *kwds)
 {
     static char *kwlist[] = {NULL};
@@ -1664,7 +1772,6 @@ static PyMethodDef pylv_label_methods[] = {
     {"set_no_break", (PyCFunction) pylv_label_set_no_break, METH_VARARGS | METH_KEYWORDS, NULL},
     {"set_body_draw", (PyCFunction) pylv_label_set_body_draw, METH_VARARGS | METH_KEYWORDS, NULL},
     {"set_anim_speed", (PyCFunction) pylv_label_set_anim_speed, METH_VARARGS | METH_KEYWORDS, NULL},
-    {"set_style", (PyCFunction) pylv_label_set_style, METH_VARARGS | METH_KEYWORDS, NULL},
     {"get_long_mode", (PyCFunction) pylv_label_get_long_mode, METH_VARARGS | METH_KEYWORDS, NULL},
     {"get_align", (PyCFunction) pylv_label_get_align, METH_VARARGS | METH_KEYWORDS, NULL},
     {"get_recolor", (PyCFunction) pylv_label_get_recolor, METH_VARARGS | METH_KEYWORDS, NULL},
@@ -1758,19 +1865,6 @@ pylv_lmeter_set_scale(pylv_Obj *self, PyObject *args, PyObject *kwds)
 }
 
 static PyObject*
-pylv_lmeter_set_style(pylv_Obj *self, PyObject *args, PyObject *kwds)
-{
-    static char *kwlist[] = {"bg", NULL};
-    Style_Object * bg;
-    if (!PyArg_ParseTupleAndKeywords(args, kwds, "O!", kwlist , &Style_Type, &bg)) return NULL;
-
-    if (lock) lock(lock_arg);         
-    lv_lmeter_set_style(self->ref, bg->ref);
-    if (unlock) unlock(unlock_arg);
-    Py_RETURN_NONE;
-}
-
-static PyObject*
 pylv_lmeter_get_style_bg(pylv_Obj *self, PyObject *args, PyObject *kwds)
 {
     static char *kwlist[] = {NULL};
@@ -1783,7 +1877,6 @@ static PyMethodDef pylv_lmeter_methods[] = {
     {"set_value", (PyCFunction) pylv_lmeter_set_value, METH_VARARGS | METH_KEYWORDS, NULL},
     {"set_range", (PyCFunction) pylv_lmeter_set_range, METH_VARARGS | METH_KEYWORDS, NULL},
     {"set_scale", (PyCFunction) pylv_lmeter_set_scale, METH_VARARGS | METH_KEYWORDS, NULL},
-    {"set_style", (PyCFunction) pylv_lmeter_set_style, METH_VARARGS | METH_KEYWORDS, NULL},
     {"get_style_bg", (PyCFunction) pylv_lmeter_get_style_bg, METH_VARARGS | METH_KEYWORDS, NULL},
     {NULL}  /* Sentinel */
 };
@@ -2052,19 +2145,6 @@ pylv_chart_set_next(pylv_Obj *self, PyObject *args, PyObject *kwds)
 }
 
 static PyObject*
-pylv_chart_set_style(pylv_Obj *self, PyObject *args, PyObject *kwds)
-{
-    static char *kwlist[] = {"style", NULL};
-    Style_Object * style;
-    if (!PyArg_ParseTupleAndKeywords(args, kwds, "O!", kwlist , &Style_Type, &style)) return NULL;
-
-    if (lock) lock(lock_arg);         
-    lv_chart_set_style(self->ref, style->ref);
-    if (unlock) unlock(unlock_arg);
-    Py_RETURN_NONE;
-}
-
-static PyObject*
 pylv_chart_get_type(pylv_Obj *self, PyObject *args, PyObject *kwds)
 {
     static char *kwlist[] = {NULL};
@@ -2137,7 +2217,6 @@ static PyMethodDef pylv_chart_methods[] = {
     {"init_points", (PyCFunction) pylv_chart_init_points, METH_VARARGS | METH_KEYWORDS, NULL},
     {"set_points", (PyCFunction) pylv_chart_set_points, METH_VARARGS | METH_KEYWORDS, NULL},
     {"set_next", (PyCFunction) pylv_chart_set_next, METH_VARARGS | METH_KEYWORDS, NULL},
-    {"set_style", (PyCFunction) pylv_chart_set_style, METH_VARARGS | METH_KEYWORDS, NULL},
     {"get_type", (PyCFunction) pylv_chart_get_type, METH_VARARGS | METH_KEYWORDS, NULL},
     {"get_series_opa", (PyCFunction) pylv_chart_get_series_opa, METH_VARARGS | METH_KEYWORDS, NULL},
     {"get_series_width", (PyCFunction) pylv_chart_get_series_width, METH_VARARGS | METH_KEYWORDS, NULL},
@@ -2214,19 +2293,6 @@ pylv_cont_set_fit(pylv_Obj *self, PyObject *args, PyObject *kwds)
 }
 
 static PyObject*
-pylv_cont_set_style(pylv_Obj *self, PyObject *args, PyObject *kwds)
-{
-    static char *kwlist[] = {"style", NULL};
-    Style_Object * style;
-    if (!PyArg_ParseTupleAndKeywords(args, kwds, "O!", kwlist , &Style_Type, &style)) return NULL;
-
-    if (lock) lock(lock_arg);         
-    lv_cont_set_style(self->ref, style->ref);
-    if (unlock) unlock(unlock_arg);
-    Py_RETURN_NONE;
-}
-
-static PyObject*
 pylv_cont_get_layout(pylv_Obj *self, PyObject *args, PyObject *kwds)
 {
     static char *kwlist[] = {NULL};
@@ -2262,23 +2328,13 @@ pylv_cont_get_ver_fit(pylv_Obj *self, PyObject *args, PyObject *kwds)
     if (result) {Py_RETURN_TRUE;} else {Py_RETURN_FALSE;}
 }
 
-static PyObject*
-pylv_cont_get_style(pylv_Obj *self, PyObject *args, PyObject *kwds)
-{
-    static char *kwlist[] = {NULL};
-    if (!PyArg_ParseTupleAndKeywords(args, kwds, "", kwlist )) return NULL;
-    return Style_From_lv_style(lv_cont_get_style(self->ref));
-}
-
 
 static PyMethodDef pylv_cont_methods[] = {
     {"set_layout", (PyCFunction) pylv_cont_set_layout, METH_VARARGS | METH_KEYWORDS, NULL},
     {"set_fit", (PyCFunction) pylv_cont_set_fit, METH_VARARGS | METH_KEYWORDS, NULL},
-    {"set_style", (PyCFunction) pylv_cont_set_style, METH_VARARGS | METH_KEYWORDS, NULL},
     {"get_layout", (PyCFunction) pylv_cont_get_layout, METH_VARARGS | METH_KEYWORDS, NULL},
     {"get_hor_fit", (PyCFunction) pylv_cont_get_hor_fit, METH_VARARGS | METH_KEYWORDS, NULL},
     {"get_ver_fit", (PyCFunction) pylv_cont_get_ver_fit, METH_VARARGS | METH_KEYWORDS, NULL},
-    {"get_style", (PyCFunction) pylv_cont_get_style, METH_VARARGS | METH_KEYWORDS, NULL},
     {NULL}  /* Sentinel */
 };
 
@@ -2371,26 +2427,12 @@ pylv_led_toggle(pylv_Obj *self, PyObject *args, PyObject *kwds)
     Py_RETURN_NONE;
 }
 
-static PyObject*
-pylv_led_set_style(pylv_Obj *self, PyObject *args, PyObject *kwds)
-{
-    static char *kwlist[] = {"style", NULL};
-    Style_Object * style;
-    if (!PyArg_ParseTupleAndKeywords(args, kwds, "O!", kwlist , &Style_Type, &style)) return NULL;
-
-    if (lock) lock(lock_arg);         
-    lv_led_set_style(self->ref, style->ref);
-    if (unlock) unlock(unlock_arg);
-    Py_RETURN_NONE;
-}
-
 
 static PyMethodDef pylv_led_methods[] = {
     {"set_bright", (PyCFunction) pylv_led_set_bright, METH_VARARGS | METH_KEYWORDS, NULL},
     {"on", (PyCFunction) pylv_led_on, METH_VARARGS | METH_KEYWORDS, NULL},
     {"off", (PyCFunction) pylv_led_off, METH_VARARGS | METH_KEYWORDS, NULL},
     {"toggle", (PyCFunction) pylv_led_toggle, METH_VARARGS | METH_KEYWORDS, NULL},
-    {"set_style", (PyCFunction) pylv_led_set_style, METH_VARARGS | METH_KEYWORDS, NULL},
     {NULL}  /* Sentinel */
 };
 
@@ -2434,6 +2476,102 @@ pylv_kb_init(pylv_Kb *self, PyObject *args, PyObject *kwds)
 }
 
 
+lv_res_t pylv_kb_ok_action_callback(lv_obj_t* obj) {
+    pylv_Kb *pyobj;
+    PyObject *handler;
+    pyobj = lv_obj_get_free_ptr(obj);
+    if (pyobj) {
+        handler = pyobj->ok_action;
+        if (handler) PyObject_CallFunctionObjArgs(handler, NULL);
+        if (PyErr_Occurred()) PyErr_Print();
+    }
+    return LV_RES_OK;
+}
+
+
+static PyObject *
+pylv_kb_get_ok_action(pylv_Kb *self, PyObject *args, PyObject *kwds)
+{
+    static char *kwlist[] = {NULL};
+    if (!PyArg_ParseTupleAndKeywords(args, kwds, "", kwlist)) return NULL;   
+    
+    PyObject *action = self->ok_action;
+    if (!action) Py_RETURN_NONE;
+
+    Py_INCREF(action);
+    return action;
+}
+
+static PyObject *
+pylv_kb_set_ok_action(pylv_Kb *self, PyObject *args, PyObject *kwds)
+{
+    static char *kwlist[] = {"action", NULL};
+    PyObject *action, *tmp;
+    if (!PyArg_ParseTupleAndKeywords(args, kwds, "O", kwlist , &action)) return NULL;
+    
+    tmp = self->ok_action;
+    if (action == Py_None) {
+        self->ok_action = NULL;
+    } else {
+        self->ok_action = action;
+        Py_INCREF(action);
+        lv_kb_set_ok_action(self->ref, pylv_kb_ok_action_callback);
+    }
+    Py_XDECREF(tmp); // Old action (tmp) could be NULL
+
+    Py_RETURN_NONE;
+}
+
+            
+
+lv_res_t pylv_kb_hide_action_callback(lv_obj_t* obj) {
+    pylv_Kb *pyobj;
+    PyObject *handler;
+    pyobj = lv_obj_get_free_ptr(obj);
+    if (pyobj) {
+        handler = pyobj->hide_action;
+        if (handler) PyObject_CallFunctionObjArgs(handler, NULL);
+        if (PyErr_Occurred()) PyErr_Print();
+    }
+    return LV_RES_OK;
+}
+
+
+static PyObject *
+pylv_kb_get_hide_action(pylv_Kb *self, PyObject *args, PyObject *kwds)
+{
+    static char *kwlist[] = {NULL};
+    if (!PyArg_ParseTupleAndKeywords(args, kwds, "", kwlist)) return NULL;   
+    
+    PyObject *action = self->hide_action;
+    if (!action) Py_RETURN_NONE;
+
+    Py_INCREF(action);
+    return action;
+}
+
+static PyObject *
+pylv_kb_set_hide_action(pylv_Kb *self, PyObject *args, PyObject *kwds)
+{
+    static char *kwlist[] = {"action", NULL};
+    PyObject *action, *tmp;
+    if (!PyArg_ParseTupleAndKeywords(args, kwds, "O", kwlist , &action)) return NULL;
+    
+    tmp = self->hide_action;
+    if (action == Py_None) {
+        self->hide_action = NULL;
+    } else {
+        self->hide_action = action;
+        Py_INCREF(action);
+        lv_kb_set_hide_action(self->ref, pylv_kb_hide_action_callback);
+    }
+    Py_XDECREF(tmp); // Old action (tmp) could be NULL
+
+    Py_RETURN_NONE;
+}
+
+            
+
 static PyObject*
 pylv_kb_set_ta(pylv_Obj *self, PyObject *args, PyObject *kwds)
 {
@@ -2471,20 +2609,6 @@ pylv_kb_set_cursor_manage(pylv_Obj *self, PyObject *args, PyObject *kwds)
     lv_kb_set_cursor_manage(self->ref, en);
     if (unlock) unlock(unlock_arg);
     Py_RETURN_NONE;
-}
-
-static PyObject*
-pylv_kb_set_ok_action(pylv_Obj *self, PyObject *args, PyObject *kwds)
-{
-    PyErr_SetString(PyExc_NotImplementedError, "not implemented");
-    return NULL;
-}
-
-static PyObject*
-pylv_kb_set_hide_action(pylv_Obj *self, PyObject *args, PyObject *kwds)
-{
-    PyErr_SetString(PyExc_NotImplementedError, "not implemented");
-    return NULL;
 }
 
 static PyObject*
@@ -2538,20 +2662,6 @@ pylv_kb_get_cursor_manage(pylv_Obj *self, PyObject *args, PyObject *kwds)
     int result = lv_kb_get_cursor_manage(self->ref);
     if (unlock) unlock(unlock_arg);
     if (result) {Py_RETURN_TRUE;} else {Py_RETURN_FALSE;}
-}
-
-static PyObject*
-pylv_kb_get_ok_action(pylv_Obj *self, PyObject *args, PyObject *kwds)
-{
-    PyErr_SetString(PyExc_NotImplementedError, "not implemented");
-    return NULL;
-}
-
-static PyObject*
-pylv_kb_get_hide_action(pylv_Obj *self, PyObject *args, PyObject *kwds)
-{
-    PyErr_SetString(PyExc_NotImplementedError, "not implemented");
-    return NULL;
 }
 
 static PyObject*
@@ -2654,19 +2764,6 @@ pylv_img_set_auto_size(pylv_Obj *self, PyObject *args, PyObject *kwds)
 }
 
 static PyObject*
-pylv_img_set_style(pylv_Obj *self, PyObject *args, PyObject *kwds)
-{
-    static char *kwlist[] = {"style", NULL};
-    Style_Object * style;
-    if (!PyArg_ParseTupleAndKeywords(args, kwds, "O!", kwlist , &Style_Type, &style)) return NULL;
-
-    if (lock) lock(lock_arg);         
-    lv_img_set_style(self->ref, style->ref);
-    if (unlock) unlock(unlock_arg);
-    Py_RETURN_NONE;
-}
-
-static PyObject*
 pylv_img_set_upscale(pylv_Obj *self, PyObject *args, PyObject *kwds)
 {
     static char *kwlist[] = {"upcale", NULL};
@@ -2715,7 +2812,6 @@ static PyMethodDef pylv_img_methods[] = {
     {"set_src", (PyCFunction) pylv_img_set_src, METH_VARARGS | METH_KEYWORDS, NULL},
     {"set_file", (PyCFunction) pylv_img_set_file, METH_VARARGS | METH_KEYWORDS, NULL},
     {"set_auto_size", (PyCFunction) pylv_img_set_auto_size, METH_VARARGS | METH_KEYWORDS, NULL},
-    {"set_style", (PyCFunction) pylv_img_set_style, METH_VARARGS | METH_KEYWORDS, NULL},
     {"set_upscale", (PyCFunction) pylv_img_set_upscale, METH_VARARGS | METH_KEYWORDS, NULL},
     {"get_src_type", (PyCFunction) pylv_img_get_src_type, METH_VARARGS | METH_KEYWORDS, NULL},
     {"get_auto_size", (PyCFunction) pylv_img_get_auto_size, METH_VARARGS | METH_KEYWORDS, NULL},
@@ -2911,19 +3007,6 @@ pylv_line_set_y_invert(pylv_Obj *self, PyObject *args, PyObject *kwds)
 }
 
 static PyObject*
-pylv_line_set_style(pylv_Obj *self, PyObject *args, PyObject *kwds)
-{
-    static char *kwlist[] = {"style", NULL};
-    Style_Object * style;
-    if (!PyArg_ParseTupleAndKeywords(args, kwds, "O!", kwlist , &Style_Type, &style)) return NULL;
-
-    if (lock) lock(lock_arg);         
-    lv_line_set_style(self->ref, style->ref);
-    if (unlock) unlock(unlock_arg);
-    Py_RETURN_NONE;
-}
-
-static PyObject*
 pylv_line_set_upscale(pylv_Obj *self, PyObject *args, PyObject *kwds)
 {
     static char *kwlist[] = {"upcale", NULL};
@@ -2977,7 +3060,6 @@ static PyMethodDef pylv_line_methods[] = {
     {"set_points", (PyCFunction) pylv_line_set_points, METH_VARARGS | METH_KEYWORDS, NULL},
     {"set_auto_size", (PyCFunction) pylv_line_set_auto_size, METH_VARARGS | METH_KEYWORDS, NULL},
     {"set_y_invert", (PyCFunction) pylv_line_set_y_invert, METH_VARARGS | METH_KEYWORDS, NULL},
-    {"set_style", (PyCFunction) pylv_line_set_style, METH_VARARGS | METH_KEYWORDS, NULL},
     {"set_upscale", (PyCFunction) pylv_line_set_upscale, METH_VARARGS | METH_KEYWORDS, NULL},
     {"get_auto_size", (PyCFunction) pylv_line_get_auto_size, METH_VARARGS | METH_KEYWORDS, NULL},
     {"get_y_inv", (PyCFunction) pylv_line_get_y_inv, METH_VARARGS | METH_KEYWORDS, NULL},
@@ -3380,20 +3462,6 @@ pylv_gauge_set_value(pylv_Obj *self, PyObject *args, PyObject *kwds)
 }
 
 static PyObject*
-pylv_gauge_set_range(pylv_Obj *self, PyObject *args, PyObject *kwds)
-{
-    static char *kwlist[] = {"min", "max", NULL};
-    short int min;
-    short int max;
-    if (!PyArg_ParseTupleAndKeywords(args, kwds, "hh", kwlist , &min, &max)) return NULL;
-
-    if (lock) lock(lock_arg);         
-    lv_gauge_set_range(self->ref, min, max);
-    if (unlock) unlock(unlock_arg);
-    Py_RETURN_NONE;
-}
-
-static PyObject*
 pylv_gauge_set_critical_value(pylv_Obj *self, PyObject *args, PyObject *kwds)
 {
     static char *kwlist[] = {"value", NULL};
@@ -3421,36 +3489,12 @@ pylv_gauge_set_scale(pylv_Obj *self, PyObject *args, PyObject *kwds)
     Py_RETURN_NONE;
 }
 
-static PyObject*
-pylv_gauge_set_style(pylv_Obj *self, PyObject *args, PyObject *kwds)
-{
-    static char *kwlist[] = {"bg", NULL};
-    Style_Object * bg;
-    if (!PyArg_ParseTupleAndKeywords(args, kwds, "O!", kwlist , &Style_Type, &bg)) return NULL;
-
-    if (lock) lock(lock_arg);         
-    lv_gauge_set_style(self->ref, bg->ref);
-    if (unlock) unlock(unlock_arg);
-    Py_RETURN_NONE;
-}
-
-static PyObject*
-pylv_gauge_get_style(pylv_Obj *self, PyObject *args, PyObject *kwds)
-{
-    static char *kwlist[] = {NULL};
-    if (!PyArg_ParseTupleAndKeywords(args, kwds, "", kwlist )) return NULL;
-    return Style_From_lv_style(lv_gauge_get_style(self->ref));
-}
-
 
 static PyMethodDef pylv_gauge_methods[] = {
     {"set_needle_count", (PyCFunction) pylv_gauge_set_needle_count, METH_VARARGS | METH_KEYWORDS, NULL},
     {"set_value", (PyCFunction) pylv_gauge_set_value, METH_VARARGS | METH_KEYWORDS, NULL},
-    {"set_range", (PyCFunction) pylv_gauge_set_range, METH_VARARGS | METH_KEYWORDS, NULL},
     {"set_critical_value", (PyCFunction) pylv_gauge_set_critical_value, METH_VARARGS | METH_KEYWORDS, NULL},
     {"set_scale", (PyCFunction) pylv_gauge_set_scale, METH_VARARGS | METH_KEYWORDS, NULL},
-    {"set_style", (PyCFunction) pylv_gauge_set_style, METH_VARARGS | METH_KEYWORDS, NULL},
-    {"get_style", (PyCFunction) pylv_gauge_get_style, METH_VARARGS | METH_KEYWORDS, NULL},
     {NULL}  /* Sentinel */
 };
 
@@ -3494,6 +3538,102 @@ pylv_page_init(pylv_Page *self, PyObject *args, PyObject *kwds)
 }
 
 
+lv_res_t pylv_page_rel_action_callback(lv_obj_t* obj) {
+    pylv_Page *pyobj;
+    PyObject *handler;
+    pyobj = lv_obj_get_free_ptr(obj);
+    if (pyobj) {
+        handler = pyobj->rel_action;
+        if (handler) PyObject_CallFunctionObjArgs(handler, NULL);
+        if (PyErr_Occurred()) PyErr_Print();
+    }
+    return LV_RES_OK;
+}
+
+
+static PyObject *
+pylv_page_get_rel_action(pylv_Page *self, PyObject *args, PyObject *kwds)
+{
+    static char *kwlist[] = {NULL};
+    if (!PyArg_ParseTupleAndKeywords(args, kwds, "", kwlist)) return NULL;   
+    
+    PyObject *action = self->rel_action;
+    if (!action) Py_RETURN_NONE;
+
+    Py_INCREF(action);
+    return action;
+}
+
+static PyObject *
+pylv_page_set_rel_action(pylv_Page *self, PyObject *args, PyObject *kwds)
+{
+    static char *kwlist[] = {"action", NULL};
+    PyObject *action, *tmp;
+    if (!PyArg_ParseTupleAndKeywords(args, kwds, "O", kwlist , &action)) return NULL;
+    
+    tmp = self->rel_action;
+    if (action == Py_None) {
+        self->rel_action = NULL;
+    } else {
+        self->rel_action = action;
+        Py_INCREF(action);
+        lv_page_set_rel_action(self->ref, pylv_page_rel_action_callback);
+    }
+    Py_XDECREF(tmp); // Old action (tmp) could be NULL
+
+    Py_RETURN_NONE;
+}
+
+            
+
+lv_res_t pylv_page_pr_action_callback(lv_obj_t* obj) {
+    pylv_Page *pyobj;
+    PyObject *handler;
+    pyobj = lv_obj_get_free_ptr(obj);
+    if (pyobj) {
+        handler = pyobj->pr_action;
+        if (handler) PyObject_CallFunctionObjArgs(handler, NULL);
+        if (PyErr_Occurred()) PyErr_Print();
+    }
+    return LV_RES_OK;
+}
+
+
+static PyObject *
+pylv_page_get_pr_action(pylv_Page *self, PyObject *args, PyObject *kwds)
+{
+    static char *kwlist[] = {NULL};
+    if (!PyArg_ParseTupleAndKeywords(args, kwds, "", kwlist)) return NULL;   
+    
+    PyObject *action = self->pr_action;
+    if (!action) Py_RETURN_NONE;
+
+    Py_INCREF(action);
+    return action;
+}
+
+static PyObject *
+pylv_page_set_pr_action(pylv_Page *self, PyObject *args, PyObject *kwds)
+{
+    static char *kwlist[] = {"action", NULL};
+    PyObject *action, *tmp;
+    if (!PyArg_ParseTupleAndKeywords(args, kwds, "O", kwlist , &action)) return NULL;
+    
+    tmp = self->pr_action;
+    if (action == Py_None) {
+        self->pr_action = NULL;
+    } else {
+        self->pr_action = action;
+        Py_INCREF(action);
+        lv_page_set_pr_action(self->ref, pylv_page_pr_action_callback);
+    }
+    Py_XDECREF(tmp); // Old action (tmp) could be NULL
+
+    Py_RETURN_NONE;
+}
+
+            
+
 static PyObject*
 pylv_page_get_scrl(pylv_Obj *self, PyObject *args, PyObject *kwds)
 {
@@ -3507,20 +3647,6 @@ pylv_page_get_scrl(pylv_Obj *self, PyObject *args, PyObject *kwds)
     if (unlock) unlock(unlock_arg);
     
     return retobj;
-}
-
-static PyObject*
-pylv_page_set_rel_action(pylv_Obj *self, PyObject *args, PyObject *kwds)
-{
-    PyErr_SetString(PyExc_NotImplementedError, "not implemented");
-    return NULL;
-}
-
-static PyObject*
-pylv_page_set_pr_action(pylv_Obj *self, PyObject *args, PyObject *kwds)
-{
-    PyErr_SetString(PyExc_NotImplementedError, "not implemented");
-    return NULL;
 }
 
 static PyObject*
@@ -3878,19 +4004,6 @@ pylv_ta_set_one_line(pylv_Obj *self, PyObject *args, PyObject *kwds)
 }
 
 static PyObject*
-pylv_ta_set_sb_mode(pylv_Obj *self, PyObject *args, PyObject *kwds)
-{
-    static char *kwlist[] = {"mode", NULL};
-    int mode;
-    if (!PyArg_ParseTupleAndKeywords(args, kwds, "i", kwlist , &mode)) return NULL;
-
-    if (lock) lock(lock_arg);         
-    lv_ta_set_sb_mode(self->ref, mode);
-    if (unlock) unlock(unlock_arg);
-    Py_RETURN_NONE;
-}
-
-static PyObject*
 pylv_ta_set_style(pylv_Obj *self, PyObject *args, PyObject *kwds)
 {
     static char *kwlist[] = {"type", "style", NULL};
@@ -3953,18 +4066,6 @@ pylv_ta_get_one_line(pylv_Obj *self, PyObject *args, PyObject *kwds)
     int result = lv_ta_get_one_line(self->ref);
     if (unlock) unlock(unlock_arg);
     if (result) {Py_RETURN_TRUE;} else {Py_RETURN_FALSE;}
-}
-
-static PyObject*
-pylv_ta_get_sb_mode(pylv_Obj *self, PyObject *args, PyObject *kwds)
-{
-    static char *kwlist[] = {NULL};
-    if (!PyArg_ParseTupleAndKeywords(args, kwds, "", kwlist )) return NULL;
-
-    if (lock) lock(lock_arg);         
-    int result = lv_ta_get_sb_mode(self->ref);
-    if (unlock) unlock(unlock_arg);
-    return Py_BuildValue("i", result);
 }
 
 static PyObject*
@@ -4034,13 +4135,11 @@ static PyMethodDef pylv_ta_methods[] = {
     {"set_cursor_type", (PyCFunction) pylv_ta_set_cursor_type, METH_VARARGS | METH_KEYWORDS, NULL},
     {"set_pwd_mode", (PyCFunction) pylv_ta_set_pwd_mode, METH_VARARGS | METH_KEYWORDS, NULL},
     {"set_one_line", (PyCFunction) pylv_ta_set_one_line, METH_VARARGS | METH_KEYWORDS, NULL},
-    {"set_sb_mode", (PyCFunction) pylv_ta_set_sb_mode, METH_VARARGS | METH_KEYWORDS, NULL},
     {"set_style", (PyCFunction) pylv_ta_set_style, METH_VARARGS | METH_KEYWORDS, NULL},
     {"get_label", (PyCFunction) pylv_ta_get_label, METH_VARARGS | METH_KEYWORDS, NULL},
     {"get_cursor_type", (PyCFunction) pylv_ta_get_cursor_type, METH_VARARGS | METH_KEYWORDS, NULL},
     {"get_pwd_mode", (PyCFunction) pylv_ta_get_pwd_mode, METH_VARARGS | METH_KEYWORDS, NULL},
     {"get_one_line", (PyCFunction) pylv_ta_get_one_line, METH_VARARGS | METH_KEYWORDS, NULL},
-    {"get_sb_mode", (PyCFunction) pylv_ta_get_sb_mode, METH_VARARGS | METH_KEYWORDS, NULL},
     {"get_style", (PyCFunction) pylv_ta_get_style, METH_VARARGS | METH_KEYWORDS, NULL},
     {"cursor_right", (PyCFunction) pylv_ta_cursor_right, METH_VARARGS | METH_KEYWORDS, NULL},
     {"cursor_left", (PyCFunction) pylv_ta_cursor_left, METH_VARARGS | METH_KEYWORDS, NULL},
@@ -4128,40 +4227,6 @@ pylv_btn_toggle(pylv_Obj *self, PyObject *args, PyObject *kwds)
 }
 
 static PyObject*
-pylv_btn_set_action(pylv_Obj *self, PyObject *args, PyObject *kwds)
-{
-    PyErr_SetString(PyExc_NotImplementedError, "not implemented");
-    return NULL;
-}
-
-static PyObject*
-pylv_btn_set_layout(pylv_Obj *self, PyObject *args, PyObject *kwds)
-{
-    static char *kwlist[] = {"layout", NULL};
-    int layout;
-    if (!PyArg_ParseTupleAndKeywords(args, kwds, "i", kwlist , &layout)) return NULL;
-
-    if (lock) lock(lock_arg);         
-    lv_btn_set_layout(self->ref, layout);
-    if (unlock) unlock(unlock_arg);
-    Py_RETURN_NONE;
-}
-
-static PyObject*
-pylv_btn_set_fit(pylv_Obj *self, PyObject *args, PyObject *kwds)
-{
-    static char *kwlist[] = {"hor_en", "ver_en", NULL};
-    int hor_en;
-    int ver_en;
-    if (!PyArg_ParseTupleAndKeywords(args, kwds, "pp", kwlist , &hor_en, &ver_en)) return NULL;
-
-    if (lock) lock(lock_arg);         
-    lv_btn_set_fit(self->ref, hor_en, ver_en);
-    if (unlock) unlock(unlock_arg);
-    Py_RETURN_NONE;
-}
-
-static PyObject*
 pylv_btn_set_style(pylv_Obj *self, PyObject *args, PyObject *kwds)
 {
     static char *kwlist[] = {"type", "style", NULL};
@@ -4200,49 +4265,6 @@ pylv_btn_get_toggle(pylv_Obj *self, PyObject *args, PyObject *kwds)
 }
 
 static PyObject*
-pylv_btn_get_action(pylv_Obj *self, PyObject *args, PyObject *kwds)
-{
-    PyErr_SetString(PyExc_NotImplementedError, "not implemented");
-    return NULL;
-}
-
-static PyObject*
-pylv_btn_get_layout(pylv_Obj *self, PyObject *args, PyObject *kwds)
-{
-    static char *kwlist[] = {NULL};
-    if (!PyArg_ParseTupleAndKeywords(args, kwds, "", kwlist )) return NULL;
-
-    if (lock) lock(lock_arg);         
-    int result = lv_btn_get_layout(self->ref);
-    if (unlock) unlock(unlock_arg);
-    return Py_BuildValue("i", result);
-}
-
-static PyObject*
-pylv_btn_get_hor_fit(pylv_Obj *self, PyObject *args, PyObject *kwds)
-{
-    static char *kwlist[] = {NULL};
-    if (!PyArg_ParseTupleAndKeywords(args, kwds, "", kwlist )) return NULL;
-
-    if (lock) lock(lock_arg);         
-    int result = lv_btn_get_hor_fit(self->ref);
-    if (unlock) unlock(unlock_arg);
-    if (result) {Py_RETURN_TRUE;} else {Py_RETURN_FALSE;}
-}
-
-static PyObject*
-pylv_btn_get_ver_fit(pylv_Obj *self, PyObject *args, PyObject *kwds)
-{
-    static char *kwlist[] = {NULL};
-    if (!PyArg_ParseTupleAndKeywords(args, kwds, "", kwlist )) return NULL;
-
-    if (lock) lock(lock_arg);         
-    int result = lv_btn_get_ver_fit(self->ref);
-    if (unlock) unlock(unlock_arg);
-    if (result) {Py_RETURN_TRUE;} else {Py_RETURN_FALSE;}
-}
-
-static PyObject*
 pylv_btn_get_style(pylv_Obj *self, PyObject *args, PyObject *kwds)
 {
     static char *kwlist[] = {"type", NULL};
@@ -4257,15 +4279,10 @@ static PyMethodDef pylv_btn_methods[] = {
     {"set_state", (PyCFunction) pylv_btn_set_state, METH_VARARGS | METH_KEYWORDS, NULL},
     {"toggle", (PyCFunction) pylv_btn_toggle, METH_VARARGS | METH_KEYWORDS, NULL},
     {"set_action", (PyCFunction) pylv_btn_set_action, METH_VARARGS | METH_KEYWORDS, NULL},
-    {"set_layout", (PyCFunction) pylv_btn_set_layout, METH_VARARGS | METH_KEYWORDS, NULL},
-    {"set_fit", (PyCFunction) pylv_btn_set_fit, METH_VARARGS | METH_KEYWORDS, NULL},
     {"set_style", (PyCFunction) pylv_btn_set_style, METH_VARARGS | METH_KEYWORDS, NULL},
     {"get_state", (PyCFunction) pylv_btn_get_state, METH_VARARGS | METH_KEYWORDS, NULL},
     {"get_toggle", (PyCFunction) pylv_btn_get_toggle, METH_VARARGS | METH_KEYWORDS, NULL},
     {"get_action", (PyCFunction) pylv_btn_get_action, METH_VARARGS | METH_KEYWORDS, NULL},
-    {"get_layout", (PyCFunction) pylv_btn_get_layout, METH_VARARGS | METH_KEYWORDS, NULL},
-    {"get_hor_fit", (PyCFunction) pylv_btn_get_hor_fit, METH_VARARGS | METH_KEYWORDS, NULL},
-    {"get_ver_fit", (PyCFunction) pylv_btn_get_ver_fit, METH_VARARGS | METH_KEYWORDS, NULL},
     {"get_style", (PyCFunction) pylv_btn_get_style, METH_VARARGS | METH_KEYWORDS, NULL},
     {NULL}  /* Sentinel */
 };
@@ -4310,6 +4327,54 @@ pylv_ddlist_init(pylv_Ddlist *self, PyObject *args, PyObject *kwds)
 }
 
 
+lv_res_t pylv_ddlist_action_callback(lv_obj_t* obj) {
+    pylv_Ddlist *pyobj;
+    PyObject *handler;
+    pyobj = lv_obj_get_free_ptr(obj);
+    if (pyobj) {
+        handler = pyobj->action;
+        if (handler) PyObject_CallFunctionObjArgs(handler, NULL);
+        if (PyErr_Occurred()) PyErr_Print();
+    }
+    return LV_RES_OK;
+}
+
+
+static PyObject *
+pylv_ddlist_get_action(pylv_Ddlist *self, PyObject *args, PyObject *kwds)
+{
+    static char *kwlist[] = {NULL};
+    if (!PyArg_ParseTupleAndKeywords(args, kwds, "", kwlist)) return NULL;   
+    
+    PyObject *action = self->action;
+    if (!action) Py_RETURN_NONE;
+
+    Py_INCREF(action);
+    return action;
+}
+
+static PyObject *
+pylv_ddlist_set_action(pylv_Ddlist *self, PyObject *args, PyObject *kwds)
+{
+    static char *kwlist[] = {"action", NULL};
+    PyObject *action, *tmp;
+    if (!PyArg_ParseTupleAndKeywords(args, kwds, "O", kwlist , &action)) return NULL;
+    
+    tmp = self->action;
+    if (action == Py_None) {
+        self->action = NULL;
+    } else {
+        self->action = action;
+        Py_INCREF(action);
+        lv_ddlist_set_action(self->ref, pylv_ddlist_action_callback);
+    }
+    Py_XDECREF(tmp); // Old action (tmp) could be NULL
+
+    Py_RETURN_NONE;
+}
+
+            
+
 static PyObject*
 pylv_ddlist_set_options(pylv_Obj *self, PyObject *args, PyObject *kwds)
 {
@@ -4337,13 +4402,6 @@ pylv_ddlist_set_selected(pylv_Obj *self, PyObject *args, PyObject *kwds)
 }
 
 static PyObject*
-pylv_ddlist_set_action(pylv_Obj *self, PyObject *args, PyObject *kwds)
-{
-    PyErr_SetString(PyExc_NotImplementedError, "not implemented");
-    return NULL;
-}
-
-static PyObject*
 pylv_ddlist_set_fix_height(pylv_Obj *self, PyObject *args, PyObject *kwds)
 {
     static char *kwlist[] = {"h", NULL};
@@ -4365,19 +4423,6 @@ pylv_ddlist_set_hor_fit(pylv_Obj *self, PyObject *args, PyObject *kwds)
 
     if (lock) lock(lock_arg);         
     lv_ddlist_set_hor_fit(self->ref, fit_en);
-    if (unlock) unlock(unlock_arg);
-    Py_RETURN_NONE;
-}
-
-static PyObject*
-pylv_ddlist_set_sb_mode(pylv_Obj *self, PyObject *args, PyObject *kwds)
-{
-    static char *kwlist[] = {"mode", NULL};
-    int mode;
-    if (!PyArg_ParseTupleAndKeywords(args, kwds, "i", kwlist , &mode)) return NULL;
-
-    if (lock) lock(lock_arg);         
-    lv_ddlist_set_sb_mode(self->ref, mode);
     if (unlock) unlock(unlock_arg);
     Py_RETURN_NONE;
 }
@@ -4423,13 +4468,6 @@ pylv_ddlist_get_selected_str(pylv_Obj *self, PyObject *args, PyObject *kwds)
 }
 
 static PyObject*
-pylv_ddlist_get_action(pylv_Obj *self, PyObject *args, PyObject *kwds)
-{
-    PyErr_SetString(PyExc_NotImplementedError, "not implemented");
-    return NULL;
-}
-
-static PyObject*
 pylv_ddlist_get_fix_height(pylv_Obj *self, PyObject *args, PyObject *kwds)
 {
     static char *kwlist[] = {NULL};
@@ -4439,18 +4477,6 @@ pylv_ddlist_get_fix_height(pylv_Obj *self, PyObject *args, PyObject *kwds)
     short int result = lv_ddlist_get_fix_height(self->ref);
     if (unlock) unlock(unlock_arg);
     return Py_BuildValue("h", result);
-}
-
-static PyObject*
-pylv_ddlist_get_sb_mode(pylv_Obj *self, PyObject *args, PyObject *kwds)
-{
-    static char *kwlist[] = {NULL};
-    if (!PyArg_ParseTupleAndKeywords(args, kwds, "", kwlist )) return NULL;
-
-    if (lock) lock(lock_arg);         
-    int result = lv_ddlist_get_sb_mode(self->ref);
-    if (unlock) unlock(unlock_arg);
-    return Py_BuildValue("i", result);
 }
 
 static PyObject*
@@ -4482,13 +4508,11 @@ static PyMethodDef pylv_ddlist_methods[] = {
     {"set_action", (PyCFunction) pylv_ddlist_set_action, METH_VARARGS | METH_KEYWORDS, NULL},
     {"set_fix_height", (PyCFunction) pylv_ddlist_set_fix_height, METH_VARARGS | METH_KEYWORDS, NULL},
     {"set_hor_fit", (PyCFunction) pylv_ddlist_set_hor_fit, METH_VARARGS | METH_KEYWORDS, NULL},
-    {"set_sb_mode", (PyCFunction) pylv_ddlist_set_sb_mode, METH_VARARGS | METH_KEYWORDS, NULL},
     {"set_anim_time", (PyCFunction) pylv_ddlist_set_anim_time, METH_VARARGS | METH_KEYWORDS, NULL},
     {"set_style", (PyCFunction) pylv_ddlist_set_style, METH_VARARGS | METH_KEYWORDS, NULL},
     {"get_selected_str", (PyCFunction) pylv_ddlist_get_selected_str, METH_VARARGS | METH_KEYWORDS, NULL},
     {"get_action", (PyCFunction) pylv_ddlist_get_action, METH_VARARGS | METH_KEYWORDS, NULL},
     {"get_fix_height", (PyCFunction) pylv_ddlist_get_fix_height, METH_VARARGS | METH_KEYWORDS, NULL},
-    {"get_sb_mode", (PyCFunction) pylv_ddlist_get_sb_mode, METH_VARARGS | METH_KEYWORDS, NULL},
     {"get_style", (PyCFunction) pylv_ddlist_get_style, METH_VARARGS | METH_KEYWORDS, NULL},
     {"open", (PyCFunction) pylv_ddlist_open, METH_VARARGS | METH_KEYWORDS, NULL},
     {NULL}  /* Sentinel */
@@ -4548,19 +4572,6 @@ pylv_list_set_anim_time(pylv_Obj *self, PyObject *args, PyObject *kwds)
 }
 
 static PyObject*
-pylv_list_set_sb_mode(pylv_Obj *self, PyObject *args, PyObject *kwds)
-{
-    static char *kwlist[] = {"mode", NULL};
-    int mode;
-    if (!PyArg_ParseTupleAndKeywords(args, kwds, "i", kwlist , &mode)) return NULL;
-
-    if (lock) lock(lock_arg);         
-    lv_list_set_sb_mode(self->ref, mode);
-    if (unlock) unlock(unlock_arg);
-    Py_RETURN_NONE;
-}
-
-static PyObject*
 pylv_list_set_style(pylv_Obj *self, PyObject *args, PyObject *kwds)
 {
     static char *kwlist[] = {"type", "style", NULL};
@@ -4602,18 +4613,6 @@ pylv_list_get_btn_img(pylv_Obj *self, PyObject *args, PyObject *kwds)
     if (unlock) unlock(unlock_arg);
     
     return retobj;
-}
-
-static PyObject*
-pylv_list_get_sb_mode(pylv_Obj *self, PyObject *args, PyObject *kwds)
-{
-    static char *kwlist[] = {NULL};
-    if (!PyArg_ParseTupleAndKeywords(args, kwds, "", kwlist )) return NULL;
-
-    if (lock) lock(lock_arg);         
-    int result = lv_list_get_sb_mode(self->ref);
-    if (unlock) unlock(unlock_arg);
-    return Py_BuildValue("i", result);
 }
 
 static PyObject*
@@ -4666,11 +4665,9 @@ pylv_list_focus(pylv_Obj *self, PyObject *args, PyObject *kwds)
 static PyMethodDef pylv_list_methods[] = {
     {"add", (PyCFunction) pylv_list_add, METH_VARARGS | METH_KEYWORDS, NULL},
     {"set_anim_time", (PyCFunction) pylv_list_set_anim_time, METH_VARARGS | METH_KEYWORDS, NULL},
-    {"set_sb_mode", (PyCFunction) pylv_list_set_sb_mode, METH_VARARGS | METH_KEYWORDS, NULL},
     {"set_style", (PyCFunction) pylv_list_set_style, METH_VARARGS | METH_KEYWORDS, NULL},
     {"get_btn_label", (PyCFunction) pylv_list_get_btn_label, METH_VARARGS | METH_KEYWORDS, NULL},
     {"get_btn_img", (PyCFunction) pylv_list_get_btn_img, METH_VARARGS | METH_KEYWORDS, NULL},
-    {"get_sb_mode", (PyCFunction) pylv_list_get_sb_mode, METH_VARARGS | METH_KEYWORDS, NULL},
     {"get_style", (PyCFunction) pylv_list_get_style, METH_VARARGS | METH_KEYWORDS, NULL},
     {"up", (PyCFunction) pylv_list_up, METH_VARARGS | METH_KEYWORDS, NULL},
     {"down", (PyCFunction) pylv_list_down, METH_VARARGS | METH_KEYWORDS, NULL},
@@ -4718,53 +4715,53 @@ pylv_slider_init(pylv_Slider *self, PyObject *args, PyObject *kwds)
 }
 
 
-static PyObject*
-pylv_slider_set_value(pylv_Obj *self, PyObject *args, PyObject *kwds)
-{
-    static char *kwlist[] = {"value", NULL};
-    short int value;
-    if (!PyArg_ParseTupleAndKeywords(args, kwds, "h", kwlist , &value)) return NULL;
+lv_res_t pylv_slider_action_callback(lv_obj_t* obj) {
+    pylv_Slider *pyobj;
+    PyObject *handler;
+    pyobj = lv_obj_get_free_ptr(obj);
+    if (pyobj) {
+        handler = pyobj->action;
+        if (handler) PyObject_CallFunctionObjArgs(handler, NULL);
+        if (PyErr_Occurred()) PyErr_Print();
+    }
+    return LV_RES_OK;
+}
 
-    if (lock) lock(lock_arg);         
-    lv_slider_set_value(self->ref, value);
-    if (unlock) unlock(unlock_arg);
+
+static PyObject *
+pylv_slider_get_action(pylv_Slider *self, PyObject *args, PyObject *kwds)
+{
+    static char *kwlist[] = {NULL};
+    if (!PyArg_ParseTupleAndKeywords(args, kwds, "", kwlist)) return NULL;   
+    
+    PyObject *action = self->action;
+    if (!action) Py_RETURN_NONE;
+
+    Py_INCREF(action);
+    return action;
+}
+
+static PyObject *
+pylv_slider_set_action(pylv_Slider *self, PyObject *args, PyObject *kwds)
+{
+    static char *kwlist[] = {"action", NULL};
+    PyObject *action, *tmp;
+    if (!PyArg_ParseTupleAndKeywords(args, kwds, "O", kwlist , &action)) return NULL;
+    
+    tmp = self->action;
+    if (action == Py_None) {
+        self->action = NULL;
+    } else {
+        self->action = action;
+        Py_INCREF(action);
+        lv_slider_set_action(self->ref, pylv_slider_action_callback);
+    }
+    Py_XDECREF(tmp); // Old action (tmp) could be NULL
+
     Py_RETURN_NONE;
 }
 
-static PyObject*
-pylv_slider_set_value_anim(pylv_Obj *self, PyObject *args, PyObject *kwds)
-{
-    static char *kwlist[] = {"value", "anim_time", NULL};
-    short int value;
-    unsigned short int anim_time;
-    if (!PyArg_ParseTupleAndKeywords(args, kwds, "hH", kwlist , &value, &anim_time)) return NULL;
-
-    if (lock) lock(lock_arg);         
-    lv_slider_set_value_anim(self->ref, value, anim_time);
-    if (unlock) unlock(unlock_arg);
-    Py_RETURN_NONE;
-}
-
-static PyObject*
-pylv_slider_set_range(pylv_Obj *self, PyObject *args, PyObject *kwds)
-{
-    static char *kwlist[] = {"min", "max", NULL};
-    short int min;
-    short int max;
-    if (!PyArg_ParseTupleAndKeywords(args, kwds, "hh", kwlist , &min, &max)) return NULL;
-
-    if (lock) lock(lock_arg);         
-    lv_slider_set_range(self->ref, min, max);
-    if (unlock) unlock(unlock_arg);
-    Py_RETURN_NONE;
-}
-
-static PyObject*
-pylv_slider_set_action(pylv_Obj *self, PyObject *args, PyObject *kwds)
-{
-    PyErr_SetString(PyExc_NotImplementedError, "not implemented");
-    return NULL;
-}
+            
 
 static PyObject*
 pylv_slider_set_knob_in(pylv_Obj *self, PyObject *args, PyObject *kwds)
@@ -4791,13 +4788,6 @@ pylv_slider_set_style(pylv_Obj *self, PyObject *args, PyObject *kwds)
     lv_slider_set_style(self->ref, type, style->ref);
     if (unlock) unlock(unlock_arg);
     Py_RETURN_NONE;
-}
-
-static PyObject*
-pylv_slider_get_action(pylv_Obj *self, PyObject *args, PyObject *kwds)
-{
-    PyErr_SetString(PyExc_NotImplementedError, "not implemented");
-    return NULL;
 }
 
 static PyObject*
@@ -4835,9 +4825,6 @@ pylv_slider_get_style(pylv_Obj *self, PyObject *args, PyObject *kwds)
 
 
 static PyMethodDef pylv_slider_methods[] = {
-    {"set_value", (PyCFunction) pylv_slider_set_value, METH_VARARGS | METH_KEYWORDS, NULL},
-    {"set_value_anim", (PyCFunction) pylv_slider_set_value_anim, METH_VARARGS | METH_KEYWORDS, NULL},
-    {"set_range", (PyCFunction) pylv_slider_set_range, METH_VARARGS | METH_KEYWORDS, NULL},
     {"set_action", (PyCFunction) pylv_slider_set_action, METH_VARARGS | METH_KEYWORDS, NULL},
     {"set_knob_in", (PyCFunction) pylv_slider_set_knob_in, METH_VARARGS | METH_KEYWORDS, NULL},
     {"set_style", (PyCFunction) pylv_slider_set_style, METH_VARARGS | METH_KEYWORDS, NULL},
@@ -4913,13 +4900,6 @@ pylv_sw_off(pylv_Obj *self, PyObject *args, PyObject *kwds)
 }
 
 static PyObject*
-pylv_sw_set_action(pylv_Obj *self, PyObject *args, PyObject *kwds)
-{
-    PyErr_SetString(PyExc_NotImplementedError, "not implemented");
-    return NULL;
-}
-
-static PyObject*
 pylv_sw_set_style(pylv_Obj *self, PyObject *args, PyObject *kwds)
 {
     static char *kwlist[] = {"type", "style", NULL};
@@ -4946,13 +4926,6 @@ pylv_sw_get_state(pylv_Obj *self, PyObject *args, PyObject *kwds)
 }
 
 static PyObject*
-pylv_sw_get_action(pylv_Obj *self, PyObject *args, PyObject *kwds)
-{
-    PyErr_SetString(PyExc_NotImplementedError, "not implemented");
-    return NULL;
-}
-
-static PyObject*
 pylv_sw_get_style(pylv_Obj *self, PyObject *args, PyObject *kwds)
 {
     static char *kwlist[] = {"type", NULL};
@@ -4965,10 +4938,8 @@ pylv_sw_get_style(pylv_Obj *self, PyObject *args, PyObject *kwds)
 static PyMethodDef pylv_sw_methods[] = {
     {"on", (PyCFunction) pylv_sw_on, METH_VARARGS | METH_KEYWORDS, NULL},
     {"off", (PyCFunction) pylv_sw_off, METH_VARARGS | METH_KEYWORDS, NULL},
-    {"set_action", (PyCFunction) pylv_sw_set_action, METH_VARARGS | METH_KEYWORDS, NULL},
     {"set_style", (PyCFunction) pylv_sw_set_style, METH_VARARGS | METH_KEYWORDS, NULL},
     {"get_state", (PyCFunction) pylv_sw_get_state, METH_VARARGS | METH_KEYWORDS, NULL},
-    {"get_action", (PyCFunction) pylv_sw_get_action, METH_VARARGS | METH_KEYWORDS, NULL},
     {"get_style", (PyCFunction) pylv_sw_get_style, METH_VARARGS | METH_KEYWORDS, NULL},
     {NULL}  /* Sentinel */
 };
@@ -5013,6 +4984,54 @@ pylv_cb_init(pylv_Cb *self, PyObject *args, PyObject *kwds)
 }
 
 
+lv_res_t pylv_cb_action_callback(lv_obj_t* obj) {
+    pylv_Cb *pyobj;
+    PyObject *handler;
+    pyobj = lv_obj_get_free_ptr(obj);
+    if (pyobj) {
+        handler = pyobj->action;
+        if (handler) PyObject_CallFunctionObjArgs(handler, NULL);
+        if (PyErr_Occurred()) PyErr_Print();
+    }
+    return LV_RES_OK;
+}
+
+
+static PyObject *
+pylv_cb_get_action(pylv_Cb *self, PyObject *args, PyObject *kwds)
+{
+    static char *kwlist[] = {NULL};
+    if (!PyArg_ParseTupleAndKeywords(args, kwds, "", kwlist)) return NULL;   
+    
+    PyObject *action = self->action;
+    if (!action) Py_RETURN_NONE;
+
+    Py_INCREF(action);
+    return action;
+}
+
+static PyObject *
+pylv_cb_set_action(pylv_Cb *self, PyObject *args, PyObject *kwds)
+{
+    static char *kwlist[] = {"action", NULL};
+    PyObject *action, *tmp;
+    if (!PyArg_ParseTupleAndKeywords(args, kwds, "O", kwlist , &action)) return NULL;
+    
+    tmp = self->action;
+    if (action == Py_None) {
+        self->action = NULL;
+    } else {
+        self->action = action;
+        Py_INCREF(action);
+        lv_cb_set_action(self->ref, pylv_cb_action_callback);
+    }
+    Py_XDECREF(tmp); // Old action (tmp) could be NULL
+
+    Py_RETURN_NONE;
+}
+
+            
+
 static PyObject*
 pylv_cb_set_text(pylv_Obj *self, PyObject *args, PyObject *kwds)
 {
@@ -5052,13 +5071,6 @@ pylv_cb_set_inactive(pylv_Obj *self, PyObject *args, PyObject *kwds)
 }
 
 static PyObject*
-pylv_cb_set_action(pylv_Obj *self, PyObject *args, PyObject *kwds)
-{
-    PyErr_SetString(PyExc_NotImplementedError, "not implemented");
-    return NULL;
-}
-
-static PyObject*
 pylv_cb_set_style(pylv_Obj *self, PyObject *args, PyObject *kwds)
 {
     static char *kwlist[] = {"type", "style", NULL};
@@ -5082,13 +5094,6 @@ pylv_cb_is_checked(pylv_Obj *self, PyObject *args, PyObject *kwds)
     int result = lv_cb_is_checked(self->ref);
     if (unlock) unlock(unlock_arg);
     if (result) {Py_RETURN_TRUE;} else {Py_RETURN_FALSE;}
-}
-
-static PyObject*
-pylv_cb_get_action(pylv_Obj *self, PyObject *args, PyObject *kwds)
-{
-    PyErr_SetString(PyExc_NotImplementedError, "not implemented");
-    return NULL;
 }
 
 static PyObject*
@@ -5154,19 +5159,6 @@ pylv_roller_init(pylv_Roller *self, PyObject *args, PyObject *kwds)
 
 
 static PyObject*
-pylv_roller_set_options(pylv_Obj *self, PyObject *args, PyObject *kwds)
-{
-    static char *kwlist[] = {"options", NULL};
-    char * options;
-    if (!PyArg_ParseTupleAndKeywords(args, kwds, "s", kwlist , &options)) return NULL;
-
-    if (lock) lock(lock_arg);         
-    lv_roller_set_options(self->ref, options);
-    if (unlock) unlock(unlock_arg);
-    Py_RETURN_NONE;
-}
-
-static PyObject*
 pylv_roller_set_selected(pylv_Obj *self, PyObject *args, PyObject *kwds)
 {
     static char *kwlist[] = {"sel_opt", "anim_en", NULL};
@@ -5178,13 +5170,6 @@ pylv_roller_set_selected(pylv_Obj *self, PyObject *args, PyObject *kwds)
     lv_roller_set_selected(self->ref, sel_opt, anim_en);
     if (unlock) unlock(unlock_arg);
     Py_RETURN_NONE;
-}
-
-static PyObject*
-pylv_roller_set_action(pylv_Obj *self, PyObject *args, PyObject *kwds)
-{
-    PyErr_SetString(PyExc_NotImplementedError, "not implemented");
-    return NULL;
 }
 
 static PyObject*
@@ -5201,32 +5186,6 @@ pylv_roller_set_visible_row_count(pylv_Obj *self, PyObject *args, PyObject *kwds
 }
 
 static PyObject*
-pylv_roller_set_hor_fit(pylv_Obj *self, PyObject *args, PyObject *kwds)
-{
-    static char *kwlist[] = {"fit_en", NULL};
-    int fit_en;
-    if (!PyArg_ParseTupleAndKeywords(args, kwds, "p", kwlist , &fit_en)) return NULL;
-
-    if (lock) lock(lock_arg);         
-    lv_roller_set_hor_fit(self->ref, fit_en);
-    if (unlock) unlock(unlock_arg);
-    Py_RETURN_NONE;
-}
-
-static PyObject*
-pylv_roller_set_anim_time(pylv_Obj *self, PyObject *args, PyObject *kwds)
-{
-    static char *kwlist[] = {"anim_time", NULL};
-    unsigned short int anim_time;
-    if (!PyArg_ParseTupleAndKeywords(args, kwds, "H", kwlist , &anim_time)) return NULL;
-
-    if (lock) lock(lock_arg);         
-    lv_roller_set_anim_time(self->ref, anim_time);
-    if (unlock) unlock(unlock_arg);
-    Py_RETURN_NONE;
-}
-
-static PyObject*
 pylv_roller_set_style(pylv_Obj *self, PyObject *args, PyObject *kwds)
 {
     static char *kwlist[] = {"type", "style", NULL};
@@ -5238,26 +5197,6 @@ pylv_roller_set_style(pylv_Obj *self, PyObject *args, PyObject *kwds)
     lv_roller_set_style(self->ref, type, style->ref);
     if (unlock) unlock(unlock_arg);
     Py_RETURN_NONE;
-}
-
-static PyObject*
-pylv_roller_get_selected_str(pylv_Obj *self, PyObject *args, PyObject *kwds)
-{
-    static char *kwlist[] = {"buf", NULL};
-    char * buf;
-    if (!PyArg_ParseTupleAndKeywords(args, kwds, "s", kwlist , &buf)) return NULL;
-
-    if (lock) lock(lock_arg);         
-    lv_roller_get_selected_str(self->ref, buf);
-    if (unlock) unlock(unlock_arg);
-    Py_RETURN_NONE;
-}
-
-static PyObject*
-pylv_roller_get_action(pylv_Obj *self, PyObject *args, PyObject *kwds)
-{
-    PyErr_SetString(PyExc_NotImplementedError, "not implemented");
-    return NULL;
 }
 
 static PyObject*
@@ -5283,15 +5222,9 @@ pylv_roller_get_style(pylv_Obj *self, PyObject *args, PyObject *kwds)
 
 
 static PyMethodDef pylv_roller_methods[] = {
-    {"set_options", (PyCFunction) pylv_roller_set_options, METH_VARARGS | METH_KEYWORDS, NULL},
     {"set_selected", (PyCFunction) pylv_roller_set_selected, METH_VARARGS | METH_KEYWORDS, NULL},
-    {"set_action", (PyCFunction) pylv_roller_set_action, METH_VARARGS | METH_KEYWORDS, NULL},
     {"set_visible_row_count", (PyCFunction) pylv_roller_set_visible_row_count, METH_VARARGS | METH_KEYWORDS, NULL},
-    {"set_hor_fit", (PyCFunction) pylv_roller_set_hor_fit, METH_VARARGS | METH_KEYWORDS, NULL},
-    {"set_anim_time", (PyCFunction) pylv_roller_set_anim_time, METH_VARARGS | METH_KEYWORDS, NULL},
     {"set_style", (PyCFunction) pylv_roller_set_style, METH_VARARGS | METH_KEYWORDS, NULL},
-    {"get_selected_str", (PyCFunction) pylv_roller_get_selected_str, METH_VARARGS | METH_KEYWORDS, NULL},
-    {"get_action", (PyCFunction) pylv_roller_get_action, METH_VARARGS | METH_KEYWORDS, NULL},
     {"get_hor_fit", (PyCFunction) pylv_roller_get_hor_fit, METH_VARARGS | METH_KEYWORDS, NULL},
     {"get_style", (PyCFunction) pylv_roller_get_style, METH_VARARGS | METH_KEYWORDS, NULL},
     {NULL}  /* Sentinel */

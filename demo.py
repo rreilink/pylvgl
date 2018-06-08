@@ -18,6 +18,7 @@ class LvglWindow(QtWidgets.QLabel):
     def mouseReleaseEvent(self, evt):
         self.mouseMoveEvent(evt)
     def mouseMoveEvent(self, evt):
+        print(evt.buttons() & QtCore.Qt.LeftButton)
         pos = evt.pos()
         lvgl.send_mouse_event(pos.x(), pos.y(), evt.buttons() & QtCore.Qt.LeftButton)
     def update(self):
@@ -121,7 +122,17 @@ class MainMenu(lvgl.Obj):
         
         
 s3 = MainMenu()
+
+s4 = lvgl.Obj()
+kb = lvgl.Kb(s4)
 lvgl.scr_load(s3)
+
+s3.btnPrint.set_action(lvgl.BTN_ACTION_CLICK, lambda: print('click'))
+s3.btnPrint.set_action(lvgl.BTN_ACTION_PR, lambda: print('press'))
+s3.btnPrint.set_action(lvgl.BTN_ACTION_LONG_PR, lambda: print('long press'))
+s3.btnPrint.set_action(lvgl.BTN_ACTION_LONG_PR_REPEAT, lambda: print('long press repeat'))
+
+
 
 app.exec_()
 
