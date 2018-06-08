@@ -216,7 +216,7 @@ for function in functions.values():
 #
 # Mark which functions have a custom implementation (in lvglmodule_template.c)
 #
-for custom in ('lv_obj_get_children', 'lv_btnm_set_map', 'lv_list_add', 'lv_btn_set_action', 'lv_btn_get_action'):
+for custom in ('lv_obj_get_children', 'lv_btnm_set_map', 'lv_list_add', 'lv_btn_set_action', 'lv_btn_get_action','lv_obj_get_type'):
     functions[custom] = FunctionDef(custom, None, [], None, True)
 
 

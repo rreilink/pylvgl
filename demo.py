@@ -18,7 +18,6 @@ class LvglWindow(QtWidgets.QLabel):
     def mouseReleaseEvent(self, evt):
         self.mouseMoveEvent(evt)
     def mouseMoveEvent(self, evt):
-        print(evt.buttons() & QtCore.Qt.LeftButton)
         pos = evt.pos()
         lvgl.send_mouse_event(pos.x(), pos.y(), evt.buttons() & QtCore.Qt.LeftButton)
     def update(self):
@@ -49,6 +48,7 @@ s1 = lvgl.Slider(lvgl.scr_act())
 s1.align(b1, lvgl.ALIGN_OUT_BOTTOM_MID, 0, 10)
 
 s1 = lvgl.scr_act()
+
 s2 = lvgl.Obj()
 lst = lvgl.List(s2)
 lst.set_width(320)
@@ -125,18 +125,14 @@ s3 = MainMenu()
 
 s4 = lvgl.Obj()
 kb = lvgl.Kb(s4)
-lvgl.scr_load(s3)
+lvgl.scr_load(s2)
 
 s3.btnPrint.set_action(lvgl.BTN_ACTION_CLICK, lambda: print('click'))
 s3.btnPrint.set_action(lvgl.BTN_ACTION_PR, lambda: print('press'))
 s3.btnPrint.set_action(lvgl.BTN_ACTION_LONG_PR, lambda: print('long press'))
 s3.btnPrint.set_action(lvgl.BTN_ACTION_LONG_PR_REPEAT, lambda: print('long press repeat'))
 
-
+print(s3.btnPrint.get_type())
 
 app.exec_()
-
-#lvgl.font_dejavu_20
-#l1.get_style().text_font
-#lvgl.font_dejavu_20
 

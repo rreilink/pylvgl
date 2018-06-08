@@ -563,6 +563,37 @@ pylv_obj_get_children(pylv_Obj *self, PyObject *args, PyObject *kwds)
     return ret;
 }
 
+static PyObject*
+pylv_obj_get_type(pylv_Obj *self, PyObject *args, PyObject *kwds)
+{
+    lv_obj_type_t result;
+    PyObject *list = NULL;
+    PyObject *str = NULL;
+    
+    if (lock) lock(lock_arg);
+    lv_obj_get_type(self->ref, &result);
+    
+    list = PyList_New(0);
+    
+    for(int i=0; i<LV_MAX_ANCESTOR_NUM;i++) {
+        if (!result.type[i]) break;
+
+        str = PyUnicode_FromString(result.type[i]);
+        if (!str) goto error;
+        
+        if (PyList_Append(list, str)) goto error; // PyList_Append increases refcount
+    }
+
+    if (unlock) unlock(unlock_arg);   
+    return list;
+    
+error:
+    Py_XDECREF(list);
+    Py_XDECREF(str);
+    if (unlock) unlock(unlock_arg);   
+    return NULL;
+}
+
 
 static PyObject*
 pylv_btnm_set_map(pylv_Btnm *self, PyObject *args, PyObject *kwds)
@@ -692,6 +723,7 @@ pylv_btn_set_action(pylv_Btn *self, PyObject *args, PyObject *kwds)
         
     tmp = self->actions[type];
     if (action == Py_None) {
+        lv_btn_set_action(self->ref, type, NULL);
         self->actions[type] = NULL;
     } else {
         self->actions[type] = action;
@@ -1211,13 +1243,6 @@ pylv_obj_get_signal_func(pylv_Obj *self, PyObject *args, PyObject *kwds)
 
 static PyObject*
 pylv_obj_get_design_func(pylv_Obj *self, PyObject *args, PyObject *kwds)
-{
-    PyErr_SetString(PyExc_NotImplementedError, "not implemented");
-    return NULL;
-}
-
-static PyObject*
-pylv_obj_get_type(pylv_Obj *self, PyObject *args, PyObject *kwds)
 {
     PyErr_SetString(PyExc_NotImplementedError, "not implemented");
     return NULL;
@@ -5319,14 +5344,13 @@ static void disp_flush(int32_t x1, int32_t y1, int32_t x2, int32_t y2, const lv_
 static lv_disp_drv_t diplay_driver = {0};
 static lv_indev_drv_t indev_driver = {0};
 static int indev_driver_registered = 0;
-static int indev_x, indev_y, indev_state, indev_pending=0;
+static int indev_x, indev_y, indev_state=0;
 
 bool indev_read(lv_indev_data_t *data) {
-    if (indev_pending) {
-        data->point.x = indev_x;
-        data->point.y = indev_y;
-        data->state = indev_state;
-    }
+    data->point.x = indev_x;
+    data->point.y = indev_y;
+    data->state = indev_state;
+
     return false;
 }
 
@@ -5344,11 +5368,11 @@ send_mouse_event(PyObject *self, PyObject *args, PyObject *kwds) {
         indev_driver.type = LV_INDEV_TYPE_POINTER;
         indev_driver.read = indev_read;
         lv_indev_drv_register(&indev_driver);
+        indev_driver_registered = 1;
     }
     indev_x = x;
     indev_y = y;
     indev_state = pressed ? LV_INDEV_STATE_PR : LV_INDEV_STATE_REL;
-    indev_pending = 1;
     
     Py_RETURN_NONE;
 }

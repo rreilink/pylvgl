@@ -26,16 +26,16 @@ Already implemented:
 * Python bindings for all LittlevGL objects
 * Python constants for all LittlevGL enum constants
 * Support for styles
+* Action callbacks
 
 To be implemented:
 
-* Action callbacks
 * Destruction / deletion of items
 * ...
 
 ## Limitations
 
-* lvgl.Style objects cannot be created from within Python, since the management of the underlying lv_style_t structs is troublesome. LittlevGL keeps references to those style objects, and as such it cannot be determined when it would be safe to free that data. In the current implementation, lvgl.Style objects are references to lv_style_t structs that have already been defined at C-level.
+* lvgl.Style.copy() allocates a new lv_style_t struct, which is never freed, since the management of lv_style_t structs is troublesome. LittlevGL keeps references to those style objects, and as such it cannot be determined when it would be safe to free that data. In the current implementation. To be safe, the allocated memory is never freed (and thus a memory leak is present)
 
 * The bindings-generator currently assumes a 16 bit-per-pixel screen configuration. This is checked in the generated lvglmodule.c at compile-time.
 
