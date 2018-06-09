@@ -124,7 +124,7 @@ for filename in [f for f in glob.glob('lvgl/lv_objx/*.c') if not f.endswith('lv_
 ancestors = {}
 for function in functions_c.values():
     if function.name.endswith('_create'):
-        results = re.findall('(lv_[A-Za-z0-9_]+)_create\s*\(\s*par', function.contents)
+        results = re.findall('(lv_[A-Za-z0-9_]+)_create\s*\(\s*par,', function.contents)
         assert len(results) == 1
         ancestors[function.name[:-7]] = results[0]
 
@@ -216,7 +216,7 @@ for function in functions.values():
 #
 # Mark which functions have a custom implementation (in lvglmodule_template.c)
 #
-for custom in ('lv_obj_get_children', 'lv_btnm_set_map', 'lv_list_add', 'lv_btn_set_action', 'lv_btn_get_action','lv_obj_get_type'):
+for custom in ('lv_obj_get_children', 'lv_btnm_set_map', 'lv_list_add', 'lv_btn_set_action', 'lv_btn_get_action','lv_obj_get_type', 'lv_list_focus'):
     functions[custom] = FunctionDef(custom, None, [], None, True)
 
 
@@ -319,13 +319,13 @@ py{function.name}(pylv_Obj *self, PyObject *args, PyObject *kwds)
     callcode = f'{function.name}(self->ref{cvarlist})'
     
     if resctype == 'pylv_Obj *':
-        # Result of function is an lv_obj; find the corresponding Python
-        # object using lv_obj_get_free_ptr
+        # Result of function is an lv_obj; find or create the corresponding Python
+        # object using pyobj_from_lv helper
         code += f'''
         
     if (lock) lock(lock_arg);
     lv_obj_t *result = {callcode};
-    PyObject *retobj = pyobj_from_lv(result);
+    PyObject *retobj = pyobj_from_lv(result, &pylv_obj_Type);
     if (unlock) unlock(unlock_arg);
     
     return retobj;

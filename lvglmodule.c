@@ -173,7 +173,7 @@ void lv_set_lock_unlock( void (*flock)(void *), void * flock_arg,
     unlock = funlock;
 }
 
-PyObject * pyobj_from_lv(lv_obj_t *obj) {
+PyObject * pyobj_from_lv(lv_obj_t *obj, PyTypeObject *tp) {
     pylv_Obj *pyobj;
     if (!obj) {
         Py_RETURN_NONE;
@@ -185,7 +185,11 @@ PyObject * pyobj_from_lv(lv_obj_t *obj) {
         Py_INCREF(pyobj); // increase reference count of returned object
     } else {
         // Python object for this lv object does not yet exist. Create a new one
-        pyobj = PyObject_New(pylv_Obj, &pylv_obj_Type);
+        // Be sure to zero out the memory
+        pyobj = PyObject_Malloc(tp->tp_basicsize);
+        if (!pyobj) return NULL;
+        memset(pyobj, 0, tp->tp_basicsize);
+        PyObject_Init((PyObject *)pyobj, tp);
         pyobj -> ref = obj;
         lv_obj_set_free_ptr(obj, pyobj);
     }
@@ -637,12 +641,41 @@ pylv_list_add(pylv_List *self, PyObject *args, PyObject *kwds)
     } 
 
     if (lock) lock(lock_arg);
-    ret = pyobj_from_lv(lv_list_add(self->ref, NULL, txt, NULL));
+    ret = pyobj_from_lv(lv_list_add(self->ref, NULL, txt, NULL), &pylv_btn_Type);
     if (unlock) unlock(unlock_arg);
     
     return ret;
 
 }
+
+
+// lv_list_focus takes lv_obj_t* as first argument, but it is not the list itself!
+static PyObject*
+pylv_list_focus(pylv_List *self, PyObject *args, PyObject *kwds)
+{
+    static char *kwlist[] = {"obj", "anim_en", NULL};
+    pylv_Btn * obj;
+    lv_obj_t *parent;
+    int anim_en;
+    if (!PyArg_ParseTupleAndKeywords(args, kwds, "O!p", kwlist , &pylv_btn_Type, &obj, &anim_en)) return NULL;
+    
+    if (lock) lock(lock_arg);         
+    
+    parent = lv_obj_get_parent(obj->ref);
+    if (parent) parent = lv_obj_get_parent(parent); // get the obj's parent's parent in a safe way
+    
+    if (parent != self->ref) {
+        if (unlock) unlock(unlock_arg);
+        return PyErr_Format(PyExc_RuntimeError, "%R is not a child of %R", obj, self);
+    }
+    
+    lv_list_focus(obj->ref, anim_en);
+    
+    if (unlock) unlock(unlock_arg);
+    Py_RETURN_NONE;
+}
+
+
 
 
 lv_res_t pylv_btn_action_click_callback(lv_obj_t* obj) {
@@ -1053,7 +1086,7 @@ pylv_obj_get_screen(pylv_Obj *self, PyObject *args, PyObject *kwds)
         
     if (lock) lock(lock_arg);
     lv_obj_t *result = lv_obj_get_screen(self->ref);
-    PyObject *retobj = pyobj_from_lv(result);
+    PyObject *retobj = pyobj_from_lv(result, &pylv_obj_Type);
     if (unlock) unlock(unlock_arg);
     
     return retobj;
@@ -1068,7 +1101,7 @@ pylv_obj_get_parent(pylv_Obj *self, PyObject *args, PyObject *kwds)
         
     if (lock) lock(lock_arg);
     lv_obj_t *result = lv_obj_get_parent(self->ref);
-    PyObject *retobj = pyobj_from_lv(result);
+    PyObject *retobj = pyobj_from_lv(result, &pylv_obj_Type);
     if (unlock) unlock(unlock_arg);
     
     return retobj;
@@ -1485,7 +1518,7 @@ pylv_win_get_from_btn(pylv_Obj *self, PyObject *args, PyObject *kwds)
         
     if (lock) lock(lock_arg);
     lv_obj_t *result = lv_win_get_from_btn(self->ref);
-    PyObject *retobj = pyobj_from_lv(result);
+    PyObject *retobj = pyobj_from_lv(result, &pylv_obj_Type);
     if (unlock) unlock(unlock_arg);
     
     return retobj;
@@ -2659,7 +2692,7 @@ pylv_kb_get_ta(pylv_Obj *self, PyObject *args, PyObject *kwds)
         
     if (lock) lock(lock_arg);
     lv_obj_t *result = lv_kb_get_ta(self->ref);
-    PyObject *retobj = pyobj_from_lv(result);
+    PyObject *retobj = pyobj_from_lv(result, &pylv_obj_Type);
     if (unlock) unlock(unlock_arg);
     
     return retobj;
@@ -3142,7 +3175,7 @@ pylv_tabview_add_tab(pylv_Obj *self, PyObject *args, PyObject *kwds)
         
     if (lock) lock(lock_arg);
     lv_obj_t *result = lv_tabview_add_tab(self->ref, name);
-    PyObject *retobj = pyobj_from_lv(result);
+    PyObject *retobj = pyobj_from_lv(result, &pylv_obj_Type);
     if (unlock) unlock(unlock_arg);
     
     return retobj;
@@ -3219,7 +3252,7 @@ pylv_tabview_get_tab(pylv_Obj *self, PyObject *args, PyObject *kwds)
         
     if (lock) lock(lock_arg);
     lv_obj_t *result = lv_tabview_get_tab(self->ref, id);
-    PyObject *retobj = pyobj_from_lv(result);
+    PyObject *retobj = pyobj_from_lv(result, &pylv_obj_Type);
     if (unlock) unlock(unlock_arg);
     
     return retobj;
@@ -3396,7 +3429,7 @@ pylv_mbox_get_from_btn(pylv_Obj *self, PyObject *args, PyObject *kwds)
         
     if (lock) lock(lock_arg);
     lv_obj_t *result = lv_mbox_get_from_btn(self->ref);
-    PyObject *retobj = pyobj_from_lv(result);
+    PyObject *retobj = pyobj_from_lv(result, &pylv_obj_Type);
     if (unlock) unlock(unlock_arg);
     
     return retobj;
@@ -3668,7 +3701,7 @@ pylv_page_get_scrl(pylv_Obj *self, PyObject *args, PyObject *kwds)
         
     if (lock) lock(lock_arg);
     lv_obj_t *result = lv_page_get_scrl(self->ref);
-    PyObject *retobj = pyobj_from_lv(result);
+    PyObject *retobj = pyobj_from_lv(result, &pylv_obj_Type);
     if (unlock) unlock(unlock_arg);
     
     return retobj;
@@ -4051,7 +4084,7 @@ pylv_ta_get_label(pylv_Obj *self, PyObject *args, PyObject *kwds)
         
     if (lock) lock(lock_arg);
     lv_obj_t *result = lv_ta_get_label(self->ref);
-    PyObject *retobj = pyobj_from_lv(result);
+    PyObject *retobj = pyobj_from_lv(result, &pylv_obj_Type);
     if (unlock) unlock(unlock_arg);
     
     return retobj;
@@ -4619,7 +4652,7 @@ pylv_list_get_btn_label(pylv_Obj *self, PyObject *args, PyObject *kwds)
         
     if (lock) lock(lock_arg);
     lv_obj_t *result = lv_list_get_btn_label(self->ref);
-    PyObject *retobj = pyobj_from_lv(result);
+    PyObject *retobj = pyobj_from_lv(result, &pylv_obj_Type);
     if (unlock) unlock(unlock_arg);
     
     return retobj;
@@ -4634,7 +4667,7 @@ pylv_list_get_btn_img(pylv_Obj *self, PyObject *args, PyObject *kwds)
         
     if (lock) lock(lock_arg);
     lv_obj_t *result = lv_list_get_btn_img(self->ref);
-    PyObject *retobj = pyobj_from_lv(result);
+    PyObject *retobj = pyobj_from_lv(result, &pylv_obj_Type);
     if (unlock) unlock(unlock_arg);
     
     return retobj;
@@ -4669,19 +4702,6 @@ pylv_list_down(pylv_Obj *self, PyObject *args, PyObject *kwds)
 
     if (lock) lock(lock_arg);         
     lv_list_down(self->ref);
-    if (unlock) unlock(unlock_arg);
-    Py_RETURN_NONE;
-}
-
-static PyObject*
-pylv_list_focus(pylv_Obj *self, PyObject *args, PyObject *kwds)
-{
-    static char *kwlist[] = {"anim_en", NULL};
-    int anim_en;
-    if (!PyArg_ParseTupleAndKeywords(args, kwds, "p", kwlist , &anim_en)) return NULL;
-
-    if (lock) lock(lock_arg);         
-    lv_list_focus(self->ref, anim_en);
     if (unlock) unlock(unlock_arg);
     Py_RETURN_NONE;
 }
@@ -5276,7 +5296,11 @@ static PyTypeObject pylv_roller_Type = {
 
 static PyObject *
 pylv_scr_act(PyObject *self, PyObject *args) {
-    return pyobj_from_lv(lv_scr_act());
+    lv_obj_t *scr;
+    if (lock) lock(lock_arg);
+    scr = lv_scr_act();
+    if (unlock) unlock(unlock_arg);
+    return pyobj_from_lv(scr, &pylv_obj_Type);
 }
 
 static PyObject *
@@ -5403,7 +5427,10 @@ static struct PyModuleDef lvglmodule = {
     lvglMethods
 };
 
-
+static PyObject*
+Obj_repr(pylv_Obj *self) {
+    return PyUnicode_FromFormat("<%s object at %p referencing %p>", Py_TYPE(self)->tp_name, self, self->ref);
+}
 
 
 PyMODINIT_FUNC
@@ -5417,6 +5444,8 @@ PyInit_lvgl(void) {
     if (PyType_Ready(&Font_Type) < 0) return NULL;
 
     if (PyType_Ready(&Style_Type) < 0) return NULL;
+    
+    pylv_obj_Type.tp_repr = (reprfunc) Obj_repr;
     
 
     pylv_obj_Type.tp_base = NULL;
