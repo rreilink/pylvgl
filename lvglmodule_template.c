@@ -697,7 +697,7 @@ static lv_indev_drv_t indev_driver = {0};
 static int indev_driver_registered = 0;
 static int indev_x, indev_y, indev_state=0;
 
-bool indev_read(lv_indev_data_t *data) {
+static bool indev_read(lv_indev_data_t *data) {
     data->point.x = indev_x;
     data->point.y = indev_y;
     data->state = indev_state;
