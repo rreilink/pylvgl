@@ -6338,6 +6338,8 @@ PyInit_lvgl(void) {
 
     PyModule_AddObject(module, "font_dejavu_20", Font_From_lv_font(&lv_font_dejavu_20));
     PyModule_AddObject(module, "font_symbol_20", Font_From_lv_font(&lv_font_symbol_20));
+    PyModule_AddObject(module, "font_dejavu_30", Font_From_lv_font(&lv_font_dejavu_30));
+    PyModule_AddObject(module, "font_symbol_30", Font_From_lv_font(&lv_font_symbol_30));
     PyModule_AddObject(module, "font_symbol_40", Font_From_lv_font(&lv_font_symbol_40));
 
 
