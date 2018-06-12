@@ -16,6 +16,8 @@
  * Forward declaration of type objects                          *
  ****************************************************************/
 
+PyObject *typesdict = NULL;
+
 <<<
 static PyTypeObject py{name}_Type;
 >>>
@@ -42,12 +44,21 @@ void lv_set_lock_unlock( void (*flock)(void *), void * flock_arg,
     unlock = funlock;
 }
 
+/* Given an lvgl lv_obj, return the accompanying Python object. If the 
+ * accompanying object already exists, it is returned (with ref count increased).
+ * If the lv_obj is not yet known to Python, a new Python object is created,
+ * with the appropriate type (which is determined using lv_obj_get_type and the
+ * typesdict dictionary of lv_obj_type name (string) --> Python Type
+ *
+ * Returns a new reference
+ */
+
 PyObject * pyobj_from_lv(lv_obj_t *obj) {
     pylv_Obj *pyobj;
-    lv_obj_type_t result;
-    PyTypeObject *tp;
-    
-        
+    lv_obj_type_t objtype;
+    const char *objtype_str;
+    PyTypeObject *tp = NULL;
+
     if (!obj) {
         Py_RETURN_NONE;
     }
@@ -58,21 +69,15 @@ PyObject * pyobj_from_lv(lv_obj_t *obj) {
         Py_INCREF(pyobj); // increase reference count of returned object
     } else {
         // Python object for this lv object does not yet exist. Create a new one
-        
-        // Determine type
-        lv_obj_get_type(obj, &result);
-        
-        // TODO: generated code with all types
-        tp = &pylv_obj_Type;
-        if (result.type[0]) {
-            if (strcmp(result.type[0], "lv_btn") == 0) {
-                tp = &pylv_btn_Type;
-            } else if (strcmp(result.type[0], "lv_cont") == 0) {
-                tp = &pylv_cont_Type;
-            }
-        }
-        
         // Be sure to zero out the memory
+        
+        lv_obj_get_type(obj, &objtype);
+        objtype_str = objtype.type[0];
+        if (objtype_str) {
+            tp = (PyTypeObject *)PyDict_GetItemString(typesdict, objtype_str); // borrowed reference
+        }
+        if (!tp) tp = &pylv_obj_Type; // Default to Obj (should not happen; lv_obj_get_type failed or result not found in typesdict)
+
         pyobj = PyObject_Malloc(tp->tp_basicsize);
         if (!pyobj) return NULL;
         memset(pyobj, 0, tp->tp_basicsize);
@@ -400,7 +405,7 @@ static PyObject*
 pylv_obj_get_children(pylv_Obj *self, PyObject *args, PyObject *kwds)
 {
     lv_obj_t *child = NULL;
-    pylv_Obj *pychild;
+    PyObject *pychild;
     PyObject *ret = PyList_New(0);
     if (!ret) return NULL;
     
@@ -409,21 +414,15 @@ pylv_obj_get_children(pylv_Obj *self, PyObject *args, PyObject *kwds)
     while (1) {
         child = lv_obj_get_child(self->ref, child);
         if (!child) break;
-        pychild = lv_obj_get_free_ptr(child);
+        pychild = pyobj_from_lv(child);
         
-        if (!pychild) {
-            // Child is not known to Python, create a new Object instance
-            pychild = PyObject_New(pylv_Obj, &pylv_obj_Type);
-            pychild -> ref = child;
-            lv_obj_set_free_ptr(child, pychild);
-        }
-        
-        // Child that is known in Python
-        if (PyList_Append(ret, (PyObject *)pychild)) { // PyList_Append increases refcount
-            Py_XDECREF(ret);
+        if (PyList_Append(ret, pychild)) { // PyList_Append increases refcount
+            Py_DECREF(ret);
+            Py_DECREF(pychild);
             ret = NULL;
             break;
         }
+        Py_DECREF(pychild);
     }
 
     if (unlock) unlock(unlock_arg);
@@ -953,6 +952,11 @@ PyInit_lvgl(void) {
 
 <<SYMBOL_ASSIGNMENTS>>
 
+    // refcount for typesdict is initally 1; it is used by pyobj_from_lv
+    // refcounts to py{name}_Type objects are incremented due to "O" format
+    typesdict = Py_BuildValue("{<<<sO>>>}"<<<,
+        "{name}", &py{name}_Type>>>);
+    
     PyModule_AddObject(module, "framebuffer", PyMemoryView_FromMemory(framebuffer, LV_HOR_RES * LV_VER_RES * 2, PyBUF_READ));
     PyModule_AddObject(module, "HOR_RES", PyLong_FromLong(LV_HOR_RES));
     PyModule_AddObject(module, "VER_RES", PyLong_FromLong(LV_VER_RES));

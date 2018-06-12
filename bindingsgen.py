@@ -374,12 +374,8 @@ lv_res_t py{obj.name}_{action}_callback(lv_obj_t* obj) {{
     pyobj = lv_obj_get_free_ptr(obj);
     if (pyobj) {{
         handler = pyobj->{attrname};
-        if (handler) {{
-            if (unlock) unlock(unlock_arg); // Release lock during call to Python code
-            PyObject_CallFunctionObjArgs(handler, NULL);
-            if (lock) lock(lock_arg);
-            if (PyErr_Occurred()) PyErr_Print();
-        }}
+        if (handler) PyObject_CallFunctionObjArgs(handler, NULL);
+        if (PyErr_Occurred()) PyErr_Print();
     }}
     return LV_RES_OK;
 }}
@@ -549,7 +545,7 @@ enumcode = ''
 for name, items in enums.items():
     for name, value in items:
         assert name.startswith('LV_')
-        enumcode += (f'    PyModule_AddObject(module, "{name[3:]}", PyLong_FromLong({value}));\n')
+        enumcode += (f'    PyModule_AddIntConstant(module, "{name[3:]}", {value});\n')
 
 fields['ENUM_ASSIGNMENTS'] = enumcode
 
@@ -612,7 +608,7 @@ symbol_assignments = ''
 with open('lvgl/lv_misc/lv_fonts/lv_symbol_def.h') as file:
     symbol_def_h_code = file.read()
     for symbol_name, symbol_definition in re.findall(r'#define\s+(SYMBOL_\w+)\s+("\\xEF\\x80\\x[0-9A-Z]+")', symbol_def_h_code):
-        symbol_assignments += f'    PyModule_AddObject(module, "{symbol_name}", PyUnicode_FromString({symbol_definition}));\n'    
+        symbol_assignments += f'    PyModule_AddStringConstant(module, "{symbol_name}", {symbol_definition});\n'    
         
 fields['SYMBOL_ASSIGNMENTS'] = symbol_assignments
 

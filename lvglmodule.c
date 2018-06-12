@@ -117,6 +117,8 @@ typedef pylv_Ddlist pylv_Roller;
  * Forward declaration of type objects                          *
  ****************************************************************/
 
+PyObject *typesdict = NULL;
+
 
 static PyTypeObject pylv_obj_Type;
 
@@ -189,12 +191,21 @@ void lv_set_lock_unlock( void (*flock)(void *), void * flock_arg,
     unlock = funlock;
 }
 
+/* Given an lvgl lv_obj, return the accompanying Python object. If the 
+ * accompanying object already exists, it is returned (with ref count increased).
+ * If the lv_obj is not yet known to Python, a new Python object is created,
+ * with the appropriate type (which is determined using lv_obj_get_type and the
+ * typesdict dictionary of lv_obj_type name (string) --> Python Type
+ *
+ * Returns a new reference
+ */
+
 PyObject * pyobj_from_lv(lv_obj_t *obj) {
     pylv_Obj *pyobj;
-    lv_obj_type_t result;
-    PyTypeObject *tp;
-    
-        
+    lv_obj_type_t objtype;
+    const char *objtype_str;
+    PyTypeObject *tp = NULL;
+
     if (!obj) {
         Py_RETURN_NONE;
     }
@@ -205,21 +216,15 @@ PyObject * pyobj_from_lv(lv_obj_t *obj) {
         Py_INCREF(pyobj); // increase reference count of returned object
     } else {
         // Python object for this lv object does not yet exist. Create a new one
-        
-        // Determine type
-        lv_obj_get_type(obj, &result);
-        
-        // TODO: generated code with all types
-        tp = &pylv_obj_Type;
-        if (result.type[0]) {
-            if (strcmp(result.type[0], "lv_btn") == 0) {
-                tp = &pylv_btn_Type;
-            } else if (strcmp(result.type[0], "lv_cont") == 0) {
-                tp = &pylv_cont_Type;
-            }
-        }
-        
         // Be sure to zero out the memory
+        
+        lv_obj_get_type(obj, &objtype);
+        objtype_str = objtype.type[0];
+        if (objtype_str) {
+            tp = (PyTypeObject *)PyDict_GetItemString(typesdict, objtype_str); // borrowed reference
+        }
+        if (!tp) tp = &pylv_obj_Type; // Default to Obj (should not happen; lv_obj_get_type failed or result not found in typesdict)
+
         pyobj = PyObject_Malloc(tp->tp_basicsize);
         if (!pyobj) return NULL;
         memset(pyobj, 0, tp->tp_basicsize);
@@ -570,7 +575,7 @@ static PyObject*
 pylv_obj_get_children(pylv_Obj *self, PyObject *args, PyObject *kwds)
 {
     lv_obj_t *child = NULL;
-    pylv_Obj *pychild;
+    PyObject *pychild;
     PyObject *ret = PyList_New(0);
     if (!ret) return NULL;
     
@@ -579,21 +584,15 @@ pylv_obj_get_children(pylv_Obj *self, PyObject *args, PyObject *kwds)
     while (1) {
         child = lv_obj_get_child(self->ref, child);
         if (!child) break;
-        pychild = lv_obj_get_free_ptr(child);
+        pychild = pyobj_from_lv(child);
         
-        if (!pychild) {
-            // Child is not known to Python, create a new Object instance
-            pychild = PyObject_New(pylv_Obj, &pylv_obj_Type);
-            pychild -> ref = child;
-            lv_obj_set_free_ptr(child, pychild);
-        }
-        
-        // Child that is known in Python
-        if (PyList_Append(ret, (PyObject *)pychild)) { // PyList_Append increases refcount
-            Py_XDECREF(ret);
+        if (PyList_Append(ret, pychild)) { // PyList_Append increases refcount
+            Py_DECREF(ret);
+            Py_DECREF(pychild);
             ret = NULL;
             break;
         }
+        Py_DECREF(pychild);
     }
 
     if (unlock) unlock(unlock_arg);
@@ -857,12 +856,8 @@ lv_res_t pylv_btn_action_click_callback(lv_obj_t* obj) {
     pyobj = lv_obj_get_free_ptr(obj);
     if (pyobj) {
         handler = pyobj->actions[0];
-        if (handler) {
-            if (unlock) unlock(unlock_arg); // Release lock during call to Python code
-            PyObject_CallFunctionObjArgs(handler, NULL);
-            if (lock) lock(lock_arg);
-            if (PyErr_Occurred()) PyErr_Print();
-        }
+        if (handler) PyObject_CallFunctionObjArgs(handler, NULL);
+        if (PyErr_Occurred()) PyErr_Print();
     }
     return LV_RES_OK;
 }
@@ -873,12 +868,8 @@ lv_res_t pylv_btn_action_pr_callback(lv_obj_t* obj) {
     pyobj = lv_obj_get_free_ptr(obj);
     if (pyobj) {
         handler = pyobj->actions[1];
-        if (handler) {
-            if (unlock) unlock(unlock_arg); // Release lock during call to Python code
-            PyObject_CallFunctionObjArgs(handler, NULL);
-            if (lock) lock(lock_arg);
-            if (PyErr_Occurred()) PyErr_Print();
-        }
+        if (handler) PyObject_CallFunctionObjArgs(handler, NULL);
+        if (PyErr_Occurred()) PyErr_Print();
     }
     return LV_RES_OK;
 }
@@ -889,12 +880,8 @@ lv_res_t pylv_btn_action_long_pr_callback(lv_obj_t* obj) {
     pyobj = lv_obj_get_free_ptr(obj);
     if (pyobj) {
         handler = pyobj->actions[2];
-        if (handler) {
-            if (unlock) unlock(unlock_arg); // Release lock during call to Python code
-            PyObject_CallFunctionObjArgs(handler, NULL);
-            if (lock) lock(lock_arg);
-            if (PyErr_Occurred()) PyErr_Print();
-        }
+        if (handler) PyObject_CallFunctionObjArgs(handler, NULL);
+        if (PyErr_Occurred()) PyErr_Print();
     }
     return LV_RES_OK;
 }
@@ -905,12 +892,8 @@ lv_res_t pylv_btn_action_long_pr_repeat_callback(lv_obj_t* obj) {
     pyobj = lv_obj_get_free_ptr(obj);
     if (pyobj) {
         handler = pyobj->actions[3];
-        if (handler) {
-            if (unlock) unlock(unlock_arg); // Release lock during call to Python code
-            PyObject_CallFunctionObjArgs(handler, NULL);
-            if (lock) lock(lock_arg);
-            if (PyErr_Occurred()) PyErr_Print();
-        }
+        if (handler) PyObject_CallFunctionObjArgs(handler, NULL);
+        if (PyErr_Occurred()) PyErr_Print();
     }
     return LV_RES_OK;
 }
@@ -2852,12 +2835,8 @@ lv_res_t pylv_kb_ok_action_callback(lv_obj_t* obj) {
     pyobj = lv_obj_get_free_ptr(obj);
     if (pyobj) {
         handler = pyobj->ok_action;
-        if (handler) {
-            if (unlock) unlock(unlock_arg); // Release lock during call to Python code
-            PyObject_CallFunctionObjArgs(handler, NULL);
-            if (lock) lock(lock_arg);
-            if (PyErr_Occurred()) PyErr_Print();
-        }
+        if (handler) PyObject_CallFunctionObjArgs(handler, NULL);
+        if (PyErr_Occurred()) PyErr_Print();
     }
     return LV_RES_OK;
 }
@@ -2904,12 +2883,8 @@ lv_res_t pylv_kb_hide_action_callback(lv_obj_t* obj) {
     pyobj = lv_obj_get_free_ptr(obj);
     if (pyobj) {
         handler = pyobj->hide_action;
-        if (handler) {
-            if (unlock) unlock(unlock_arg); // Release lock during call to Python code
-            PyObject_CallFunctionObjArgs(handler, NULL);
-            if (lock) lock(lock_arg);
-            if (PyErr_Occurred()) PyErr_Print();
-        }
+        if (handler) PyObject_CallFunctionObjArgs(handler, NULL);
+        if (PyErr_Occurred()) PyErr_Print();
     }
     return LV_RES_OK;
 }
@@ -4066,12 +4041,8 @@ lv_res_t pylv_page_rel_action_callback(lv_obj_t* obj) {
     pyobj = lv_obj_get_free_ptr(obj);
     if (pyobj) {
         handler = pyobj->rel_action;
-        if (handler) {
-            if (unlock) unlock(unlock_arg); // Release lock during call to Python code
-            PyObject_CallFunctionObjArgs(handler, NULL);
-            if (lock) lock(lock_arg);
-            if (PyErr_Occurred()) PyErr_Print();
-        }
+        if (handler) PyObject_CallFunctionObjArgs(handler, NULL);
+        if (PyErr_Occurred()) PyErr_Print();
     }
     return LV_RES_OK;
 }
@@ -4118,12 +4089,8 @@ lv_res_t pylv_page_pr_action_callback(lv_obj_t* obj) {
     pyobj = lv_obj_get_free_ptr(obj);
     if (pyobj) {
         handler = pyobj->pr_action;
-        if (handler) {
-            if (unlock) unlock(unlock_arg); // Release lock during call to Python code
-            PyObject_CallFunctionObjArgs(handler, NULL);
-            if (lock) lock(lock_arg);
-            if (PyErr_Occurred()) PyErr_Print();
-        }
+        if (handler) PyObject_CallFunctionObjArgs(handler, NULL);
+        if (PyErr_Occurred()) PyErr_Print();
     }
     return LV_RES_OK;
 }
@@ -4876,12 +4843,8 @@ lv_res_t pylv_ddlist_action_callback(lv_obj_t* obj) {
     pyobj = lv_obj_get_free_ptr(obj);
     if (pyobj) {
         handler = pyobj->action;
-        if (handler) {
-            if (unlock) unlock(unlock_arg); // Release lock during call to Python code
-            PyObject_CallFunctionObjArgs(handler, NULL);
-            if (lock) lock(lock_arg);
-            if (PyErr_Occurred()) PyErr_Print();
-        }
+        if (handler) PyObject_CallFunctionObjArgs(handler, NULL);
+        if (PyErr_Occurred()) PyErr_Print();
     }
     return LV_RES_OK;
 }
@@ -5294,12 +5257,8 @@ lv_res_t pylv_slider_action_callback(lv_obj_t* obj) {
     pyobj = lv_obj_get_free_ptr(obj);
     if (pyobj) {
         handler = pyobj->action;
-        if (handler) {
-            if (unlock) unlock(unlock_arg); // Release lock during call to Python code
-            PyObject_CallFunctionObjArgs(handler, NULL);
-            if (lock) lock(lock_arg);
-            if (PyErr_Occurred()) PyErr_Print();
-        }
+        if (handler) PyObject_CallFunctionObjArgs(handler, NULL);
+        if (PyErr_Occurred()) PyErr_Print();
     }
     return LV_RES_OK;
 }
@@ -5580,12 +5539,8 @@ lv_res_t pylv_cb_action_callback(lv_obj_t* obj) {
     pyobj = lv_obj_get_free_ptr(obj);
     if (pyobj) {
         handler = pyobj->action;
-        if (handler) {
-            if (unlock) unlock(unlock_arg); // Release lock during call to Python code
-            PyObject_CallFunctionObjArgs(handler, NULL);
-            if (lock) lock(lock_arg);
-            if (PyErr_Occurred()) PyErr_Print();
-        }
+        if (handler) PyObject_CallFunctionObjArgs(handler, NULL);
+        if (PyErr_Occurred()) PyErr_Print();
     }
     return LV_RES_OK;
 }
@@ -6148,177 +6103,177 @@ PyInit_lvgl(void) {
 
 
     
-    PyModule_AddObject(module, "DESIGN_DRAW_MAIN", PyLong_FromLong(0));
-    PyModule_AddObject(module, "DESIGN_DRAW_POST", PyLong_FromLong(1));
-    PyModule_AddObject(module, "DESIGN_COVER_CHK", PyLong_FromLong(2));
-    PyModule_AddObject(module, "RES_INV", PyLong_FromLong(0));
-    PyModule_AddObject(module, "RES_OK", PyLong_FromLong(1));
-    PyModule_AddObject(module, "SIGNAL_CLEANUP", PyLong_FromLong(0));
-    PyModule_AddObject(module, "SIGNAL_CHILD_CHG", PyLong_FromLong(1));
-    PyModule_AddObject(module, "SIGNAL_CORD_CHG", PyLong_FromLong(2));
-    PyModule_AddObject(module, "SIGNAL_STYLE_CHG", PyLong_FromLong(3));
-    PyModule_AddObject(module, "SIGNAL_REFR_EXT_SIZE", PyLong_FromLong(4));
-    PyModule_AddObject(module, "SIGNAL_GET_TYPE", PyLong_FromLong(5));
-    PyModule_AddObject(module, "SIGNAL_PRESSED", PyLong_FromLong(6));
-    PyModule_AddObject(module, "SIGNAL_PRESSING", PyLong_FromLong(7));
-    PyModule_AddObject(module, "SIGNAL_PRESS_LOST", PyLong_FromLong(8));
-    PyModule_AddObject(module, "SIGNAL_RELEASED", PyLong_FromLong(9));
-    PyModule_AddObject(module, "SIGNAL_LONG_PRESS", PyLong_FromLong(10));
-    PyModule_AddObject(module, "SIGNAL_LONG_PRESS_REP", PyLong_FromLong(11));
-    PyModule_AddObject(module, "SIGNAL_DRAG_BEGIN", PyLong_FromLong(12));
-    PyModule_AddObject(module, "SIGNAL_DRAG_END", PyLong_FromLong(13));
-    PyModule_AddObject(module, "SIGNAL_FOCUS", PyLong_FromLong(14));
-    PyModule_AddObject(module, "SIGNAL_DEFOCUS", PyLong_FromLong(15));
-    PyModule_AddObject(module, "SIGNAL_CONTROLL", PyLong_FromLong(16));
-    PyModule_AddObject(module, "PROTECT_NONE", PyLong_FromLong(0));
-    PyModule_AddObject(module, "PROTECT_CHILD_CHG", PyLong_FromLong(1));
-    PyModule_AddObject(module, "PROTECT_PARENT", PyLong_FromLong(2));
-    PyModule_AddObject(module, "PROTECT_POS", PyLong_FromLong(4));
-    PyModule_AddObject(module, "PROTECT_FOLLOW", PyLong_FromLong(8));
-    PyModule_AddObject(module, "PROTECT_PRESS_LOST", PyLong_FromLong(16));
-    PyModule_AddObject(module, "ALIGN_CENTER", PyLong_FromLong(0));
-    PyModule_AddObject(module, "ALIGN_IN_TOP_LEFT", PyLong_FromLong(1));
-    PyModule_AddObject(module, "ALIGN_IN_TOP_MID", PyLong_FromLong(2));
-    PyModule_AddObject(module, "ALIGN_IN_TOP_RIGHT", PyLong_FromLong(3));
-    PyModule_AddObject(module, "ALIGN_IN_BOTTOM_LEFT", PyLong_FromLong(4));
-    PyModule_AddObject(module, "ALIGN_IN_BOTTOM_MID", PyLong_FromLong(5));
-    PyModule_AddObject(module, "ALIGN_IN_BOTTOM_RIGHT", PyLong_FromLong(6));
-    PyModule_AddObject(module, "ALIGN_IN_LEFT_MID", PyLong_FromLong(7));
-    PyModule_AddObject(module, "ALIGN_IN_RIGHT_MID", PyLong_FromLong(8));
-    PyModule_AddObject(module, "ALIGN_OUT_TOP_LEFT", PyLong_FromLong(9));
-    PyModule_AddObject(module, "ALIGN_OUT_TOP_MID", PyLong_FromLong(10));
-    PyModule_AddObject(module, "ALIGN_OUT_TOP_RIGHT", PyLong_FromLong(11));
-    PyModule_AddObject(module, "ALIGN_OUT_BOTTOM_LEFT", PyLong_FromLong(12));
-    PyModule_AddObject(module, "ALIGN_OUT_BOTTOM_MID", PyLong_FromLong(13));
-    PyModule_AddObject(module, "ALIGN_OUT_BOTTOM_RIGHT", PyLong_FromLong(14));
-    PyModule_AddObject(module, "ALIGN_OUT_LEFT_TOP", PyLong_FromLong(15));
-    PyModule_AddObject(module, "ALIGN_OUT_LEFT_MID", PyLong_FromLong(16));
-    PyModule_AddObject(module, "ALIGN_OUT_LEFT_BOTTOM", PyLong_FromLong(17));
-    PyModule_AddObject(module, "ALIGN_OUT_RIGHT_TOP", PyLong_FromLong(18));
-    PyModule_AddObject(module, "ALIGN_OUT_RIGHT_MID", PyLong_FromLong(19));
-    PyModule_AddObject(module, "ALIGN_OUT_RIGHT_BOTTOM", PyLong_FromLong(20));
-    PyModule_AddObject(module, "ANIM_NONE", PyLong_FromLong(0));
-    PyModule_AddObject(module, "ANIM_FLOAT_TOP", PyLong_FromLong(1));
-    PyModule_AddObject(module, "ANIM_FLOAT_LEFT", PyLong_FromLong(2));
-    PyModule_AddObject(module, "ANIM_FLOAT_BOTTOM", PyLong_FromLong(3));
-    PyModule_AddObject(module, "ANIM_FLOAT_RIGHT", PyLong_FromLong(4));
-    PyModule_AddObject(module, "ANIM_GROW_H", PyLong_FromLong(5));
-    PyModule_AddObject(module, "ANIM_GROW_V", PyLong_FromLong(6));
-    PyModule_AddObject(module, "SLIDER_STYLE_BG", PyLong_FromLong(0));
-    PyModule_AddObject(module, "SLIDER_STYLE_INDIC", PyLong_FromLong(1));
-    PyModule_AddObject(module, "SLIDER_STYLE_KNOB", PyLong_FromLong(2));
-    PyModule_AddObject(module, "LIST_STYLE_BG", PyLong_FromLong(0));
-    PyModule_AddObject(module, "LIST_STYLE_SCRL", PyLong_FromLong(1));
-    PyModule_AddObject(module, "LIST_STYLE_SB", PyLong_FromLong(2));
-    PyModule_AddObject(module, "LIST_STYLE_BTN_REL", PyLong_FromLong(3));
-    PyModule_AddObject(module, "LIST_STYLE_BTN_PR", PyLong_FromLong(4));
-    PyModule_AddObject(module, "LIST_STYLE_BTN_TGL_REL", PyLong_FromLong(5));
-    PyModule_AddObject(module, "LIST_STYLE_BTN_TGL_PR", PyLong_FromLong(6));
-    PyModule_AddObject(module, "LIST_STYLE_BTN_INA", PyLong_FromLong(7));
-    PyModule_AddObject(module, "KB_MODE_TEXT", PyLong_FromLong(0));
-    PyModule_AddObject(module, "KB_MODE_NUM", PyLong_FromLong(1));
-    PyModule_AddObject(module, "KB_STYLE_BG", PyLong_FromLong(0));
-    PyModule_AddObject(module, "KB_STYLE_BTN_REL", PyLong_FromLong(1));
-    PyModule_AddObject(module, "KB_STYLE_BTN_PR", PyLong_FromLong(2));
-    PyModule_AddObject(module, "KB_STYLE_BTN_TGL_REL", PyLong_FromLong(3));
-    PyModule_AddObject(module, "KB_STYLE_BTN_TGL_PR", PyLong_FromLong(4));
-    PyModule_AddObject(module, "KB_STYLE_BTN_INA", PyLong_FromLong(5));
-    PyModule_AddObject(module, "BAR_STYLE_BG", PyLong_FromLong(0));
-    PyModule_AddObject(module, "BAR_STYLE_INDIC", PyLong_FromLong(1));
-    PyModule_AddObject(module, "TABVIEW_STYLE_BG", PyLong_FromLong(0));
-    PyModule_AddObject(module, "TABVIEW_STYLE_INDIC", PyLong_FromLong(1));
-    PyModule_AddObject(module, "TABVIEW_STYLE_BTN_BG", PyLong_FromLong(2));
-    PyModule_AddObject(module, "TABVIEW_STYLE_BTN_REL", PyLong_FromLong(3));
-    PyModule_AddObject(module, "TABVIEW_STYLE_BTN_PR", PyLong_FromLong(4));
-    PyModule_AddObject(module, "TABVIEW_STYLE_BTN_TGL_REL", PyLong_FromLong(5));
-    PyModule_AddObject(module, "TABVIEW_STYLE_BTN_TGL_PR", PyLong_FromLong(6));
-    PyModule_AddObject(module, "SW_STYLE_BG", PyLong_FromLong(0));
-    PyModule_AddObject(module, "SW_STYLE_INDIC", PyLong_FromLong(1));
-    PyModule_AddObject(module, "SW_STYLE_KNOB_OFF", PyLong_FromLong(2));
-    PyModule_AddObject(module, "SW_STYLE_KNOB_ON", PyLong_FromLong(3));
-    PyModule_AddObject(module, "MBOX_STYLE_BG", PyLong_FromLong(0));
-    PyModule_AddObject(module, "MBOX_STYLE_BTN_BG", PyLong_FromLong(1));
-    PyModule_AddObject(module, "MBOX_STYLE_BTN_REL", PyLong_FromLong(2));
-    PyModule_AddObject(module, "MBOX_STYLE_BTN_PR", PyLong_FromLong(3));
-    PyModule_AddObject(module, "MBOX_STYLE_BTN_TGL_REL", PyLong_FromLong(4));
-    PyModule_AddObject(module, "MBOX_STYLE_BTN_TGL_PR", PyLong_FromLong(5));
-    PyModule_AddObject(module, "MBOX_STYLE_BTN_INA", PyLong_FromLong(6));
-    PyModule_AddObject(module, "LABEL_LONG_EXPAND", PyLong_FromLong(0));
-    PyModule_AddObject(module, "LABEL_LONG_BREAK", PyLong_FromLong(1));
-    PyModule_AddObject(module, "LABEL_LONG_SCROLL", PyLong_FromLong(2));
-    PyModule_AddObject(module, "LABEL_LONG_DOT", PyLong_FromLong(3));
-    PyModule_AddObject(module, "LABEL_LONG_ROLL", PyLong_FromLong(4));
-    PyModule_AddObject(module, "LABEL_ALIGN_LEFT", PyLong_FromLong(0));
-    PyModule_AddObject(module, "LABEL_ALIGN_CENTER", PyLong_FromLong(1));
-    PyModule_AddObject(module, "CB_STYLE_BG", PyLong_FromLong(0));
-    PyModule_AddObject(module, "CB_STYLE_BOX_REL", PyLong_FromLong(1));
-    PyModule_AddObject(module, "CB_STYLE_BOX_PR", PyLong_FromLong(2));
-    PyModule_AddObject(module, "CB_STYLE_BOX_TGL_REL", PyLong_FromLong(3));
-    PyModule_AddObject(module, "CB_STYLE_BOX_TGL_PR", PyLong_FromLong(4));
-    PyModule_AddObject(module, "CB_STYLE_BOX_INA", PyLong_FromLong(5));
-    PyModule_AddObject(module, "SB_MODE_OFF", PyLong_FromLong(0));
-    PyModule_AddObject(module, "SB_MODE_ON", PyLong_FromLong(1));
-    PyModule_AddObject(module, "SB_MODE_DRAG", PyLong_FromLong(2));
-    PyModule_AddObject(module, "SB_MODE_AUTO", PyLong_FromLong(3));
-    PyModule_AddObject(module, "PAGE_STYLE_BG", PyLong_FromLong(0));
-    PyModule_AddObject(module, "PAGE_STYLE_SCRL", PyLong_FromLong(1));
-    PyModule_AddObject(module, "PAGE_STYLE_SB", PyLong_FromLong(2));
-    PyModule_AddObject(module, "WIN_STYLE_BG", PyLong_FromLong(0));
-    PyModule_AddObject(module, "WIN_STYLE_CONTENT_BG", PyLong_FromLong(1));
-    PyModule_AddObject(module, "WIN_STYLE_CONTENT_SCRL", PyLong_FromLong(2));
-    PyModule_AddObject(module, "WIN_STYLE_SB", PyLong_FromLong(3));
-    PyModule_AddObject(module, "WIN_STYLE_HEADER", PyLong_FromLong(4));
-    PyModule_AddObject(module, "WIN_STYLE_BTN_REL", PyLong_FromLong(5));
-    PyModule_AddObject(module, "WIN_STYLE_BTN_PR", PyLong_FromLong(6));
-    PyModule_AddObject(module, "BTN_STATE_REL", PyLong_FromLong(0));
-    PyModule_AddObject(module, "BTN_STATE_PR", PyLong_FromLong(1));
-    PyModule_AddObject(module, "BTN_STATE_TGL_REL", PyLong_FromLong(2));
-    PyModule_AddObject(module, "BTN_STATE_TGL_PR", PyLong_FromLong(3));
-    PyModule_AddObject(module, "BTN_STATE_INA", PyLong_FromLong(4));
-    PyModule_AddObject(module, "BTN_STATE_NUM", PyLong_FromLong(5));
-    PyModule_AddObject(module, "BTN_ACTION_CLICK", PyLong_FromLong(0));
-    PyModule_AddObject(module, "BTN_ACTION_PR", PyLong_FromLong(1));
-    PyModule_AddObject(module, "BTN_ACTION_LONG_PR", PyLong_FromLong(2));
-    PyModule_AddObject(module, "BTN_ACTION_LONG_PR_REPEAT", PyLong_FromLong(3));
-    PyModule_AddObject(module, "BTN_ACTION_NUM", PyLong_FromLong(4));
-    PyModule_AddObject(module, "BTN_STYLE_REL", PyLong_FromLong(0));
-    PyModule_AddObject(module, "BTN_STYLE_PR", PyLong_FromLong(1));
-    PyModule_AddObject(module, "BTN_STYLE_TGL_REL", PyLong_FromLong(2));
-    PyModule_AddObject(module, "BTN_STYLE_TGL_PR", PyLong_FromLong(3));
-    PyModule_AddObject(module, "BTN_STYLE_INA", PyLong_FromLong(4));
-    PyModule_AddObject(module, "CURSOR_NONE", PyLong_FromLong(0));
-    PyModule_AddObject(module, "CURSOR_LINE", PyLong_FromLong(1));
-    PyModule_AddObject(module, "CURSOR_BLOCK", PyLong_FromLong(2));
-    PyModule_AddObject(module, "CURSOR_OUTLINE", PyLong_FromLong(3));
-    PyModule_AddObject(module, "CURSOR_UNDERLINE", PyLong_FromLong(4));
-    PyModule_AddObject(module, "CURSOR_HIDDEN", PyLong_FromLong(16));
-    PyModule_AddObject(module, "TA_STYLE_BG", PyLong_FromLong(0));
-    PyModule_AddObject(module, "TA_STYLE_SB", PyLong_FromLong(1));
-    PyModule_AddObject(module, "TA_STYLE_CURSOR", PyLong_FromLong(2));
-    PyModule_AddObject(module, "ROLLER_STYLE_BG", PyLong_FromLong(0));
-    PyModule_AddObject(module, "ROLLER_STYLE_SEL", PyLong_FromLong(1));
-    PyModule_AddObject(module, "CHART_TYPE_LINE", PyLong_FromLong(1));
-    PyModule_AddObject(module, "CHART_TYPE_COLUMN", PyLong_FromLong(2));
-    PyModule_AddObject(module, "CHART_TYPE_POINT", PyLong_FromLong(4));
-    PyModule_AddObject(module, "BTNM_STYLE_BG", PyLong_FromLong(0));
-    PyModule_AddObject(module, "BTNM_STYLE_BTN_REL", PyLong_FromLong(1));
-    PyModule_AddObject(module, "BTNM_STYLE_BTN_PR", PyLong_FromLong(2));
-    PyModule_AddObject(module, "BTNM_STYLE_BTN_TGL_REL", PyLong_FromLong(3));
-    PyModule_AddObject(module, "BTNM_STYLE_BTN_TGL_PR", PyLong_FromLong(4));
-    PyModule_AddObject(module, "BTNM_STYLE_BTN_INA", PyLong_FromLong(5));
-    PyModule_AddObject(module, "DDLIST_STYLE_BG", PyLong_FromLong(0));
-    PyModule_AddObject(module, "DDLIST_STYLE_SEL", PyLong_FromLong(1));
-    PyModule_AddObject(module, "DDLIST_STYLE_SB", PyLong_FromLong(2));
-    PyModule_AddObject(module, "LAYOUT_OFF", PyLong_FromLong(0));
-    PyModule_AddObject(module, "LAYOUT_CENTER", PyLong_FromLong(1));
-    PyModule_AddObject(module, "LAYOUT_COL_L", PyLong_FromLong(2));
-    PyModule_AddObject(module, "LAYOUT_COL_M", PyLong_FromLong(3));
-    PyModule_AddObject(module, "LAYOUT_COL_R", PyLong_FromLong(4));
-    PyModule_AddObject(module, "LAYOUT_ROW_T", PyLong_FromLong(5));
-    PyModule_AddObject(module, "LAYOUT_ROW_M", PyLong_FromLong(6));
-    PyModule_AddObject(module, "LAYOUT_ROW_B", PyLong_FromLong(7));
-    PyModule_AddObject(module, "LAYOUT_PRETTY", PyLong_FromLong(8));
-    PyModule_AddObject(module, "LAYOUT_GRID", PyLong_FromLong(9));
+    PyModule_AddIntConstant(module, "DESIGN_DRAW_MAIN", 0);
+    PyModule_AddIntConstant(module, "DESIGN_DRAW_POST", 1);
+    PyModule_AddIntConstant(module, "DESIGN_COVER_CHK", 2);
+    PyModule_AddIntConstant(module, "RES_INV", 0);
+    PyModule_AddIntConstant(module, "RES_OK", 1);
+    PyModule_AddIntConstant(module, "SIGNAL_CLEANUP", 0);
+    PyModule_AddIntConstant(module, "SIGNAL_CHILD_CHG", 1);
+    PyModule_AddIntConstant(module, "SIGNAL_CORD_CHG", 2);
+    PyModule_AddIntConstant(module, "SIGNAL_STYLE_CHG", 3);
+    PyModule_AddIntConstant(module, "SIGNAL_REFR_EXT_SIZE", 4);
+    PyModule_AddIntConstant(module, "SIGNAL_GET_TYPE", 5);
+    PyModule_AddIntConstant(module, "SIGNAL_PRESSED", 6);
+    PyModule_AddIntConstant(module, "SIGNAL_PRESSING", 7);
+    PyModule_AddIntConstant(module, "SIGNAL_PRESS_LOST", 8);
+    PyModule_AddIntConstant(module, "SIGNAL_RELEASED", 9);
+    PyModule_AddIntConstant(module, "SIGNAL_LONG_PRESS", 10);
+    PyModule_AddIntConstant(module, "SIGNAL_LONG_PRESS_REP", 11);
+    PyModule_AddIntConstant(module, "SIGNAL_DRAG_BEGIN", 12);
+    PyModule_AddIntConstant(module, "SIGNAL_DRAG_END", 13);
+    PyModule_AddIntConstant(module, "SIGNAL_FOCUS", 14);
+    PyModule_AddIntConstant(module, "SIGNAL_DEFOCUS", 15);
+    PyModule_AddIntConstant(module, "SIGNAL_CONTROLL", 16);
+    PyModule_AddIntConstant(module, "PROTECT_NONE", 0);
+    PyModule_AddIntConstant(module, "PROTECT_CHILD_CHG", 1);
+    PyModule_AddIntConstant(module, "PROTECT_PARENT", 2);
+    PyModule_AddIntConstant(module, "PROTECT_POS", 4);
+    PyModule_AddIntConstant(module, "PROTECT_FOLLOW", 8);
+    PyModule_AddIntConstant(module, "PROTECT_PRESS_LOST", 16);
+    PyModule_AddIntConstant(module, "ALIGN_CENTER", 0);
+    PyModule_AddIntConstant(module, "ALIGN_IN_TOP_LEFT", 1);
+    PyModule_AddIntConstant(module, "ALIGN_IN_TOP_MID", 2);
+    PyModule_AddIntConstant(module, "ALIGN_IN_TOP_RIGHT", 3);
+    PyModule_AddIntConstant(module, "ALIGN_IN_BOTTOM_LEFT", 4);
+    PyModule_AddIntConstant(module, "ALIGN_IN_BOTTOM_MID", 5);
+    PyModule_AddIntConstant(module, "ALIGN_IN_BOTTOM_RIGHT", 6);
+    PyModule_AddIntConstant(module, "ALIGN_IN_LEFT_MID", 7);
+    PyModule_AddIntConstant(module, "ALIGN_IN_RIGHT_MID", 8);
+    PyModule_AddIntConstant(module, "ALIGN_OUT_TOP_LEFT", 9);
+    PyModule_AddIntConstant(module, "ALIGN_OUT_TOP_MID", 10);
+    PyModule_AddIntConstant(module, "ALIGN_OUT_TOP_RIGHT", 11);
+    PyModule_AddIntConstant(module, "ALIGN_OUT_BOTTOM_LEFT", 12);
+    PyModule_AddIntConstant(module, "ALIGN_OUT_BOTTOM_MID", 13);
+    PyModule_AddIntConstant(module, "ALIGN_OUT_BOTTOM_RIGHT", 14);
+    PyModule_AddIntConstant(module, "ALIGN_OUT_LEFT_TOP", 15);
+    PyModule_AddIntConstant(module, "ALIGN_OUT_LEFT_MID", 16);
+    PyModule_AddIntConstant(module, "ALIGN_OUT_LEFT_BOTTOM", 17);
+    PyModule_AddIntConstant(module, "ALIGN_OUT_RIGHT_TOP", 18);
+    PyModule_AddIntConstant(module, "ALIGN_OUT_RIGHT_MID", 19);
+    PyModule_AddIntConstant(module, "ALIGN_OUT_RIGHT_BOTTOM", 20);
+    PyModule_AddIntConstant(module, "ANIM_NONE", 0);
+    PyModule_AddIntConstant(module, "ANIM_FLOAT_TOP", 1);
+    PyModule_AddIntConstant(module, "ANIM_FLOAT_LEFT", 2);
+    PyModule_AddIntConstant(module, "ANIM_FLOAT_BOTTOM", 3);
+    PyModule_AddIntConstant(module, "ANIM_FLOAT_RIGHT", 4);
+    PyModule_AddIntConstant(module, "ANIM_GROW_H", 5);
+    PyModule_AddIntConstant(module, "ANIM_GROW_V", 6);
+    PyModule_AddIntConstant(module, "SLIDER_STYLE_BG", 0);
+    PyModule_AddIntConstant(module, "SLIDER_STYLE_INDIC", 1);
+    PyModule_AddIntConstant(module, "SLIDER_STYLE_KNOB", 2);
+    PyModule_AddIntConstant(module, "LIST_STYLE_BG", 0);
+    PyModule_AddIntConstant(module, "LIST_STYLE_SCRL", 1);
+    PyModule_AddIntConstant(module, "LIST_STYLE_SB", 2);
+    PyModule_AddIntConstant(module, "LIST_STYLE_BTN_REL", 3);
+    PyModule_AddIntConstant(module, "LIST_STYLE_BTN_PR", 4);
+    PyModule_AddIntConstant(module, "LIST_STYLE_BTN_TGL_REL", 5);
+    PyModule_AddIntConstant(module, "LIST_STYLE_BTN_TGL_PR", 6);
+    PyModule_AddIntConstant(module, "LIST_STYLE_BTN_INA", 7);
+    PyModule_AddIntConstant(module, "KB_MODE_TEXT", 0);
+    PyModule_AddIntConstant(module, "KB_MODE_NUM", 1);
+    PyModule_AddIntConstant(module, "KB_STYLE_BG", 0);
+    PyModule_AddIntConstant(module, "KB_STYLE_BTN_REL", 1);
+    PyModule_AddIntConstant(module, "KB_STYLE_BTN_PR", 2);
+    PyModule_AddIntConstant(module, "KB_STYLE_BTN_TGL_REL", 3);
+    PyModule_AddIntConstant(module, "KB_STYLE_BTN_TGL_PR", 4);
+    PyModule_AddIntConstant(module, "KB_STYLE_BTN_INA", 5);
+    PyModule_AddIntConstant(module, "BAR_STYLE_BG", 0);
+    PyModule_AddIntConstant(module, "BAR_STYLE_INDIC", 1);
+    PyModule_AddIntConstant(module, "TABVIEW_STYLE_BG", 0);
+    PyModule_AddIntConstant(module, "TABVIEW_STYLE_INDIC", 1);
+    PyModule_AddIntConstant(module, "TABVIEW_STYLE_BTN_BG", 2);
+    PyModule_AddIntConstant(module, "TABVIEW_STYLE_BTN_REL", 3);
+    PyModule_AddIntConstant(module, "TABVIEW_STYLE_BTN_PR", 4);
+    PyModule_AddIntConstant(module, "TABVIEW_STYLE_BTN_TGL_REL", 5);
+    PyModule_AddIntConstant(module, "TABVIEW_STYLE_BTN_TGL_PR", 6);
+    PyModule_AddIntConstant(module, "SW_STYLE_BG", 0);
+    PyModule_AddIntConstant(module, "SW_STYLE_INDIC", 1);
+    PyModule_AddIntConstant(module, "SW_STYLE_KNOB_OFF", 2);
+    PyModule_AddIntConstant(module, "SW_STYLE_KNOB_ON", 3);
+    PyModule_AddIntConstant(module, "MBOX_STYLE_BG", 0);
+    PyModule_AddIntConstant(module, "MBOX_STYLE_BTN_BG", 1);
+    PyModule_AddIntConstant(module, "MBOX_STYLE_BTN_REL", 2);
+    PyModule_AddIntConstant(module, "MBOX_STYLE_BTN_PR", 3);
+    PyModule_AddIntConstant(module, "MBOX_STYLE_BTN_TGL_REL", 4);
+    PyModule_AddIntConstant(module, "MBOX_STYLE_BTN_TGL_PR", 5);
+    PyModule_AddIntConstant(module, "MBOX_STYLE_BTN_INA", 6);
+    PyModule_AddIntConstant(module, "LABEL_LONG_EXPAND", 0);
+    PyModule_AddIntConstant(module, "LABEL_LONG_BREAK", 1);
+    PyModule_AddIntConstant(module, "LABEL_LONG_SCROLL", 2);
+    PyModule_AddIntConstant(module, "LABEL_LONG_DOT", 3);
+    PyModule_AddIntConstant(module, "LABEL_LONG_ROLL", 4);
+    PyModule_AddIntConstant(module, "LABEL_ALIGN_LEFT", 0);
+    PyModule_AddIntConstant(module, "LABEL_ALIGN_CENTER", 1);
+    PyModule_AddIntConstant(module, "CB_STYLE_BG", 0);
+    PyModule_AddIntConstant(module, "CB_STYLE_BOX_REL", 1);
+    PyModule_AddIntConstant(module, "CB_STYLE_BOX_PR", 2);
+    PyModule_AddIntConstant(module, "CB_STYLE_BOX_TGL_REL", 3);
+    PyModule_AddIntConstant(module, "CB_STYLE_BOX_TGL_PR", 4);
+    PyModule_AddIntConstant(module, "CB_STYLE_BOX_INA", 5);
+    PyModule_AddIntConstant(module, "SB_MODE_OFF", 0);
+    PyModule_AddIntConstant(module, "SB_MODE_ON", 1);
+    PyModule_AddIntConstant(module, "SB_MODE_DRAG", 2);
+    PyModule_AddIntConstant(module, "SB_MODE_AUTO", 3);
+    PyModule_AddIntConstant(module, "PAGE_STYLE_BG", 0);
+    PyModule_AddIntConstant(module, "PAGE_STYLE_SCRL", 1);
+    PyModule_AddIntConstant(module, "PAGE_STYLE_SB", 2);
+    PyModule_AddIntConstant(module, "WIN_STYLE_BG", 0);
+    PyModule_AddIntConstant(module, "WIN_STYLE_CONTENT_BG", 1);
+    PyModule_AddIntConstant(module, "WIN_STYLE_CONTENT_SCRL", 2);
+    PyModule_AddIntConstant(module, "WIN_STYLE_SB", 3);
+    PyModule_AddIntConstant(module, "WIN_STYLE_HEADER", 4);
+    PyModule_AddIntConstant(module, "WIN_STYLE_BTN_REL", 5);
+    PyModule_AddIntConstant(module, "WIN_STYLE_BTN_PR", 6);
+    PyModule_AddIntConstant(module, "BTN_STATE_REL", 0);
+    PyModule_AddIntConstant(module, "BTN_STATE_PR", 1);
+    PyModule_AddIntConstant(module, "BTN_STATE_TGL_REL", 2);
+    PyModule_AddIntConstant(module, "BTN_STATE_TGL_PR", 3);
+    PyModule_AddIntConstant(module, "BTN_STATE_INA", 4);
+    PyModule_AddIntConstant(module, "BTN_STATE_NUM", 5);
+    PyModule_AddIntConstant(module, "BTN_ACTION_CLICK", 0);
+    PyModule_AddIntConstant(module, "BTN_ACTION_PR", 1);
+    PyModule_AddIntConstant(module, "BTN_ACTION_LONG_PR", 2);
+    PyModule_AddIntConstant(module, "BTN_ACTION_LONG_PR_REPEAT", 3);
+    PyModule_AddIntConstant(module, "BTN_ACTION_NUM", 4);
+    PyModule_AddIntConstant(module, "BTN_STYLE_REL", 0);
+    PyModule_AddIntConstant(module, "BTN_STYLE_PR", 1);
+    PyModule_AddIntConstant(module, "BTN_STYLE_TGL_REL", 2);
+    PyModule_AddIntConstant(module, "BTN_STYLE_TGL_PR", 3);
+    PyModule_AddIntConstant(module, "BTN_STYLE_INA", 4);
+    PyModule_AddIntConstant(module, "CURSOR_NONE", 0);
+    PyModule_AddIntConstant(module, "CURSOR_LINE", 1);
+    PyModule_AddIntConstant(module, "CURSOR_BLOCK", 2);
+    PyModule_AddIntConstant(module, "CURSOR_OUTLINE", 3);
+    PyModule_AddIntConstant(module, "CURSOR_UNDERLINE", 4);
+    PyModule_AddIntConstant(module, "CURSOR_HIDDEN", 16);
+    PyModule_AddIntConstant(module, "TA_STYLE_BG", 0);
+    PyModule_AddIntConstant(module, "TA_STYLE_SB", 1);
+    PyModule_AddIntConstant(module, "TA_STYLE_CURSOR", 2);
+    PyModule_AddIntConstant(module, "ROLLER_STYLE_BG", 0);
+    PyModule_AddIntConstant(module, "ROLLER_STYLE_SEL", 1);
+    PyModule_AddIntConstant(module, "CHART_TYPE_LINE", 1);
+    PyModule_AddIntConstant(module, "CHART_TYPE_COLUMN", 2);
+    PyModule_AddIntConstant(module, "CHART_TYPE_POINT", 4);
+    PyModule_AddIntConstant(module, "BTNM_STYLE_BG", 0);
+    PyModule_AddIntConstant(module, "BTNM_STYLE_BTN_REL", 1);
+    PyModule_AddIntConstant(module, "BTNM_STYLE_BTN_PR", 2);
+    PyModule_AddIntConstant(module, "BTNM_STYLE_BTN_TGL_REL", 3);
+    PyModule_AddIntConstant(module, "BTNM_STYLE_BTN_TGL_PR", 4);
+    PyModule_AddIntConstant(module, "BTNM_STYLE_BTN_INA", 5);
+    PyModule_AddIntConstant(module, "DDLIST_STYLE_BG", 0);
+    PyModule_AddIntConstant(module, "DDLIST_STYLE_SEL", 1);
+    PyModule_AddIntConstant(module, "DDLIST_STYLE_SB", 2);
+    PyModule_AddIntConstant(module, "LAYOUT_OFF", 0);
+    PyModule_AddIntConstant(module, "LAYOUT_CENTER", 1);
+    PyModule_AddIntConstant(module, "LAYOUT_COL_L", 2);
+    PyModule_AddIntConstant(module, "LAYOUT_COL_M", 3);
+    PyModule_AddIntConstant(module, "LAYOUT_COL_R", 4);
+    PyModule_AddIntConstant(module, "LAYOUT_ROW_T", 5);
+    PyModule_AddIntConstant(module, "LAYOUT_ROW_M", 6);
+    PyModule_AddIntConstant(module, "LAYOUT_ROW_B", 7);
+    PyModule_AddIntConstant(module, "LAYOUT_PRETTY", 8);
+    PyModule_AddIntConstant(module, "LAYOUT_GRID", 9);
 
     
     PyModule_AddObject(module, "style_scr",Style_From_lv_style(&lv_style_scr));
@@ -6343,58 +6298,86 @@ PyInit_lvgl(void) {
     PyModule_AddObject(module, "font_symbol_40", Font_From_lv_font(&lv_font_symbol_40));
 
 
-    PyModule_AddObject(module, "SYMBOL_AUDIO", PyUnicode_FromString("\xEF\x80\x80"));
-    PyModule_AddObject(module, "SYMBOL_VIDEO", PyUnicode_FromString("\xEF\x80\x81"));
-    PyModule_AddObject(module, "SYMBOL_LIST", PyUnicode_FromString("\xEF\x80\x82"));
-    PyModule_AddObject(module, "SYMBOL_OK", PyUnicode_FromString("\xEF\x80\x83"));
-    PyModule_AddObject(module, "SYMBOL_CLOSE", PyUnicode_FromString("\xEF\x80\x84"));
-    PyModule_AddObject(module, "SYMBOL_POWER", PyUnicode_FromString("\xEF\x80\x85"));
-    PyModule_AddObject(module, "SYMBOL_SETTINGS", PyUnicode_FromString("\xEF\x80\x86"));
-    PyModule_AddObject(module, "SYMBOL_TRASH", PyUnicode_FromString("\xEF\x80\x87"));
-    PyModule_AddObject(module, "SYMBOL_HOME", PyUnicode_FromString("\xEF\x80\x88"));
-    PyModule_AddObject(module, "SYMBOL_DOWNLOAD", PyUnicode_FromString("\xEF\x80\x89"));
-    PyModule_AddObject(module, "SYMBOL_DRIVE", PyUnicode_FromString("\xEF\x80\x8A"));
-    PyModule_AddObject(module, "SYMBOL_REFRESH", PyUnicode_FromString("\xEF\x80\x8B"));
-    PyModule_AddObject(module, "SYMBOL_MUTE", PyUnicode_FromString("\xEF\x80\x8C"));
-    PyModule_AddObject(module, "SYMBOL_VOLUME_MID", PyUnicode_FromString("\xEF\x80\x8D"));
-    PyModule_AddObject(module, "SYMBOL_VOLUME_MAX", PyUnicode_FromString("\xEF\x80\x8E"));
-    PyModule_AddObject(module, "SYMBOL_IMAGE", PyUnicode_FromString("\xEF\x80\x8F"));
-    PyModule_AddObject(module, "SYMBOL_EDIT", PyUnicode_FromString("\xEF\x80\x90"));
-    PyModule_AddObject(module, "SYMBOL_PREV", PyUnicode_FromString("\xEF\x80\x91"));
-    PyModule_AddObject(module, "SYMBOL_PLAY", PyUnicode_FromString("\xEF\x80\x92"));
-    PyModule_AddObject(module, "SYMBOL_PAUSE", PyUnicode_FromString("\xEF\x80\x93"));
-    PyModule_AddObject(module, "SYMBOL_STOP", PyUnicode_FromString("\xEF\x80\x94"));
-    PyModule_AddObject(module, "SYMBOL_NEXT", PyUnicode_FromString("\xEF\x80\x95"));
-    PyModule_AddObject(module, "SYMBOL_EJECT", PyUnicode_FromString("\xEF\x80\x96"));
-    PyModule_AddObject(module, "SYMBOL_LEFT", PyUnicode_FromString("\xEF\x80\x97"));
-    PyModule_AddObject(module, "SYMBOL_RIGHT", PyUnicode_FromString("\xEF\x80\x98"));
-    PyModule_AddObject(module, "SYMBOL_PLUS", PyUnicode_FromString("\xEF\x80\x99"));
-    PyModule_AddObject(module, "SYMBOL_MINUS", PyUnicode_FromString("\xEF\x80\x9A"));
-    PyModule_AddObject(module, "SYMBOL_WARNING", PyUnicode_FromString("\xEF\x80\x9B"));
-    PyModule_AddObject(module, "SYMBOL_SHUFFLE", PyUnicode_FromString("\xEF\x80\x9C"));
-    PyModule_AddObject(module, "SYMBOL_UP", PyUnicode_FromString("\xEF\x80\x9D"));
-    PyModule_AddObject(module, "SYMBOL_DOWN", PyUnicode_FromString("\xEF\x80\x9E"));
-    PyModule_AddObject(module, "SYMBOL_LOOP", PyUnicode_FromString("\xEF\x80\x9F"));
-    PyModule_AddObject(module, "SYMBOL_DIRECTORY", PyUnicode_FromString("\xEF\x80\xA0"));
-    PyModule_AddObject(module, "SYMBOL_UPLOAD", PyUnicode_FromString("\xEF\x80\xA1"));
-    PyModule_AddObject(module, "SYMBOL_CALL", PyUnicode_FromString("\xEF\x80\xA2"));
-    PyModule_AddObject(module, "SYMBOL_CUT", PyUnicode_FromString("\xEF\x80\xA3"));
-    PyModule_AddObject(module, "SYMBOL_COPY", PyUnicode_FromString("\xEF\x80\xA4"));
-    PyModule_AddObject(module, "SYMBOL_SAVE", PyUnicode_FromString("\xEF\x80\xA5"));
-    PyModule_AddObject(module, "SYMBOL_CHARGE", PyUnicode_FromString("\xEF\x80\xA6"));
-    PyModule_AddObject(module, "SYMBOL_BELL", PyUnicode_FromString("\xEF\x80\xA7"));
-    PyModule_AddObject(module, "SYMBOL_KEYBOARD", PyUnicode_FromString("\xEF\x80\xA8"));
-    PyModule_AddObject(module, "SYMBOL_GPS", PyUnicode_FromString("\xEF\x80\xA9"));
-    PyModule_AddObject(module, "SYMBOL_FILE", PyUnicode_FromString("\xEF\x80\xAA"));
-    PyModule_AddObject(module, "SYMBOL_WIFI", PyUnicode_FromString("\xEF\x80\xAB"));
-    PyModule_AddObject(module, "SYMBOL_BATTERY_FULL", PyUnicode_FromString("\xEF\x80\xAC"));
-    PyModule_AddObject(module, "SYMBOL_BATTERY_3", PyUnicode_FromString("\xEF\x80\xAD"));
-    PyModule_AddObject(module, "SYMBOL_BATTERY_2", PyUnicode_FromString("\xEF\x80\xAE"));
-    PyModule_AddObject(module, "SYMBOL_BATTERY_1", PyUnicode_FromString("\xEF\x80\xAF"));
-    PyModule_AddObject(module, "SYMBOL_BATTERY_EMPTY", PyUnicode_FromString("\xEF\x80\xB0"));
-    PyModule_AddObject(module, "SYMBOL_BLUETOOTH", PyUnicode_FromString("\xEF\x80\xB1"));
+    PyModule_AddStringConstant(module, "SYMBOL_AUDIO", "\xEF\x80\x80");
+    PyModule_AddStringConstant(module, "SYMBOL_VIDEO", "\xEF\x80\x81");
+    PyModule_AddStringConstant(module, "SYMBOL_LIST", "\xEF\x80\x82");
+    PyModule_AddStringConstant(module, "SYMBOL_OK", "\xEF\x80\x83");
+    PyModule_AddStringConstant(module, "SYMBOL_CLOSE", "\xEF\x80\x84");
+    PyModule_AddStringConstant(module, "SYMBOL_POWER", "\xEF\x80\x85");
+    PyModule_AddStringConstant(module, "SYMBOL_SETTINGS", "\xEF\x80\x86");
+    PyModule_AddStringConstant(module, "SYMBOL_TRASH", "\xEF\x80\x87");
+    PyModule_AddStringConstant(module, "SYMBOL_HOME", "\xEF\x80\x88");
+    PyModule_AddStringConstant(module, "SYMBOL_DOWNLOAD", "\xEF\x80\x89");
+    PyModule_AddStringConstant(module, "SYMBOL_DRIVE", "\xEF\x80\x8A");
+    PyModule_AddStringConstant(module, "SYMBOL_REFRESH", "\xEF\x80\x8B");
+    PyModule_AddStringConstant(module, "SYMBOL_MUTE", "\xEF\x80\x8C");
+    PyModule_AddStringConstant(module, "SYMBOL_VOLUME_MID", "\xEF\x80\x8D");
+    PyModule_AddStringConstant(module, "SYMBOL_VOLUME_MAX", "\xEF\x80\x8E");
+    PyModule_AddStringConstant(module, "SYMBOL_IMAGE", "\xEF\x80\x8F");
+    PyModule_AddStringConstant(module, "SYMBOL_EDIT", "\xEF\x80\x90");
+    PyModule_AddStringConstant(module, "SYMBOL_PREV", "\xEF\x80\x91");
+    PyModule_AddStringConstant(module, "SYMBOL_PLAY", "\xEF\x80\x92");
+    PyModule_AddStringConstant(module, "SYMBOL_PAUSE", "\xEF\x80\x93");
+    PyModule_AddStringConstant(module, "SYMBOL_STOP", "\xEF\x80\x94");
+    PyModule_AddStringConstant(module, "SYMBOL_NEXT", "\xEF\x80\x95");
+    PyModule_AddStringConstant(module, "SYMBOL_EJECT", "\xEF\x80\x96");
+    PyModule_AddStringConstant(module, "SYMBOL_LEFT", "\xEF\x80\x97");
+    PyModule_AddStringConstant(module, "SYMBOL_RIGHT", "\xEF\x80\x98");
+    PyModule_AddStringConstant(module, "SYMBOL_PLUS", "\xEF\x80\x99");
+    PyModule_AddStringConstant(module, "SYMBOL_MINUS", "\xEF\x80\x9A");
+    PyModule_AddStringConstant(module, "SYMBOL_WARNING", "\xEF\x80\x9B");
+    PyModule_AddStringConstant(module, "SYMBOL_SHUFFLE", "\xEF\x80\x9C");
+    PyModule_AddStringConstant(module, "SYMBOL_UP", "\xEF\x80\x9D");
+    PyModule_AddStringConstant(module, "SYMBOL_DOWN", "\xEF\x80\x9E");
+    PyModule_AddStringConstant(module, "SYMBOL_LOOP", "\xEF\x80\x9F");
+    PyModule_AddStringConstant(module, "SYMBOL_DIRECTORY", "\xEF\x80\xA0");
+    PyModule_AddStringConstant(module, "SYMBOL_UPLOAD", "\xEF\x80\xA1");
+    PyModule_AddStringConstant(module, "SYMBOL_CALL", "\xEF\x80\xA2");
+    PyModule_AddStringConstant(module, "SYMBOL_CUT", "\xEF\x80\xA3");
+    PyModule_AddStringConstant(module, "SYMBOL_COPY", "\xEF\x80\xA4");
+    PyModule_AddStringConstant(module, "SYMBOL_SAVE", "\xEF\x80\xA5");
+    PyModule_AddStringConstant(module, "SYMBOL_CHARGE", "\xEF\x80\xA6");
+    PyModule_AddStringConstant(module, "SYMBOL_BELL", "\xEF\x80\xA7");
+    PyModule_AddStringConstant(module, "SYMBOL_KEYBOARD", "\xEF\x80\xA8");
+    PyModule_AddStringConstant(module, "SYMBOL_GPS", "\xEF\x80\xA9");
+    PyModule_AddStringConstant(module, "SYMBOL_FILE", "\xEF\x80\xAA");
+    PyModule_AddStringConstant(module, "SYMBOL_WIFI", "\xEF\x80\xAB");
+    PyModule_AddStringConstant(module, "SYMBOL_BATTERY_FULL", "\xEF\x80\xAC");
+    PyModule_AddStringConstant(module, "SYMBOL_BATTERY_3", "\xEF\x80\xAD");
+    PyModule_AddStringConstant(module, "SYMBOL_BATTERY_2", "\xEF\x80\xAE");
+    PyModule_AddStringConstant(module, "SYMBOL_BATTERY_1", "\xEF\x80\xAF");
+    PyModule_AddStringConstant(module, "SYMBOL_BATTERY_EMPTY", "\xEF\x80\xB0");
+    PyModule_AddStringConstant(module, "SYMBOL_BLUETOOTH", "\xEF\x80\xB1");
 
 
+    // refcount for typesdict is initally 1; it is used by pyobj_from_lv
+    // refcounts to py{name}_Type objects are incremented due to "O" format
+    typesdict = Py_BuildValue("{sOsOsOsOsOsOsOsOsOsOsOsOsOsOsOsOsOsOsOsOsOsOsOsO}",
+        "lv_obj", &pylv_obj_Type,
+        "lv_win", &pylv_win_Type,
+        "lv_label", &pylv_label_Type,
+        "lv_lmeter", &pylv_lmeter_Type,
+        "lv_btnm", &pylv_btnm_Type,
+        "lv_chart", &pylv_chart_Type,
+        "lv_cont", &pylv_cont_Type,
+        "lv_led", &pylv_led_Type,
+        "lv_kb", &pylv_kb_Type,
+        "lv_img", &pylv_img_Type,
+        "lv_bar", &pylv_bar_Type,
+        "lv_line", &pylv_line_Type,
+        "lv_tabview", &pylv_tabview_Type,
+        "lv_mbox", &pylv_mbox_Type,
+        "lv_gauge", &pylv_gauge_Type,
+        "lv_page", &pylv_page_Type,
+        "lv_ta", &pylv_ta_Type,
+        "lv_btn", &pylv_btn_Type,
+        "lv_ddlist", &pylv_ddlist_Type,
+        "lv_list", &pylv_list_Type,
+        "lv_slider", &pylv_slider_Type,
+        "lv_sw", &pylv_sw_Type,
+        "lv_cb", &pylv_cb_Type,
+        "lv_roller", &pylv_roller_Type);
+    
     PyModule_AddObject(module, "framebuffer", PyMemoryView_FromMemory(framebuffer, LV_HOR_RES * LV_VER_RES * 2, PyBUF_READ));
     PyModule_AddObject(module, "HOR_RES", PyLong_FromLong(LV_HOR_RES));
     PyModule_AddObject(module, "VER_RES", PyLong_FromLong(LV_VER_RES));

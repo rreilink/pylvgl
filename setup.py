@@ -1,4 +1,5 @@
 import sys
+import os
 import shutil
 import glob
 
@@ -16,8 +17,13 @@ module1 = Extension('lvgl',
     )
 
 setup (name = 'lvgl',
-       version = '1.0',
+       version = '0.1',
        description = 'lvgl bindings',
        ext_modules = [module1])
 
-shutil.copy('build/lib.macosx-10.7-x86_64-3.6/lvgl.cpython-36m-darwin.so', '.')
+if os.name == 'nt':
+    shutil.copy(r'build\lib.win-amd64-3.6\lvgl.cp36-win_amd64.pyd', '.')
+
+else:
+    shutil.copy('build/lib.macosx-10.7-x86_64-3.6/lvgl.cpython-36m-darwin.so', '.')
+    
