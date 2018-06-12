@@ -42,8 +42,12 @@ void lv_set_lock_unlock( void (*flock)(void *), void * flock_arg,
     unlock = funlock;
 }
 
-PyObject * pyobj_from_lv(lv_obj_t *obj, PyTypeObject *tp) {
+PyObject * pyobj_from_lv(lv_obj_t *obj) {
     pylv_Obj *pyobj;
+    lv_obj_type_t result;
+    PyTypeObject *tp;
+    
+        
     if (!obj) {
         Py_RETURN_NONE;
     }
@@ -54,6 +58,20 @@ PyObject * pyobj_from_lv(lv_obj_t *obj, PyTypeObject *tp) {
         Py_INCREF(pyobj); // increase reference count of returned object
     } else {
         // Python object for this lv object does not yet exist. Create a new one
+        
+        // Determine type
+        lv_obj_get_type(obj, &result);
+        
+        // TODO: generated code with all types
+        tp = &pylv_obj_Type;
+        if (result.type[0]) {
+            if (strcmp(result.type[0], "lv_btn") == 0) {
+                tp = &pylv_btn_Type;
+            } else if (strcmp(result.type[0], "lv_cont") == 0) {
+                tp = &pylv_cont_Type;
+            }
+        }
+        
         // Be sure to zero out the memory
         pyobj = PyObject_Malloc(tp->tp_basicsize);
         if (!pyobj) return NULL;
@@ -444,6 +462,145 @@ error:
     return NULL;
 }
 
+lv_res_t pylv_obj_signal_callback(lv_obj_t* obj, lv_signal_t signal, void *param) {
+    pylv_Obj *pyobj;
+    PyObject *handler;
+    PyObject *pyarg;
+    lv_res_t result;
+    lv_point_t point,drag_vect;
+    PyObject *dragging;
+    
+    pyobj = lv_obj_get_free_ptr(obj);
+    if (pyobj) {
+        result = pyobj->orig_c_signal_func(obj, signal, param);
+        if (result == LV_RES_OK) {
+            handler = pyobj->signal_func;
+            if (handler) {
+                switch(signal) {
+                /* All signals that have an lv_indev_t * as argument */
+                case LV_SIGNAL_PRESSED:
+                case LV_SIGNAL_PRESSING:
+                case LV_SIGNAL_PRESS_LOST:
+                case LV_SIGNAL_RELEASED:
+                case LV_SIGNAL_LONG_PRESS:
+                case LV_SIGNAL_LONG_PRESS_REP:
+                case LV_SIGNAL_DRAG_BEGIN:
+                case LV_SIGNAL_DRAG_END:
+                    lv_indev_get_point(param, &point);
+                    dragging = lv_indev_is_dragging(param) ? Py_True : Py_False; // ref count is increased by Py_BuildValue "O"
+                    lv_indev_get_vect(param, &drag_vect);
+                    pyarg = Py_BuildValue("{s(ii)s(ii)sOs(ii)}", 
+                        "screenpos", (int) point.x, (int) point.y, 
+                        "objpos", (int) (point.x - obj->coords.x1), (int) (point.y - obj->coords.y1), 
+                        "dragging", dragging, 
+                        "dragvector", (int) drag_vect.x, (int) drag_vect.y);
+                    
+                    break;
+                /* Not implemented (yet), arg = None*/
+                case LV_SIGNAL_CLEANUP:
+                case LV_SIGNAL_CHILD_CHG:
+                case LV_SIGNAL_CORD_CHG:
+                case LV_SIGNAL_STYLE_CHG:
+                case LV_SIGNAL_REFR_EXT_SIZE:
+                case LV_SIGNAL_GET_TYPE:                    
+                case LV_SIGNAL_FOCUS:
+                case LV_SIGNAL_DEFOCUS:
+                case LV_SIGNAL_CONTROLL:
+                default:
+                    pyarg = Py_None;
+                    Py_INCREF(pyarg);
+                }
+                
+                // We are called from within lv_poll which will mean the lock is held
+                // Release it since we are allowed to call lv_ functions now
+                // (Would otherwise result in deadlock when lvgl calls are made from
+                // with the signal handler)
+                if (unlock) unlock(unlock_arg);            
+                PyObject_CallFunction(handler, "iO", (int) signal, pyarg);
+                if (lock) lock(lock_arg);
+
+                
+                Py_DECREF(pyarg);
+            }
+            if (PyErr_Occurred()) PyErr_Print();
+        }
+    }
+    return LV_RES_OK;
+}
+
+
+static PyObject*
+pylv_obj_get_signal_func(pylv_Obj *self, PyObject *args, PyObject *kwds)
+{
+    static char *kwlist[] = {NULL};
+    if (!PyArg_ParseTupleAndKeywords(args, kwds, "", kwlist)) return NULL;   
+    
+    PyObject *signal_func = self->signal_func;
+    if (!signal_func) Py_RETURN_NONE;
+
+    Py_INCREF(signal_func);
+    return signal_func;
+}
+
+static PyObject *
+pylv_obj_set_signal_func(pylv_Ddlist *self, PyObject *args, PyObject *kwds)
+{
+    static char *kwlist[] = {"signal_func", NULL};
+    PyObject *signal_func, *tmp;
+    if (!PyArg_ParseTupleAndKeywords(args, kwds, "O", kwlist , &signal_func)) return NULL;
+    
+    tmp = self->signal_func;
+    if (signal_func == Py_None) {
+        self->signal_func = NULL;
+    } else {
+        self->signal_func = signal_func;
+        Py_INCREF(signal_func);
+        
+        if (lock) lock(lock_arg);
+        if (!self->orig_c_signal_func) {
+            self->orig_c_signal_func = lv_obj_get_signal_func(self->ref);
+        }
+        lv_obj_set_signal_func(self->ref, pylv_obj_signal_callback);
+        if (unlock) unlock(unlock_arg);
+    }
+    Py_XDECREF(tmp); // Old action (tmp) could be NULL
+
+    Py_RETURN_NONE;
+}
+
+
+static PyObject*
+pylv_label_get_letter_pos(pylv_Label *self, PyObject *args, PyObject *kwds)
+{
+    static char *kwlist[] = {"index", NULL};
+    int index;
+    lv_point_t pos;
+    if (!PyArg_ParseTupleAndKeywords(args, kwds, "i", kwlist , &index)) return NULL;   
+    
+    if (lock) lock(lock_arg);
+    lv_label_get_letter_pos(self->ref, index, &pos);
+    if (unlock) unlock(unlock_arg);
+
+    return Py_BuildValue("ii", (int) pos.x, (int) pos.y);
+}
+
+static PyObject*
+pylv_label_get_letter_on(pylv_Label *self, PyObject *args, PyObject *kwds)
+{
+    static char *kwlist[] = {"pos", NULL};
+    int x, y, index;
+    lv_point_t pos;
+    if (!PyArg_ParseTupleAndKeywords(args, kwds, "(ii)", kwlist , &x, &y)) return NULL;   
+    
+    pos.x = x;
+    pos.y = y;
+    
+    if (lock) lock(lock_arg);
+    index = lv_label_get_letter_on(self->ref, &pos);
+    if (unlock) unlock(unlock_arg);
+
+    return Py_BuildValue("i", index);
+}
 
 static PyObject*
 pylv_btnm_set_map(pylv_Btnm *self, PyObject *args, PyObject *kwds)
@@ -487,7 +644,7 @@ pylv_list_add(pylv_List *self, PyObject *args, PyObject *kwds)
     } 
 
     if (lock) lock(lock_arg);
-    ret = pyobj_from_lv(lv_list_add(self->ref, NULL, txt, NULL), &pylv_btn_Type);
+    ret = pyobj_from_lv(lv_list_add(self->ref, NULL, txt, NULL));
     if (unlock) unlock(unlock_arg);
     
     return ret;
@@ -627,7 +784,7 @@ pylv_scr_act(PyObject *self, PyObject *args) {
     if (lock) lock(lock_arg);
     scr = lv_scr_act();
     if (unlock) unlock(unlock_arg);
-    return pyobj_from_lv(scr, &pylv_obj_Type);
+    return pyobj_from_lv(scr);
 }
 
 static PyObject *

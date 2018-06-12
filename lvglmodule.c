@@ -13,6 +13,8 @@
 typedef struct {
     PyObject_HEAD
     lv_obj_t *ref;
+    PyObject *signal_func;
+    lv_signal_func_t orig_c_signal_func;
 } pylv_Obj;
 
 typedef pylv_Obj pylv_Win;
@@ -24,6 +26,8 @@ typedef pylv_Obj pylv_Lmeter;
 typedef struct {
     PyObject_HEAD
     lv_obj_t *ref;
+    PyObject *signal_func;
+    lv_signal_func_t orig_c_signal_func;
     const char **map;
 } pylv_Btnm;
 
@@ -36,6 +40,8 @@ typedef pylv_Obj pylv_Led;
 typedef struct {
     PyObject_HEAD
     lv_obj_t *ref;
+    PyObject *signal_func;
+    lv_signal_func_t orig_c_signal_func;
     const char **map;
     PyObject *ok_action;
     PyObject *hide_action;
@@ -56,6 +62,8 @@ typedef pylv_Lmeter pylv_Gauge;
 typedef struct {
     PyObject_HEAD
     lv_obj_t *ref;
+    PyObject *signal_func;
+    lv_signal_func_t orig_c_signal_func;
     PyObject *rel_action;
     PyObject *pr_action;
 } pylv_Page;
@@ -65,12 +73,16 @@ typedef pylv_Page pylv_Ta;
 typedef struct {
     PyObject_HEAD
     lv_obj_t *ref;
+    PyObject *signal_func;
+    lv_signal_func_t orig_c_signal_func;
     PyObject *actions[LV_BTN_ACTION_NUM];
 } pylv_Btn;
 
 typedef struct {
     PyObject_HEAD
     lv_obj_t *ref;
+    PyObject *signal_func;
+    lv_signal_func_t orig_c_signal_func;
     PyObject *rel_action;
     PyObject *pr_action;
     PyObject *action;
@@ -81,6 +93,8 @@ typedef pylv_Page pylv_List;
 typedef struct {
     PyObject_HEAD
     lv_obj_t *ref;
+    PyObject *signal_func;
+    lv_signal_func_t orig_c_signal_func;
     PyObject *action;
 } pylv_Slider;
 
@@ -89,6 +103,8 @@ typedef pylv_Slider pylv_Sw;
 typedef struct {
     PyObject_HEAD
     lv_obj_t *ref;
+    PyObject *signal_func;
+    lv_signal_func_t orig_c_signal_func;
     PyObject *actions[LV_BTN_ACTION_NUM];
     PyObject *action;
 } pylv_Cb;
@@ -173,8 +189,12 @@ void lv_set_lock_unlock( void (*flock)(void *), void * flock_arg,
     unlock = funlock;
 }
 
-PyObject * pyobj_from_lv(lv_obj_t *obj, PyTypeObject *tp) {
+PyObject * pyobj_from_lv(lv_obj_t *obj) {
     pylv_Obj *pyobj;
+    lv_obj_type_t result;
+    PyTypeObject *tp;
+    
+        
     if (!obj) {
         Py_RETURN_NONE;
     }
@@ -185,6 +205,20 @@ PyObject * pyobj_from_lv(lv_obj_t *obj, PyTypeObject *tp) {
         Py_INCREF(pyobj); // increase reference count of returned object
     } else {
         // Python object for this lv object does not yet exist. Create a new one
+        
+        // Determine type
+        lv_obj_get_type(obj, &result);
+        
+        // TODO: generated code with all types
+        tp = &pylv_obj_Type;
+        if (result.type[0]) {
+            if (strcmp(result.type[0], "lv_btn") == 0) {
+                tp = &pylv_btn_Type;
+            } else if (strcmp(result.type[0], "lv_cont") == 0) {
+                tp = &pylv_cont_Type;
+            }
+        }
+        
         // Be sure to zero out the memory
         pyobj = PyObject_Malloc(tp->tp_basicsize);
         if (!pyobj) return NULL;
@@ -598,6 +632,145 @@ error:
     return NULL;
 }
 
+lv_res_t pylv_obj_signal_callback(lv_obj_t* obj, lv_signal_t signal, void *param) {
+    pylv_Obj *pyobj;
+    PyObject *handler;
+    PyObject *pyarg;
+    lv_res_t result;
+    lv_point_t point,drag_vect;
+    PyObject *dragging;
+    
+    pyobj = lv_obj_get_free_ptr(obj);
+    if (pyobj) {
+        result = pyobj->orig_c_signal_func(obj, signal, param);
+        if (result == LV_RES_OK) {
+            handler = pyobj->signal_func;
+            if (handler) {
+                switch(signal) {
+                /* All signals that have an lv_indev_t * as argument */
+                case LV_SIGNAL_PRESSED:
+                case LV_SIGNAL_PRESSING:
+                case LV_SIGNAL_PRESS_LOST:
+                case LV_SIGNAL_RELEASED:
+                case LV_SIGNAL_LONG_PRESS:
+                case LV_SIGNAL_LONG_PRESS_REP:
+                case LV_SIGNAL_DRAG_BEGIN:
+                case LV_SIGNAL_DRAG_END:
+                    lv_indev_get_point(param, &point);
+                    dragging = lv_indev_is_dragging(param) ? Py_True : Py_False; // ref count is increased by Py_BuildValue "O"
+                    lv_indev_get_vect(param, &drag_vect);
+                    pyarg = Py_BuildValue("{s(ii)s(ii)sOs(ii)}", 
+                        "screenpos", (int) point.x, (int) point.y, 
+                        "objpos", (int) (point.x - obj->coords.x1), (int) (point.y - obj->coords.y1), 
+                        "dragging", dragging, 
+                        "dragvector", (int) drag_vect.x, (int) drag_vect.y);
+                    
+                    break;
+                /* Not implemented (yet), arg = None*/
+                case LV_SIGNAL_CLEANUP:
+                case LV_SIGNAL_CHILD_CHG:
+                case LV_SIGNAL_CORD_CHG:
+                case LV_SIGNAL_STYLE_CHG:
+                case LV_SIGNAL_REFR_EXT_SIZE:
+                case LV_SIGNAL_GET_TYPE:                    
+                case LV_SIGNAL_FOCUS:
+                case LV_SIGNAL_DEFOCUS:
+                case LV_SIGNAL_CONTROLL:
+                default:
+                    pyarg = Py_None;
+                    Py_INCREF(pyarg);
+                }
+                
+                // We are called from within lv_poll which will mean the lock is held
+                // Release it since we are allowed to call lv_ functions now
+                // (Would otherwise result in deadlock when lvgl calls are made from
+                // with the signal handler)
+                if (unlock) unlock(unlock_arg);            
+                PyObject_CallFunction(handler, "iO", (int) signal, pyarg);
+                if (lock) lock(lock_arg);
+
+                
+                Py_DECREF(pyarg);
+            }
+            if (PyErr_Occurred()) PyErr_Print();
+        }
+    }
+    return LV_RES_OK;
+}
+
+
+static PyObject*
+pylv_obj_get_signal_func(pylv_Obj *self, PyObject *args, PyObject *kwds)
+{
+    static char *kwlist[] = {NULL};
+    if (!PyArg_ParseTupleAndKeywords(args, kwds, "", kwlist)) return NULL;   
+    
+    PyObject *signal_func = self->signal_func;
+    if (!signal_func) Py_RETURN_NONE;
+
+    Py_INCREF(signal_func);
+    return signal_func;
+}
+
+static PyObject *
+pylv_obj_set_signal_func(pylv_Ddlist *self, PyObject *args, PyObject *kwds)
+{
+    static char *kwlist[] = {"signal_func", NULL};
+    PyObject *signal_func, *tmp;
+    if (!PyArg_ParseTupleAndKeywords(args, kwds, "O", kwlist , &signal_func)) return NULL;
+    
+    tmp = self->signal_func;
+    if (signal_func == Py_None) {
+        self->signal_func = NULL;
+    } else {
+        self->signal_func = signal_func;
+        Py_INCREF(signal_func);
+        
+        if (lock) lock(lock_arg);
+        if (!self->orig_c_signal_func) {
+            self->orig_c_signal_func = lv_obj_get_signal_func(self->ref);
+        }
+        lv_obj_set_signal_func(self->ref, pylv_obj_signal_callback);
+        if (unlock) unlock(unlock_arg);
+    }
+    Py_XDECREF(tmp); // Old action (tmp) could be NULL
+
+    Py_RETURN_NONE;
+}
+
+
+static PyObject*
+pylv_label_get_letter_pos(pylv_Label *self, PyObject *args, PyObject *kwds)
+{
+    static char *kwlist[] = {"index", NULL};
+    int index;
+    lv_point_t pos;
+    if (!PyArg_ParseTupleAndKeywords(args, kwds, "i", kwlist , &index)) return NULL;   
+    
+    if (lock) lock(lock_arg);
+    lv_label_get_letter_pos(self->ref, index, &pos);
+    if (unlock) unlock(unlock_arg);
+
+    return Py_BuildValue("ii", (int) pos.x, (int) pos.y);
+}
+
+static PyObject*
+pylv_label_get_letter_on(pylv_Label *self, PyObject *args, PyObject *kwds)
+{
+    static char *kwlist[] = {"pos", NULL};
+    int x, y, index;
+    lv_point_t pos;
+    if (!PyArg_ParseTupleAndKeywords(args, kwds, "(ii)", kwlist , &x, &y)) return NULL;   
+    
+    pos.x = x;
+    pos.y = y;
+    
+    if (lock) lock(lock_arg);
+    index = lv_label_get_letter_on(self->ref, &pos);
+    if (unlock) unlock(unlock_arg);
+
+    return Py_BuildValue("i", index);
+}
 
 static PyObject*
 pylv_btnm_set_map(pylv_Btnm *self, PyObject *args, PyObject *kwds)
@@ -641,7 +814,7 @@ pylv_list_add(pylv_List *self, PyObject *args, PyObject *kwds)
     } 
 
     if (lock) lock(lock_arg);
-    ret = pyobj_from_lv(lv_list_add(self->ref, NULL, txt, NULL), &pylv_btn_Type);
+    ret = pyobj_from_lv(lv_list_add(self->ref, NULL, txt, NULL));
     if (unlock) unlock(unlock_arg);
     
     return ret;
@@ -684,8 +857,12 @@ lv_res_t pylv_btn_action_click_callback(lv_obj_t* obj) {
     pyobj = lv_obj_get_free_ptr(obj);
     if (pyobj) {
         handler = pyobj->actions[0];
-        if (handler) PyObject_CallFunctionObjArgs(handler, NULL);
-        if (PyErr_Occurred()) PyErr_Print();
+        if (handler) {
+            if (unlock) unlock(unlock_arg); // Release lock during call to Python code
+            PyObject_CallFunctionObjArgs(handler, NULL);
+            if (lock) lock(lock_arg);
+            if (PyErr_Occurred()) PyErr_Print();
+        }
     }
     return LV_RES_OK;
 }
@@ -696,8 +873,12 @@ lv_res_t pylv_btn_action_pr_callback(lv_obj_t* obj) {
     pyobj = lv_obj_get_free_ptr(obj);
     if (pyobj) {
         handler = pyobj->actions[1];
-        if (handler) PyObject_CallFunctionObjArgs(handler, NULL);
-        if (PyErr_Occurred()) PyErr_Print();
+        if (handler) {
+            if (unlock) unlock(unlock_arg); // Release lock during call to Python code
+            PyObject_CallFunctionObjArgs(handler, NULL);
+            if (lock) lock(lock_arg);
+            if (PyErr_Occurred()) PyErr_Print();
+        }
     }
     return LV_RES_OK;
 }
@@ -708,8 +889,12 @@ lv_res_t pylv_btn_action_long_pr_callback(lv_obj_t* obj) {
     pyobj = lv_obj_get_free_ptr(obj);
     if (pyobj) {
         handler = pyobj->actions[2];
-        if (handler) PyObject_CallFunctionObjArgs(handler, NULL);
-        if (PyErr_Occurred()) PyErr_Print();
+        if (handler) {
+            if (unlock) unlock(unlock_arg); // Release lock during call to Python code
+            PyObject_CallFunctionObjArgs(handler, NULL);
+            if (lock) lock(lock_arg);
+            if (PyErr_Occurred()) PyErr_Print();
+        }
     }
     return LV_RES_OK;
 }
@@ -720,8 +905,12 @@ lv_res_t pylv_btn_action_long_pr_repeat_callback(lv_obj_t* obj) {
     pyobj = lv_obj_get_free_ptr(obj);
     if (pyobj) {
         handler = pyobj->actions[3];
-        if (handler) PyObject_CallFunctionObjArgs(handler, NULL);
-        if (PyErr_Occurred()) PyErr_Print();
+        if (handler) {
+            if (unlock) unlock(unlock_arg); // Release lock during call to Python code
+            PyObject_CallFunctionObjArgs(handler, NULL);
+            if (lock) lock(lock_arg);
+            if (PyErr_Occurred()) PyErr_Print();
+        }
     }
     return LV_RES_OK;
 }
@@ -1052,13 +1241,6 @@ pylv_obj_clear_protect(pylv_Obj *self, PyObject *args, PyObject *kwds)
 }
 
 static PyObject*
-pylv_obj_set_signal_func(pylv_Obj *self, PyObject *args, PyObject *kwds)
-{
-    PyErr_SetString(PyExc_NotImplementedError, "not implemented");
-    return NULL;
-}
-
-static PyObject*
 pylv_obj_set_design_func(pylv_Obj *self, PyObject *args, PyObject *kwds)
 {
     PyErr_SetString(PyExc_NotImplementedError, "not implemented");
@@ -1086,7 +1268,7 @@ pylv_obj_get_screen(pylv_Obj *self, PyObject *args, PyObject *kwds)
         
     if (lock) lock(lock_arg);
     lv_obj_t *result = lv_obj_get_screen(self->ref);
-    PyObject *retobj = pyobj_from_lv(result, &pylv_obj_Type);
+    PyObject *retobj = pyobj_from_lv(result);
     if (unlock) unlock(unlock_arg);
     
     return retobj;
@@ -1101,10 +1283,22 @@ pylv_obj_get_parent(pylv_Obj *self, PyObject *args, PyObject *kwds)
         
     if (lock) lock(lock_arg);
     lv_obj_t *result = lv_obj_get_parent(self->ref);
-    PyObject *retobj = pyobj_from_lv(result, &pylv_obj_Type);
+    PyObject *retobj = pyobj_from_lv(result);
     if (unlock) unlock(unlock_arg);
     
     return retobj;
+}
+
+static PyObject*
+pylv_obj_count_children(pylv_Obj *self, PyObject *args, PyObject *kwds)
+{
+    static char *kwlist[] = {NULL};
+    if (!PyArg_ParseTupleAndKeywords(args, kwds, "", kwlist )) return NULL;
+
+    if (lock) lock(lock_arg);         
+    unsigned short int result = lv_obj_count_children(self->ref);
+    if (unlock) unlock(unlock_arg);
+    return Py_BuildValue("H", result);
 }
 
 static PyObject*
@@ -1255,6 +1449,18 @@ pylv_obj_get_drag_parent(pylv_Obj *self, PyObject *args, PyObject *kwds)
 }
 
 static PyObject*
+pylv_obj_get_protect(pylv_Obj *self, PyObject *args, PyObject *kwds)
+{
+    static char *kwlist[] = {NULL};
+    if (!PyArg_ParseTupleAndKeywords(args, kwds, "", kwlist )) return NULL;
+
+    if (lock) lock(lock_arg);         
+    unsigned char result = lv_obj_get_protect(self->ref);
+    if (unlock) unlock(unlock_arg);
+    return Py_BuildValue("b", result);
+}
+
+static PyObject*
 pylv_obj_is_protected(pylv_Obj *self, PyObject *args, PyObject *kwds)
 {
     static char *kwlist[] = {"prot", NULL};
@@ -1265,13 +1471,6 @@ pylv_obj_is_protected(pylv_Obj *self, PyObject *args, PyObject *kwds)
     int result = lv_obj_is_protected(self->ref, prot);
     if (unlock) unlock(unlock_arg);
     if (result) {Py_RETURN_TRUE;} else {Py_RETURN_FALSE;}
-}
-
-static PyObject*
-pylv_obj_get_signal_func(pylv_Obj *self, PyObject *args, PyObject *kwds)
-{
-    PyErr_SetString(PyExc_NotImplementedError, "not implemented");
-    return NULL;
 }
 
 static PyObject*
@@ -1314,6 +1513,7 @@ static PyMethodDef pylv_obj_methods[] = {
     {"refresh_ext_size", (PyCFunction) pylv_obj_refresh_ext_size, METH_VARARGS | METH_KEYWORDS, NULL},
     {"get_screen", (PyCFunction) pylv_obj_get_screen, METH_VARARGS | METH_KEYWORDS, NULL},
     {"get_parent", (PyCFunction) pylv_obj_get_parent, METH_VARARGS | METH_KEYWORDS, NULL},
+    {"count_children", (PyCFunction) pylv_obj_count_children, METH_VARARGS | METH_KEYWORDS, NULL},
     {"get_coords", (PyCFunction) pylv_obj_get_coords, METH_VARARGS | METH_KEYWORDS, NULL},
     {"get_x", (PyCFunction) pylv_obj_get_x, METH_VARARGS | METH_KEYWORDS, NULL},
     {"get_y", (PyCFunction) pylv_obj_get_y, METH_VARARGS | METH_KEYWORDS, NULL},
@@ -1327,6 +1527,7 @@ static PyMethodDef pylv_obj_methods[] = {
     {"get_drag", (PyCFunction) pylv_obj_get_drag, METH_VARARGS | METH_KEYWORDS, NULL},
     {"get_drag_throw", (PyCFunction) pylv_obj_get_drag_throw, METH_VARARGS | METH_KEYWORDS, NULL},
     {"get_drag_parent", (PyCFunction) pylv_obj_get_drag_parent, METH_VARARGS | METH_KEYWORDS, NULL},
+    {"get_protect", (PyCFunction) pylv_obj_get_protect, METH_VARARGS | METH_KEYWORDS, NULL},
     {"is_protected", (PyCFunction) pylv_obj_is_protected, METH_VARARGS | METH_KEYWORDS, NULL},
     {"get_signal_func", (PyCFunction) pylv_obj_get_signal_func, METH_VARARGS | METH_KEYWORDS, NULL},
     {"get_design_func", (PyCFunction) pylv_obj_get_design_func, METH_VARARGS | METH_KEYWORDS, NULL},
@@ -1518,7 +1719,7 @@ pylv_win_get_from_btn(pylv_Obj *self, PyObject *args, PyObject *kwds)
         
     if (lock) lock(lock_arg);
     lv_obj_t *result = lv_win_get_from_btn(self->ref);
-    PyObject *retobj = pyobj_from_lv(result, &pylv_obj_Type);
+    PyObject *retobj = pyobj_from_lv(result);
     if (unlock) unlock(unlock_arg);
     
     return retobj;
@@ -1785,10 +1986,15 @@ pylv_label_get_body_draw(pylv_Obj *self, PyObject *args, PyObject *kwds)
 }
 
 static PyObject*
-pylv_label_get_letter_pos(pylv_Obj *self, PyObject *args, PyObject *kwds)
+pylv_label_get_anim_speed(pylv_Obj *self, PyObject *args, PyObject *kwds)
 {
-    PyErr_SetString(PyExc_NotImplementedError, "not implemented");
-    return NULL;
+    static char *kwlist[] = {NULL};
+    if (!PyArg_ParseTupleAndKeywords(args, kwds, "", kwlist )) return NULL;
+
+    if (lock) lock(lock_arg);         
+    unsigned short int result = lv_label_get_anim_speed(self->ref);
+    if (unlock) unlock(unlock_arg);
+    return Py_BuildValue("H", result);
 }
 
 static PyObject*
@@ -1835,7 +2041,9 @@ static PyMethodDef pylv_label_methods[] = {
     {"get_recolor", (PyCFunction) pylv_label_get_recolor, METH_VARARGS | METH_KEYWORDS, NULL},
     {"get_no_break", (PyCFunction) pylv_label_get_no_break, METH_VARARGS | METH_KEYWORDS, NULL},
     {"get_body_draw", (PyCFunction) pylv_label_get_body_draw, METH_VARARGS | METH_KEYWORDS, NULL},
+    {"get_anim_speed", (PyCFunction) pylv_label_get_anim_speed, METH_VARARGS | METH_KEYWORDS, NULL},
     {"get_letter_pos", (PyCFunction) pylv_label_get_letter_pos, METH_VARARGS | METH_KEYWORDS, NULL},
+    {"get_letter_on", (PyCFunction) pylv_label_get_letter_on, METH_VARARGS | METH_KEYWORDS, NULL},
     {"ins_text", (PyCFunction) pylv_label_ins_text, METH_VARARGS | METH_KEYWORDS, NULL},
     {"cut_text", (PyCFunction) pylv_label_cut_text, METH_VARARGS | METH_KEYWORDS, NULL},
     {NULL}  /* Sentinel */
@@ -1923,6 +2131,66 @@ pylv_lmeter_set_scale(pylv_Obj *self, PyObject *args, PyObject *kwds)
 }
 
 static PyObject*
+pylv_lmeter_get_value(pylv_Obj *self, PyObject *args, PyObject *kwds)
+{
+    static char *kwlist[] = {NULL};
+    if (!PyArg_ParseTupleAndKeywords(args, kwds, "", kwlist )) return NULL;
+
+    if (lock) lock(lock_arg);         
+    short int result = lv_lmeter_get_value(self->ref);
+    if (unlock) unlock(unlock_arg);
+    return Py_BuildValue("h", result);
+}
+
+static PyObject*
+pylv_lmeter_get_min_value(pylv_Obj *self, PyObject *args, PyObject *kwds)
+{
+    static char *kwlist[] = {NULL};
+    if (!PyArg_ParseTupleAndKeywords(args, kwds, "", kwlist )) return NULL;
+
+    if (lock) lock(lock_arg);         
+    short int result = lv_lmeter_get_min_value(self->ref);
+    if (unlock) unlock(unlock_arg);
+    return Py_BuildValue("h", result);
+}
+
+static PyObject*
+pylv_lmeter_get_max_value(pylv_Obj *self, PyObject *args, PyObject *kwds)
+{
+    static char *kwlist[] = {NULL};
+    if (!PyArg_ParseTupleAndKeywords(args, kwds, "", kwlist )) return NULL;
+
+    if (lock) lock(lock_arg);         
+    short int result = lv_lmeter_get_max_value(self->ref);
+    if (unlock) unlock(unlock_arg);
+    return Py_BuildValue("h", result);
+}
+
+static PyObject*
+pylv_lmeter_get_line_count(pylv_Obj *self, PyObject *args, PyObject *kwds)
+{
+    static char *kwlist[] = {NULL};
+    if (!PyArg_ParseTupleAndKeywords(args, kwds, "", kwlist )) return NULL;
+
+    if (lock) lock(lock_arg);         
+    unsigned char result = lv_lmeter_get_line_count(self->ref);
+    if (unlock) unlock(unlock_arg);
+    return Py_BuildValue("b", result);
+}
+
+static PyObject*
+pylv_lmeter_get_scale_angle(pylv_Obj *self, PyObject *args, PyObject *kwds)
+{
+    static char *kwlist[] = {NULL};
+    if (!PyArg_ParseTupleAndKeywords(args, kwds, "", kwlist )) return NULL;
+
+    if (lock) lock(lock_arg);         
+    unsigned short int result = lv_lmeter_get_scale_angle(self->ref);
+    if (unlock) unlock(unlock_arg);
+    return Py_BuildValue("H", result);
+}
+
+static PyObject*
 pylv_lmeter_get_style_bg(pylv_Obj *self, PyObject *args, PyObject *kwds)
 {
     static char *kwlist[] = {NULL};
@@ -1935,6 +2203,11 @@ static PyMethodDef pylv_lmeter_methods[] = {
     {"set_value", (PyCFunction) pylv_lmeter_set_value, METH_VARARGS | METH_KEYWORDS, NULL},
     {"set_range", (PyCFunction) pylv_lmeter_set_range, METH_VARARGS | METH_KEYWORDS, NULL},
     {"set_scale", (PyCFunction) pylv_lmeter_set_scale, METH_VARARGS | METH_KEYWORDS, NULL},
+    {"get_value", (PyCFunction) pylv_lmeter_get_value, METH_VARARGS | METH_KEYWORDS, NULL},
+    {"get_min_value", (PyCFunction) pylv_lmeter_get_min_value, METH_VARARGS | METH_KEYWORDS, NULL},
+    {"get_max_value", (PyCFunction) pylv_lmeter_get_max_value, METH_VARARGS | METH_KEYWORDS, NULL},
+    {"get_line_count", (PyCFunction) pylv_lmeter_get_line_count, METH_VARARGS | METH_KEYWORDS, NULL},
+    {"get_scale_angle", (PyCFunction) pylv_lmeter_get_scale_angle, METH_VARARGS | METH_KEYWORDS, NULL},
     {"get_style_bg", (PyCFunction) pylv_lmeter_get_style_bg, METH_VARARGS | METH_KEYWORDS, NULL},
     {NULL}  /* Sentinel */
 };
@@ -2022,6 +2295,18 @@ pylv_btnm_get_action(pylv_Obj *self, PyObject *args, PyObject *kwds)
 }
 
 static PyObject*
+pylv_btnm_get_toggled(pylv_Obj *self, PyObject *args, PyObject *kwds)
+{
+    static char *kwlist[] = {NULL};
+    if (!PyArg_ParseTupleAndKeywords(args, kwds, "", kwlist )) return NULL;
+
+    if (lock) lock(lock_arg);         
+    unsigned short int result = lv_btnm_get_toggled(self->ref);
+    if (unlock) unlock(unlock_arg);
+    return Py_BuildValue("H", result);
+}
+
+static PyObject*
 pylv_btnm_get_style(pylv_Obj *self, PyObject *args, PyObject *kwds)
 {
     static char *kwlist[] = {"type", NULL};
@@ -2037,6 +2322,7 @@ static PyMethodDef pylv_btnm_methods[] = {
     {"set_toggle", (PyCFunction) pylv_btnm_set_toggle, METH_VARARGS | METH_KEYWORDS, NULL},
     {"set_style", (PyCFunction) pylv_btnm_set_style, METH_VARARGS | METH_KEYWORDS, NULL},
     {"get_action", (PyCFunction) pylv_btnm_get_action, METH_VARARGS | METH_KEYWORDS, NULL},
+    {"get_toggled", (PyCFunction) pylv_btnm_get_toggled, METH_VARARGS | METH_KEYWORDS, NULL},
     {"get_style", (PyCFunction) pylv_btnm_get_style, METH_VARARGS | METH_KEYWORDS, NULL},
     {NULL}  /* Sentinel */
 };
@@ -2215,6 +2501,18 @@ pylv_chart_get_type(pylv_Obj *self, PyObject *args, PyObject *kwds)
 }
 
 static PyObject*
+pylv_chart_get_point_cnt(pylv_Obj *self, PyObject *args, PyObject *kwds)
+{
+    static char *kwlist[] = {NULL};
+    if (!PyArg_ParseTupleAndKeywords(args, kwds, "", kwlist )) return NULL;
+
+    if (lock) lock(lock_arg);         
+    unsigned short int result = lv_chart_get_point_cnt(self->ref);
+    if (unlock) unlock(unlock_arg);
+    return Py_BuildValue("H", result);
+}
+
+static PyObject*
 pylv_chart_get_series_opa(pylv_Obj *self, PyObject *args, PyObject *kwds)
 {
     static char *kwlist[] = {NULL};
@@ -2276,6 +2574,7 @@ static PyMethodDef pylv_chart_methods[] = {
     {"set_points", (PyCFunction) pylv_chart_set_points, METH_VARARGS | METH_KEYWORDS, NULL},
     {"set_next", (PyCFunction) pylv_chart_set_next, METH_VARARGS | METH_KEYWORDS, NULL},
     {"get_type", (PyCFunction) pylv_chart_get_type, METH_VARARGS | METH_KEYWORDS, NULL},
+    {"get_point_cnt", (PyCFunction) pylv_chart_get_point_cnt, METH_VARARGS | METH_KEYWORDS, NULL},
     {"get_series_opa", (PyCFunction) pylv_chart_get_series_opa, METH_VARARGS | METH_KEYWORDS, NULL},
     {"get_series_width", (PyCFunction) pylv_chart_get_series_width, METH_VARARGS | METH_KEYWORDS, NULL},
     {"get_series_darking", (PyCFunction) pylv_chart_get_series_darking, METH_VARARGS | METH_KEYWORDS, NULL},
@@ -2485,12 +2784,25 @@ pylv_led_toggle(pylv_Obj *self, PyObject *args, PyObject *kwds)
     Py_RETURN_NONE;
 }
 
+static PyObject*
+pylv_led_get_bright(pylv_Obj *self, PyObject *args, PyObject *kwds)
+{
+    static char *kwlist[] = {NULL};
+    if (!PyArg_ParseTupleAndKeywords(args, kwds, "", kwlist )) return NULL;
+
+    if (lock) lock(lock_arg);         
+    unsigned char result = lv_led_get_bright(self->ref);
+    if (unlock) unlock(unlock_arg);
+    return Py_BuildValue("b", result);
+}
+
 
 static PyMethodDef pylv_led_methods[] = {
     {"set_bright", (PyCFunction) pylv_led_set_bright, METH_VARARGS | METH_KEYWORDS, NULL},
     {"on", (PyCFunction) pylv_led_on, METH_VARARGS | METH_KEYWORDS, NULL},
     {"off", (PyCFunction) pylv_led_off, METH_VARARGS | METH_KEYWORDS, NULL},
     {"toggle", (PyCFunction) pylv_led_toggle, METH_VARARGS | METH_KEYWORDS, NULL},
+    {"get_bright", (PyCFunction) pylv_led_get_bright, METH_VARARGS | METH_KEYWORDS, NULL},
     {NULL}  /* Sentinel */
 };
 
@@ -2540,8 +2852,12 @@ lv_res_t pylv_kb_ok_action_callback(lv_obj_t* obj) {
     pyobj = lv_obj_get_free_ptr(obj);
     if (pyobj) {
         handler = pyobj->ok_action;
-        if (handler) PyObject_CallFunctionObjArgs(handler, NULL);
-        if (PyErr_Occurred()) PyErr_Print();
+        if (handler) {
+            if (unlock) unlock(unlock_arg); // Release lock during call to Python code
+            PyObject_CallFunctionObjArgs(handler, NULL);
+            if (lock) lock(lock_arg);
+            if (PyErr_Occurred()) PyErr_Print();
+        }
     }
     return LV_RES_OK;
 }
@@ -2588,8 +2904,12 @@ lv_res_t pylv_kb_hide_action_callback(lv_obj_t* obj) {
     pyobj = lv_obj_get_free_ptr(obj);
     if (pyobj) {
         handler = pyobj->hide_action;
-        if (handler) PyObject_CallFunctionObjArgs(handler, NULL);
-        if (PyErr_Occurred()) PyErr_Print();
+        if (handler) {
+            if (unlock) unlock(unlock_arg); // Release lock during call to Python code
+            PyObject_CallFunctionObjArgs(handler, NULL);
+            if (lock) lock(lock_arg);
+            if (PyErr_Occurred()) PyErr_Print();
+        }
     }
     return LV_RES_OK;
 }
@@ -2692,7 +3012,7 @@ pylv_kb_get_ta(pylv_Obj *self, PyObject *args, PyObject *kwds)
         
     if (lock) lock(lock_arg);
     lv_obj_t *result = lv_kb_get_ta(self->ref);
-    PyObject *retobj = pyobj_from_lv(result, &pylv_obj_Type);
+    PyObject *retobj = pyobj_from_lv(result);
     if (unlock) unlock(unlock_arg);
     
     return retobj;
@@ -2973,6 +3293,42 @@ pylv_bar_set_style(pylv_Obj *self, PyObject *args, PyObject *kwds)
 }
 
 static PyObject*
+pylv_bar_get_value(pylv_Obj *self, PyObject *args, PyObject *kwds)
+{
+    static char *kwlist[] = {NULL};
+    if (!PyArg_ParseTupleAndKeywords(args, kwds, "", kwlist )) return NULL;
+
+    if (lock) lock(lock_arg);         
+    short int result = lv_bar_get_value(self->ref);
+    if (unlock) unlock(unlock_arg);
+    return Py_BuildValue("h", result);
+}
+
+static PyObject*
+pylv_bar_get_min_value(pylv_Obj *self, PyObject *args, PyObject *kwds)
+{
+    static char *kwlist[] = {NULL};
+    if (!PyArg_ParseTupleAndKeywords(args, kwds, "", kwlist )) return NULL;
+
+    if (lock) lock(lock_arg);         
+    short int result = lv_bar_get_min_value(self->ref);
+    if (unlock) unlock(unlock_arg);
+    return Py_BuildValue("h", result);
+}
+
+static PyObject*
+pylv_bar_get_max_value(pylv_Obj *self, PyObject *args, PyObject *kwds)
+{
+    static char *kwlist[] = {NULL};
+    if (!PyArg_ParseTupleAndKeywords(args, kwds, "", kwlist )) return NULL;
+
+    if (lock) lock(lock_arg);         
+    short int result = lv_bar_get_max_value(self->ref);
+    if (unlock) unlock(unlock_arg);
+    return Py_BuildValue("h", result);
+}
+
+static PyObject*
 pylv_bar_get_style(pylv_Obj *self, PyObject *args, PyObject *kwds)
 {
     static char *kwlist[] = {"type", NULL};
@@ -2987,6 +3343,9 @@ static PyMethodDef pylv_bar_methods[] = {
     {"set_value_anim", (PyCFunction) pylv_bar_set_value_anim, METH_VARARGS | METH_KEYWORDS, NULL},
     {"set_range", (PyCFunction) pylv_bar_set_range, METH_VARARGS | METH_KEYWORDS, NULL},
     {"set_style", (PyCFunction) pylv_bar_set_style, METH_VARARGS | METH_KEYWORDS, NULL},
+    {"get_value", (PyCFunction) pylv_bar_get_value, METH_VARARGS | METH_KEYWORDS, NULL},
+    {"get_min_value", (PyCFunction) pylv_bar_get_min_value, METH_VARARGS | METH_KEYWORDS, NULL},
+    {"get_max_value", (PyCFunction) pylv_bar_get_max_value, METH_VARARGS | METH_KEYWORDS, NULL},
     {"get_style", (PyCFunction) pylv_bar_get_style, METH_VARARGS | METH_KEYWORDS, NULL},
     {NULL}  /* Sentinel */
 };
@@ -3175,7 +3534,7 @@ pylv_tabview_add_tab(pylv_Obj *self, PyObject *args, PyObject *kwds)
         
     if (lock) lock(lock_arg);
     lv_obj_t *result = lv_tabview_add_tab(self->ref, name);
-    PyObject *retobj = pyobj_from_lv(result, &pylv_obj_Type);
+    PyObject *retobj = pyobj_from_lv(result);
     if (unlock) unlock(unlock_arg);
     
     return retobj;
@@ -3243,6 +3602,30 @@ pylv_tabview_set_style(pylv_Obj *self, PyObject *args, PyObject *kwds)
 }
 
 static PyObject*
+pylv_tabview_get_tab_act(pylv_Obj *self, PyObject *args, PyObject *kwds)
+{
+    static char *kwlist[] = {NULL};
+    if (!PyArg_ParseTupleAndKeywords(args, kwds, "", kwlist )) return NULL;
+
+    if (lock) lock(lock_arg);         
+    unsigned short int result = lv_tabview_get_tab_act(self->ref);
+    if (unlock) unlock(unlock_arg);
+    return Py_BuildValue("H", result);
+}
+
+static PyObject*
+pylv_tabview_get_tab_count(pylv_Obj *self, PyObject *args, PyObject *kwds)
+{
+    static char *kwlist[] = {NULL};
+    if (!PyArg_ParseTupleAndKeywords(args, kwds, "", kwlist )) return NULL;
+
+    if (lock) lock(lock_arg);         
+    unsigned short int result = lv_tabview_get_tab_count(self->ref);
+    if (unlock) unlock(unlock_arg);
+    return Py_BuildValue("H", result);
+}
+
+static PyObject*
 pylv_tabview_get_tab(pylv_Obj *self, PyObject *args, PyObject *kwds)
 {
     static char *kwlist[] = {"id", NULL};
@@ -3252,7 +3635,7 @@ pylv_tabview_get_tab(pylv_Obj *self, PyObject *args, PyObject *kwds)
         
     if (lock) lock(lock_arg);
     lv_obj_t *result = lv_tabview_get_tab(self->ref, id);
-    PyObject *retobj = pyobj_from_lv(result, &pylv_obj_Type);
+    PyObject *retobj = pyobj_from_lv(result);
     if (unlock) unlock(unlock_arg);
     
     return retobj;
@@ -3278,6 +3661,18 @@ pylv_tabview_get_sliding(pylv_Obj *self, PyObject *args, PyObject *kwds)
 }
 
 static PyObject*
+pylv_tabview_get_anim_time(pylv_Obj *self, PyObject *args, PyObject *kwds)
+{
+    static char *kwlist[] = {NULL};
+    if (!PyArg_ParseTupleAndKeywords(args, kwds, "", kwlist )) return NULL;
+
+    if (lock) lock(lock_arg);         
+    unsigned short int result = lv_tabview_get_anim_time(self->ref);
+    if (unlock) unlock(unlock_arg);
+    return Py_BuildValue("H", result);
+}
+
+static PyObject*
 pylv_tabview_get_style(pylv_Obj *self, PyObject *args, PyObject *kwds)
 {
     static char *kwlist[] = {"type", NULL};
@@ -3294,9 +3689,12 @@ static PyMethodDef pylv_tabview_methods[] = {
     {"set_sliding", (PyCFunction) pylv_tabview_set_sliding, METH_VARARGS | METH_KEYWORDS, NULL},
     {"set_anim_time", (PyCFunction) pylv_tabview_set_anim_time, METH_VARARGS | METH_KEYWORDS, NULL},
     {"set_style", (PyCFunction) pylv_tabview_set_style, METH_VARARGS | METH_KEYWORDS, NULL},
+    {"get_tab_act", (PyCFunction) pylv_tabview_get_tab_act, METH_VARARGS | METH_KEYWORDS, NULL},
+    {"get_tab_count", (PyCFunction) pylv_tabview_get_tab_count, METH_VARARGS | METH_KEYWORDS, NULL},
     {"get_tab", (PyCFunction) pylv_tabview_get_tab, METH_VARARGS | METH_KEYWORDS, NULL},
     {"get_tab_load_action", (PyCFunction) pylv_tabview_get_tab_load_action, METH_VARARGS | METH_KEYWORDS, NULL},
     {"get_sliding", (PyCFunction) pylv_tabview_get_sliding, METH_VARARGS | METH_KEYWORDS, NULL},
+    {"get_anim_time", (PyCFunction) pylv_tabview_get_anim_time, METH_VARARGS | METH_KEYWORDS, NULL},
     {"get_style", (PyCFunction) pylv_tabview_get_style, METH_VARARGS | METH_KEYWORDS, NULL},
     {NULL}  /* Sentinel */
 };
@@ -3429,10 +3827,22 @@ pylv_mbox_get_from_btn(pylv_Obj *self, PyObject *args, PyObject *kwds)
         
     if (lock) lock(lock_arg);
     lv_obj_t *result = lv_mbox_get_from_btn(self->ref);
-    PyObject *retobj = pyobj_from_lv(result, &pylv_obj_Type);
+    PyObject *retobj = pyobj_from_lv(result);
     if (unlock) unlock(unlock_arg);
     
     return retobj;
+}
+
+static PyObject*
+pylv_mbox_get_anim_time(pylv_Obj *self, PyObject *args, PyObject *kwds)
+{
+    static char *kwlist[] = {NULL};
+    if (!PyArg_ParseTupleAndKeywords(args, kwds, "", kwlist )) return NULL;
+
+    if (lock) lock(lock_arg);         
+    unsigned short int result = lv_mbox_get_anim_time(self->ref);
+    if (unlock) unlock(unlock_arg);
+    return Py_BuildValue("H", result);
 }
 
 static PyObject*
@@ -3454,6 +3864,7 @@ static PyMethodDef pylv_mbox_methods[] = {
     {"stop_auto_close", (PyCFunction) pylv_mbox_stop_auto_close, METH_VARARGS | METH_KEYWORDS, NULL},
     {"set_style", (PyCFunction) pylv_mbox_set_style, METH_VARARGS | METH_KEYWORDS, NULL},
     {"get_from_btn", (PyCFunction) pylv_mbox_get_from_btn, METH_VARARGS | METH_KEYWORDS, NULL},
+    {"get_anim_time", (PyCFunction) pylv_mbox_get_anim_time, METH_VARARGS | METH_KEYWORDS, NULL},
     {"get_style", (PyCFunction) pylv_mbox_get_style, METH_VARARGS | METH_KEYWORDS, NULL},
     {NULL}  /* Sentinel */
 };
@@ -3547,12 +3958,65 @@ pylv_gauge_set_scale(pylv_Obj *self, PyObject *args, PyObject *kwds)
     Py_RETURN_NONE;
 }
 
+static PyObject*
+pylv_gauge_get_value(pylv_Obj *self, PyObject *args, PyObject *kwds)
+{
+    static char *kwlist[] = {"needle", NULL};
+    unsigned char needle;
+    if (!PyArg_ParseTupleAndKeywords(args, kwds, "b", kwlist , &needle)) return NULL;
+
+    if (lock) lock(lock_arg);         
+    short int result = lv_gauge_get_value(self->ref, needle);
+    if (unlock) unlock(unlock_arg);
+    return Py_BuildValue("h", result);
+}
+
+static PyObject*
+pylv_gauge_get_needle_count(pylv_Obj *self, PyObject *args, PyObject *kwds)
+{
+    static char *kwlist[] = {NULL};
+    if (!PyArg_ParseTupleAndKeywords(args, kwds, "", kwlist )) return NULL;
+
+    if (lock) lock(lock_arg);         
+    unsigned char result = lv_gauge_get_needle_count(self->ref);
+    if (unlock) unlock(unlock_arg);
+    return Py_BuildValue("b", result);
+}
+
+static PyObject*
+pylv_gauge_get_critical_value(pylv_Obj *self, PyObject *args, PyObject *kwds)
+{
+    static char *kwlist[] = {NULL};
+    if (!PyArg_ParseTupleAndKeywords(args, kwds, "", kwlist )) return NULL;
+
+    if (lock) lock(lock_arg);         
+    short int result = lv_gauge_get_critical_value(self->ref);
+    if (unlock) unlock(unlock_arg);
+    return Py_BuildValue("h", result);
+}
+
+static PyObject*
+pylv_gauge_get_label_count(pylv_Obj *self, PyObject *args, PyObject *kwds)
+{
+    static char *kwlist[] = {NULL};
+    if (!PyArg_ParseTupleAndKeywords(args, kwds, "", kwlist )) return NULL;
+
+    if (lock) lock(lock_arg);         
+    unsigned char result = lv_gauge_get_label_count(self->ref);
+    if (unlock) unlock(unlock_arg);
+    return Py_BuildValue("b", result);
+}
+
 
 static PyMethodDef pylv_gauge_methods[] = {
     {"set_needle_count", (PyCFunction) pylv_gauge_set_needle_count, METH_VARARGS | METH_KEYWORDS, NULL},
     {"set_value", (PyCFunction) pylv_gauge_set_value, METH_VARARGS | METH_KEYWORDS, NULL},
     {"set_critical_value", (PyCFunction) pylv_gauge_set_critical_value, METH_VARARGS | METH_KEYWORDS, NULL},
     {"set_scale", (PyCFunction) pylv_gauge_set_scale, METH_VARARGS | METH_KEYWORDS, NULL},
+    {"get_value", (PyCFunction) pylv_gauge_get_value, METH_VARARGS | METH_KEYWORDS, NULL},
+    {"get_needle_count", (PyCFunction) pylv_gauge_get_needle_count, METH_VARARGS | METH_KEYWORDS, NULL},
+    {"get_critical_value", (PyCFunction) pylv_gauge_get_critical_value, METH_VARARGS | METH_KEYWORDS, NULL},
+    {"get_label_count", (PyCFunction) pylv_gauge_get_label_count, METH_VARARGS | METH_KEYWORDS, NULL},
     {NULL}  /* Sentinel */
 };
 
@@ -3602,8 +4066,12 @@ lv_res_t pylv_page_rel_action_callback(lv_obj_t* obj) {
     pyobj = lv_obj_get_free_ptr(obj);
     if (pyobj) {
         handler = pyobj->rel_action;
-        if (handler) PyObject_CallFunctionObjArgs(handler, NULL);
-        if (PyErr_Occurred()) PyErr_Print();
+        if (handler) {
+            if (unlock) unlock(unlock_arg); // Release lock during call to Python code
+            PyObject_CallFunctionObjArgs(handler, NULL);
+            if (lock) lock(lock_arg);
+            if (PyErr_Occurred()) PyErr_Print();
+        }
     }
     return LV_RES_OK;
 }
@@ -3650,8 +4118,12 @@ lv_res_t pylv_page_pr_action_callback(lv_obj_t* obj) {
     pyobj = lv_obj_get_free_ptr(obj);
     if (pyobj) {
         handler = pyobj->pr_action;
-        if (handler) PyObject_CallFunctionObjArgs(handler, NULL);
-        if (PyErr_Occurred()) PyErr_Print();
+        if (handler) {
+            if (unlock) unlock(unlock_arg); // Release lock during call to Python code
+            PyObject_CallFunctionObjArgs(handler, NULL);
+            if (lock) lock(lock_arg);
+            if (PyErr_Occurred()) PyErr_Print();
+        }
     }
     return LV_RES_OK;
 }
@@ -3701,7 +4173,7 @@ pylv_page_get_scrl(pylv_Obj *self, PyObject *args, PyObject *kwds)
         
     if (lock) lock(lock_arg);
     lv_obj_t *result = lv_page_get_scrl(self->ref);
-    PyObject *retobj = pyobj_from_lv(result, &pylv_obj_Type);
+    PyObject *retobj = pyobj_from_lv(result);
     if (unlock) unlock(unlock_arg);
     
     return retobj;
@@ -4084,10 +4556,22 @@ pylv_ta_get_label(pylv_Obj *self, PyObject *args, PyObject *kwds)
         
     if (lock) lock(lock_arg);
     lv_obj_t *result = lv_ta_get_label(self->ref);
-    PyObject *retobj = pyobj_from_lv(result, &pylv_obj_Type);
+    PyObject *retobj = pyobj_from_lv(result);
     if (unlock) unlock(unlock_arg);
     
     return retobj;
+}
+
+static PyObject*
+pylv_ta_get_cursor_pos(pylv_Obj *self, PyObject *args, PyObject *kwds)
+{
+    static char *kwlist[] = {NULL};
+    if (!PyArg_ParseTupleAndKeywords(args, kwds, "", kwlist )) return NULL;
+
+    if (lock) lock(lock_arg);         
+    unsigned short int result = lv_ta_get_cursor_pos(self->ref);
+    if (unlock) unlock(unlock_arg);
+    return Py_BuildValue("H", result);
 }
 
 static PyObject*
@@ -4195,6 +4679,7 @@ static PyMethodDef pylv_ta_methods[] = {
     {"set_one_line", (PyCFunction) pylv_ta_set_one_line, METH_VARARGS | METH_KEYWORDS, NULL},
     {"set_style", (PyCFunction) pylv_ta_set_style, METH_VARARGS | METH_KEYWORDS, NULL},
     {"get_label", (PyCFunction) pylv_ta_get_label, METH_VARARGS | METH_KEYWORDS, NULL},
+    {"get_cursor_pos", (PyCFunction) pylv_ta_get_cursor_pos, METH_VARARGS | METH_KEYWORDS, NULL},
     {"get_cursor_type", (PyCFunction) pylv_ta_get_cursor_type, METH_VARARGS | METH_KEYWORDS, NULL},
     {"get_pwd_mode", (PyCFunction) pylv_ta_get_pwd_mode, METH_VARARGS | METH_KEYWORDS, NULL},
     {"get_one_line", (PyCFunction) pylv_ta_get_one_line, METH_VARARGS | METH_KEYWORDS, NULL},
@@ -4391,8 +4876,12 @@ lv_res_t pylv_ddlist_action_callback(lv_obj_t* obj) {
     pyobj = lv_obj_get_free_ptr(obj);
     if (pyobj) {
         handler = pyobj->action;
-        if (handler) PyObject_CallFunctionObjArgs(handler, NULL);
-        if (PyErr_Occurred()) PyErr_Print();
+        if (handler) {
+            if (unlock) unlock(unlock_arg); // Release lock during call to Python code
+            PyObject_CallFunctionObjArgs(handler, NULL);
+            if (lock) lock(lock_arg);
+            if (PyErr_Occurred()) PyErr_Print();
+        }
     }
     return LV_RES_OK;
 }
@@ -4513,6 +5002,18 @@ pylv_ddlist_set_style(pylv_Obj *self, PyObject *args, PyObject *kwds)
 }
 
 static PyObject*
+pylv_ddlist_get_selected(pylv_Obj *self, PyObject *args, PyObject *kwds)
+{
+    static char *kwlist[] = {NULL};
+    if (!PyArg_ParseTupleAndKeywords(args, kwds, "", kwlist )) return NULL;
+
+    if (lock) lock(lock_arg);         
+    unsigned short int result = lv_ddlist_get_selected(self->ref);
+    if (unlock) unlock(unlock_arg);
+    return Py_BuildValue("H", result);
+}
+
+static PyObject*
 pylv_ddlist_get_selected_str(pylv_Obj *self, PyObject *args, PyObject *kwds)
 {
     static char *kwlist[] = {"buf", NULL};
@@ -4535,6 +5036,18 @@ pylv_ddlist_get_fix_height(pylv_Obj *self, PyObject *args, PyObject *kwds)
     short int result = lv_ddlist_get_fix_height(self->ref);
     if (unlock) unlock(unlock_arg);
     return Py_BuildValue("h", result);
+}
+
+static PyObject*
+pylv_ddlist_get_anim_time(pylv_Obj *self, PyObject *args, PyObject *kwds)
+{
+    static char *kwlist[] = {NULL};
+    if (!PyArg_ParseTupleAndKeywords(args, kwds, "", kwlist )) return NULL;
+
+    if (lock) lock(lock_arg);         
+    unsigned short int result = lv_ddlist_get_anim_time(self->ref);
+    if (unlock) unlock(unlock_arg);
+    return Py_BuildValue("H", result);
 }
 
 static PyObject*
@@ -4568,9 +5081,11 @@ static PyMethodDef pylv_ddlist_methods[] = {
     {"set_hor_fit", (PyCFunction) pylv_ddlist_set_hor_fit, METH_VARARGS | METH_KEYWORDS, NULL},
     {"set_anim_time", (PyCFunction) pylv_ddlist_set_anim_time, METH_VARARGS | METH_KEYWORDS, NULL},
     {"set_style", (PyCFunction) pylv_ddlist_set_style, METH_VARARGS | METH_KEYWORDS, NULL},
+    {"get_selected", (PyCFunction) pylv_ddlist_get_selected, METH_VARARGS | METH_KEYWORDS, NULL},
     {"get_selected_str", (PyCFunction) pylv_ddlist_get_selected_str, METH_VARARGS | METH_KEYWORDS, NULL},
     {"get_action", (PyCFunction) pylv_ddlist_get_action, METH_VARARGS | METH_KEYWORDS, NULL},
     {"get_fix_height", (PyCFunction) pylv_ddlist_get_fix_height, METH_VARARGS | METH_KEYWORDS, NULL},
+    {"get_anim_time", (PyCFunction) pylv_ddlist_get_anim_time, METH_VARARGS | METH_KEYWORDS, NULL},
     {"get_style", (PyCFunction) pylv_ddlist_get_style, METH_VARARGS | METH_KEYWORDS, NULL},
     {"open", (PyCFunction) pylv_ddlist_open, METH_VARARGS | METH_KEYWORDS, NULL},
     {NULL}  /* Sentinel */
@@ -4652,7 +5167,7 @@ pylv_list_get_btn_label(pylv_Obj *self, PyObject *args, PyObject *kwds)
         
     if (lock) lock(lock_arg);
     lv_obj_t *result = lv_list_get_btn_label(self->ref);
-    PyObject *retobj = pyobj_from_lv(result, &pylv_obj_Type);
+    PyObject *retobj = pyobj_from_lv(result);
     if (unlock) unlock(unlock_arg);
     
     return retobj;
@@ -4667,10 +5182,22 @@ pylv_list_get_btn_img(pylv_Obj *self, PyObject *args, PyObject *kwds)
         
     if (lock) lock(lock_arg);
     lv_obj_t *result = lv_list_get_btn_img(self->ref);
-    PyObject *retobj = pyobj_from_lv(result, &pylv_obj_Type);
+    PyObject *retobj = pyobj_from_lv(result);
     if (unlock) unlock(unlock_arg);
     
     return retobj;
+}
+
+static PyObject*
+pylv_list_get_anim_time(pylv_Obj *self, PyObject *args, PyObject *kwds)
+{
+    static char *kwlist[] = {NULL};
+    if (!PyArg_ParseTupleAndKeywords(args, kwds, "", kwlist )) return NULL;
+
+    if (lock) lock(lock_arg);         
+    unsigned short int result = lv_list_get_anim_time(self->ref);
+    if (unlock) unlock(unlock_arg);
+    return Py_BuildValue("H", result);
 }
 
 static PyObject*
@@ -4713,6 +5240,7 @@ static PyMethodDef pylv_list_methods[] = {
     {"set_style", (PyCFunction) pylv_list_set_style, METH_VARARGS | METH_KEYWORDS, NULL},
     {"get_btn_label", (PyCFunction) pylv_list_get_btn_label, METH_VARARGS | METH_KEYWORDS, NULL},
     {"get_btn_img", (PyCFunction) pylv_list_get_btn_img, METH_VARARGS | METH_KEYWORDS, NULL},
+    {"get_anim_time", (PyCFunction) pylv_list_get_anim_time, METH_VARARGS | METH_KEYWORDS, NULL},
     {"get_style", (PyCFunction) pylv_list_get_style, METH_VARARGS | METH_KEYWORDS, NULL},
     {"up", (PyCFunction) pylv_list_up, METH_VARARGS | METH_KEYWORDS, NULL},
     {"down", (PyCFunction) pylv_list_down, METH_VARARGS | METH_KEYWORDS, NULL},
@@ -4766,8 +5294,12 @@ lv_res_t pylv_slider_action_callback(lv_obj_t* obj) {
     pyobj = lv_obj_get_free_ptr(obj);
     if (pyobj) {
         handler = pyobj->action;
-        if (handler) PyObject_CallFunctionObjArgs(handler, NULL);
-        if (PyErr_Occurred()) PyErr_Print();
+        if (handler) {
+            if (unlock) unlock(unlock_arg); // Release lock during call to Python code
+            PyObject_CallFunctionObjArgs(handler, NULL);
+            if (lock) lock(lock_arg);
+            if (PyErr_Occurred()) PyErr_Print();
+        }
     }
     return LV_RES_OK;
 }
@@ -4836,6 +5368,18 @@ pylv_slider_set_style(pylv_Obj *self, PyObject *args, PyObject *kwds)
 }
 
 static PyObject*
+pylv_slider_get_value(pylv_Obj *self, PyObject *args, PyObject *kwds)
+{
+    static char *kwlist[] = {NULL};
+    if (!PyArg_ParseTupleAndKeywords(args, kwds, "", kwlist )) return NULL;
+
+    if (lock) lock(lock_arg);         
+    short int result = lv_slider_get_value(self->ref);
+    if (unlock) unlock(unlock_arg);
+    return Py_BuildValue("h", result);
+}
+
+static PyObject*
 pylv_slider_is_dragged(pylv_Obj *self, PyObject *args, PyObject *kwds)
 {
     static char *kwlist[] = {NULL};
@@ -4873,6 +5417,7 @@ static PyMethodDef pylv_slider_methods[] = {
     {"set_action", (PyCFunction) pylv_slider_set_action, METH_VARARGS | METH_KEYWORDS, NULL},
     {"set_knob_in", (PyCFunction) pylv_slider_set_knob_in, METH_VARARGS | METH_KEYWORDS, NULL},
     {"set_style", (PyCFunction) pylv_slider_set_style, METH_VARARGS | METH_KEYWORDS, NULL},
+    {"get_value", (PyCFunction) pylv_slider_get_value, METH_VARARGS | METH_KEYWORDS, NULL},
     {"get_action", (PyCFunction) pylv_slider_get_action, METH_VARARGS | METH_KEYWORDS, NULL},
     {"is_dragged", (PyCFunction) pylv_slider_is_dragged, METH_VARARGS | METH_KEYWORDS, NULL},
     {"get_knob_in", (PyCFunction) pylv_slider_get_knob_in, METH_VARARGS | METH_KEYWORDS, NULL},
@@ -5035,8 +5580,12 @@ lv_res_t pylv_cb_action_callback(lv_obj_t* obj) {
     pyobj = lv_obj_get_free_ptr(obj);
     if (pyobj) {
         handler = pyobj->action;
-        if (handler) PyObject_CallFunctionObjArgs(handler, NULL);
-        if (PyErr_Occurred()) PyErr_Print();
+        if (handler) {
+            if (unlock) unlock(unlock_arg); // Release lock during call to Python code
+            PyObject_CallFunctionObjArgs(handler, NULL);
+            if (lock) lock(lock_arg);
+            if (PyErr_Occurred()) PyErr_Print();
+        }
     }
     return LV_RES_OK;
 }
@@ -5300,7 +5849,7 @@ pylv_scr_act(PyObject *self, PyObject *args) {
     if (lock) lock(lock_arg);
     scr = lv_scr_act();
     if (unlock) unlock(unlock_arg);
-    return pyobj_from_lv(scr, &pylv_obj_Type);
+    return pyobj_from_lv(scr);
 }
 
 static PyObject *

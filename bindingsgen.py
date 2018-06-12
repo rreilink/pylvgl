@@ -92,10 +92,9 @@ def parse(filename, functions, enums):
         
         enums[enumname] = values
 
-    
 
     # Find method definitions
-    for static, restype, resptr, name, argsstr, contents in re.findall(r'(static\s+inline\s+)?(bool|void|lv_\w+_t)(\s+\*)?\s+(\w+)\(([\w\s*&,()]*?)\)\s*(?:{([^@]*)@|;)', c, re.DOTALL):
+    for static, restype, resptr, name, argsstr, contents in re.findall(r'(static\s+inline\s+)?(bool|void|\w+_t)(\s+\*)?\s+(\w+)\(([\w\s*&,()]*?)\)\s*(?:{([^@]*)@|;)', c, re.DOTALL):
 
         if '(' in argsstr:
             print(f'{name} cannot be bound since it has a function pointer as argument')
@@ -114,10 +113,10 @@ def parse(filename, functions, enums):
 
         functions[name]=(FunctionDef(name, restype + resptr.strip(), args, contents, False))
 
-
 # Use C-files to get class hierarchy    
 functions_c = {}
 enums_c = {}
+
 for filename in [f for f in glob.glob('lvgl/lv_objx/*.c') if not f.endswith('lv_objx_templ.c')]:
     parse(filename, functions_c, enums_c)
 
@@ -142,10 +141,11 @@ ancestors = sortedancestors
 # Use H-files to get external function definitions    
 functions = {}
 enums = {}
+
 for filename in ['lvgl/lv_core/lv_obj.h'] + [f for f in glob.glob('lvgl/lv_objx/*.h') if not f.endswith('lv_objx_templ.h')]:
     parse(filename, functions, enums)
 
-assert(len(functions) == 328)
+assert(len(functions) == 364)
 
 skipfunctions = {
     # Not present in the C-files, only in the headers
@@ -216,7 +216,7 @@ for function in functions.values():
 #
 # Mark which functions have a custom implementation (in lvglmodule_template.c)
 #
-for custom in ('lv_obj_get_children', 'lv_btnm_set_map', 'lv_list_add', 'lv_btn_set_action', 'lv_btn_get_action','lv_obj_get_type', 'lv_list_focus'):
+for custom in ('lv_obj_get_children', 'lv_obj_get_signal_func', 'lv_obj_set_signal_func', 'lv_label_get_letter_pos', 'lv_label_get_letter_on', 'lv_btnm_set_map', 'lv_list_add', 'lv_btn_set_action', 'lv_btn_get_action','lv_obj_get_type', 'lv_list_focus'):
     functions[custom] = FunctionDef(custom, None, [], None, True)
 
 
@@ -325,7 +325,7 @@ py{function.name}(pylv_Obj *self, PyObject *args, PyObject *kwds)
         
     if (lock) lock(lock_arg);
     lv_obj_t *result = {callcode};
-    PyObject *retobj = pyobj_from_lv(result, &pylv_obj_Type);
+    PyObject *retobj = pyobj_from_lv(result);
     if (unlock) unlock(unlock_arg);
     
     return retobj;
@@ -374,8 +374,12 @@ lv_res_t py{obj.name}_{action}_callback(lv_obj_t* obj) {{
     pyobj = lv_obj_get_free_ptr(obj);
     if (pyobj) {{
         handler = pyobj->{attrname};
-        if (handler) PyObject_CallFunctionObjArgs(handler, NULL);
-        if (PyErr_Occurred()) PyErr_Print();
+        if (handler) {{
+            if (unlock) unlock(unlock_arg); // Release lock during call to Python code
+            PyObject_CallFunctionObjArgs(handler, NULL);
+            if (lock) lock(lock_arg);
+            if (PyErr_Occurred()) PyErr_Print();
+        }}
     }}
     return LV_RES_OK;
 }}
@@ -524,7 +528,7 @@ for function in functions.values():
 fields = {}
 
 objects['lv_btnm'].customstructfields.append('const char **map;')
-objects['lv_obj'].customstructfields.extend(['PyObject_HEAD', 'lv_obj_t *ref;'])
+objects['lv_obj'].customstructfields.extend(['PyObject_HEAD', 'lv_obj_t *ref;', 'PyObject *signal_func;', 'lv_signal_func_t orig_c_signal_func;'])
 objects['lv_btn'].customstructfields.append(f'PyObject *actions[LV_BTN_ACTION_NUM];')
 
 # Button callback handlers
