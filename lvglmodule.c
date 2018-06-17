@@ -6,6 +6,30 @@
 #error Only 16 bits color depth is currently supported
 #endif
 
+
+/* Note on the lvgl lock and the GIL:
+ *
+ * Any attempt to aquire the lock should be with the GIL released. Otherwise,
+ * The following situation could occur:
+ *
+ * Thread 1:                    Thread 2 (lv_poll called)
+ *   has the GIL                  has the lvgl lock
+ *   waits for lvgl lock          process callback --> aquire GIL
+ *
+ * This would be a deadlock situation
+ */
+
+#define LVGL_LOCK \
+    if (lock) { \
+        Py_BEGIN_ALLOW_THREADS \
+        lock(lock_arg); \
+        Py_END_ALLOW_THREADS \
+    }
+
+#define LVGL_UNLOCK \
+    if (unlock) { unlock(unlock_arg); }
+ 
+
 /****************************************************************
  * Object struct definitions                                    *
  ****************************************************************/
@@ -579,7 +603,7 @@ pylv_obj_get_children(pylv_Obj *self, PyObject *args, PyObject *kwds)
     PyObject *ret = PyList_New(0);
     if (!ret) return NULL;
     
-    if (lock) lock(lock_arg);
+    LVGL_LOCK
     
     while (1) {
         child = lv_obj_get_child(self->ref, child);
@@ -595,7 +619,7 @@ pylv_obj_get_children(pylv_Obj *self, PyObject *args, PyObject *kwds)
         Py_DECREF(pychild);
     }
 
-    if (unlock) unlock(unlock_arg);
+    LVGL_UNLOCK
     
     return ret;
 }
@@ -607,8 +631,9 @@ pylv_obj_get_type(pylv_Obj *self, PyObject *args, PyObject *kwds)
     PyObject *list = NULL;
     PyObject *str = NULL;
     
-    if (lock) lock(lock_arg);
+    LVGL_LOCK
     lv_obj_get_type(self->ref, &result);
+    LVGL_UNLOCK
     
     list = PyList_New(0);
     
@@ -620,14 +645,12 @@ pylv_obj_get_type(pylv_Obj *self, PyObject *args, PyObject *kwds)
         
         if (PyList_Append(list, str)) goto error; // PyList_Append increases refcount
     }
-
-    if (unlock) unlock(unlock_arg);   
+  
     return list;
     
 error:
     Py_XDECREF(list);
-    Py_XDECREF(str);
-    if (unlock) unlock(unlock_arg);   
+    Py_XDECREF(str);  
     return NULL;
 }
 
@@ -638,10 +661,15 @@ lv_res_t pylv_obj_signal_callback(lv_obj_t* obj, lv_signal_t signal, void *param
     lv_res_t result;
     lv_point_t point,drag_vect;
     PyObject *dragging;
+
+    PyGILState_STATE gstate;
+
+    gstate = PyGILState_Ensure();
     
     pyobj = lv_obj_get_free_ptr(obj);
     if (pyobj) {
         result = pyobj->orig_c_signal_func(obj, signal, param);
+        
         if (result == LV_RES_OK) {
             handler = pyobj->signal_func;
             if (handler) {
@@ -684,16 +712,23 @@ lv_res_t pylv_obj_signal_callback(lv_obj_t* obj, lv_signal_t signal, void *param
                 // Release it since we are allowed to call lv_ functions now
                 // (Would otherwise result in deadlock when lvgl calls are made from
                 // with the signal handler)
-                if (unlock) unlock(unlock_arg);            
+                if (unlock) unlock(unlock_arg);
                 PyObject_CallFunction(handler, "iO", (int) signal, pyarg);
-                if (lock) lock(lock_arg);
-
                 
                 Py_DECREF(pyarg);
+                if (PyErr_Occurred()) PyErr_Print();
+                
+                PyGILState_Release(gstate);
+                if (lock) lock(lock_arg);
+
+                return LV_RES_OK;
+
             }
-            if (PyErr_Occurred()) PyErr_Print();
+
         }
     }
+    
+    PyGILState_Release(gstate);
     return LV_RES_OK;
 }
 
@@ -725,12 +760,12 @@ pylv_obj_set_signal_func(pylv_Ddlist *self, PyObject *args, PyObject *kwds)
         self->signal_func = signal_func;
         Py_INCREF(signal_func);
         
-        if (lock) lock(lock_arg);
+        LVGL_LOCK
         if (!self->orig_c_signal_func) {
             self->orig_c_signal_func = lv_obj_get_signal_func(self->ref);
         }
         lv_obj_set_signal_func(self->ref, pylv_obj_signal_callback);
-        if (unlock) unlock(unlock_arg);
+        LVGL_UNLOCK
     }
     Py_XDECREF(tmp); // Old action (tmp) could be NULL
 
@@ -746,9 +781,9 @@ pylv_label_get_letter_pos(pylv_Label *self, PyObject *args, PyObject *kwds)
     lv_point_t pos;
     if (!PyArg_ParseTupleAndKeywords(args, kwds, "i", kwlist , &index)) return NULL;   
     
-    if (lock) lock(lock_arg);
+    LVGL_LOCK
     lv_label_get_letter_pos(self->ref, index, &pos);
-    if (unlock) unlock(unlock_arg);
+    LVGL_UNLOCK
 
     return Py_BuildValue("ii", (int) pos.x, (int) pos.y);
 }
@@ -764,9 +799,9 @@ pylv_label_get_letter_on(pylv_Label *self, PyObject *args, PyObject *kwds)
     pos.x = x;
     pos.y = y;
     
-    if (lock) lock(lock_arg);
+    LVGL_LOCK
     index = lv_label_get_letter_on(self->ref, &pos);
-    if (unlock) unlock(unlock_arg);
+    LVGL_UNLOCK
 
     return Py_BuildValue("i", index);
 }
@@ -783,9 +818,9 @@ pylv_btnm_set_map(pylv_Btnm *self, PyObject *args, PyObject *kwds)
     cmap = buildstringmap(map);
     if (!cmap) return NULL;
     
-    if (lock) lock(lock_arg);
+    LVGL_LOCK
     lv_btnm_set_map(self->ref, cmap);
-    if (unlock) unlock(unlock_arg);
+    LVGL_UNLOCK
 
     // Free the old map (if any) and store the new one to be able to free it later
     if (self->map) PyMem_Free(self->map);
@@ -812,9 +847,9 @@ pylv_list_add(pylv_List *self, PyObject *args, PyObject *kwds)
         return NULL;
     } 
 
-    if (lock) lock(lock_arg);
+    LVGL_LOCK
     ret = pyobj_from_lv(lv_list_add(self->ref, NULL, txt, NULL));
-    if (unlock) unlock(unlock_arg);
+    LVGL_UNLOCK
     
     return ret;
 
@@ -831,7 +866,7 @@ pylv_list_focus(pylv_List *self, PyObject *args, PyObject *kwds)
     int anim_en;
     if (!PyArg_ParseTupleAndKeywords(args, kwds, "O!p", kwlist , &pylv_btn_Type, &obj, &anim_en)) return NULL;
     
-    if (lock) lock(lock_arg);         
+    LVGL_LOCK         
     
     parent = lv_obj_get_parent(obj->ref);
     if (parent) parent = lv_obj_get_parent(parent); // get the obj's parent's parent in a safe way
@@ -843,7 +878,7 @@ pylv_list_focus(pylv_List *self, PyObject *args, PyObject *kwds)
     
     lv_list_focus(obj->ref, anim_en);
     
-    if (unlock) unlock(unlock_arg);
+    LVGL_UNLOCK
     Py_RETURN_NONE;
 }
 
@@ -853,48 +888,104 @@ pylv_list_focus(pylv_List *self, PyObject *args, PyObject *kwds)
 lv_res_t pylv_btn_action_click_callback(lv_obj_t* obj) {
     pylv_Btn *pyobj;
     PyObject *handler;
+    PyGILState_STATE gstate;
+
+    gstate = PyGILState_Ensure();
+    
     pyobj = lv_obj_get_free_ptr(obj);
     if (pyobj) {
         handler = pyobj->actions[0];
-        if (handler) PyObject_CallFunctionObjArgs(handler, NULL);
-        if (PyErr_Occurred()) PyErr_Print();
+        if (handler) {
+            if (unlock) unlock(unlock_arg); 
+            PyObject_CallFunctionObjArgs(handler, NULL);
+            if (PyErr_Occurred()) PyErr_Print();
+            
+            PyGILState_Release(gstate);
+            if (lock) lock(lock_arg); 
+            return LV_RES_OK;
+
+        }
+
     }
+    PyGILState_Release(gstate);
     return LV_RES_OK;
 }
 
 lv_res_t pylv_btn_action_pr_callback(lv_obj_t* obj) {
     pylv_Btn *pyobj;
     PyObject *handler;
+    PyGILState_STATE gstate;
+
+    gstate = PyGILState_Ensure();
+    
     pyobj = lv_obj_get_free_ptr(obj);
     if (pyobj) {
         handler = pyobj->actions[1];
-        if (handler) PyObject_CallFunctionObjArgs(handler, NULL);
-        if (PyErr_Occurred()) PyErr_Print();
+        if (handler) {
+            if (unlock) unlock(unlock_arg); 
+            PyObject_CallFunctionObjArgs(handler, NULL);
+            if (PyErr_Occurred()) PyErr_Print();
+            
+            PyGILState_Release(gstate);
+            if (lock) lock(lock_arg); 
+            return LV_RES_OK;
+
+        }
+
     }
+    PyGILState_Release(gstate);
     return LV_RES_OK;
 }
 
 lv_res_t pylv_btn_action_long_pr_callback(lv_obj_t* obj) {
     pylv_Btn *pyobj;
     PyObject *handler;
+    PyGILState_STATE gstate;
+
+    gstate = PyGILState_Ensure();
+    
     pyobj = lv_obj_get_free_ptr(obj);
     if (pyobj) {
         handler = pyobj->actions[2];
-        if (handler) PyObject_CallFunctionObjArgs(handler, NULL);
-        if (PyErr_Occurred()) PyErr_Print();
+        if (handler) {
+            if (unlock) unlock(unlock_arg); 
+            PyObject_CallFunctionObjArgs(handler, NULL);
+            if (PyErr_Occurred()) PyErr_Print();
+            
+            PyGILState_Release(gstate);
+            if (lock) lock(lock_arg); 
+            return LV_RES_OK;
+
+        }
+
     }
+    PyGILState_Release(gstate);
     return LV_RES_OK;
 }
 
 lv_res_t pylv_btn_action_long_pr_repeat_callback(lv_obj_t* obj) {
     pylv_Btn *pyobj;
     PyObject *handler;
+    PyGILState_STATE gstate;
+
+    gstate = PyGILState_Ensure();
+    
     pyobj = lv_obj_get_free_ptr(obj);
     if (pyobj) {
         handler = pyobj->actions[3];
-        if (handler) PyObject_CallFunctionObjArgs(handler, NULL);
-        if (PyErr_Occurred()) PyErr_Print();
+        if (handler) {
+            if (unlock) unlock(unlock_arg); 
+            PyObject_CallFunctionObjArgs(handler, NULL);
+            if (PyErr_Occurred()) PyErr_Print();
+            
+            PyGILState_Release(gstate);
+            if (lock) lock(lock_arg); 
+            return LV_RES_OK;
+
+        }
+
     }
+    PyGILState_Release(gstate);
     return LV_RES_OK;
 }
 static lv_action_t pylv_btn_action_callbacks[LV_BTN_ACTION_NUM] = {pylv_btn_action_click_callback, pylv_btn_action_pr_callback, pylv_btn_action_long_pr_callback, pylv_btn_action_long_pr_repeat_callback};
@@ -964,10 +1055,10 @@ pylv_obj_init(pylv_Obj *self, PyObject *args, PyObject *kwds)
         return -1;
     }   
     
-    if (lock) lock(lock_arg);
+    LVGL_LOCK
     self->ref = lv_obj_create(parent ? parent->ref : NULL, copy ? copy->ref : NULL);
     lv_obj_set_free_ptr(self->ref, self);
-    if (unlock) unlock(unlock_arg);
+    LVGL_UNLOCK
 
     return 0;
 }
@@ -979,9 +1070,9 @@ pylv_obj_invalidate(pylv_Obj *self, PyObject *args, PyObject *kwds)
     static char *kwlist[] = {NULL};
     if (!PyArg_ParseTupleAndKeywords(args, kwds, "", kwlist )) return NULL;
 
-    if (lock) lock(lock_arg);         
+    LVGL_LOCK         
     lv_obj_invalidate(self->ref);
-    if (unlock) unlock(unlock_arg);
+    LVGL_UNLOCK
     Py_RETURN_NONE;
 }
 
@@ -992,9 +1083,9 @@ pylv_obj_set_parent(pylv_Obj *self, PyObject *args, PyObject *kwds)
     pylv_Obj * parent;
     if (!PyArg_ParseTupleAndKeywords(args, kwds, "O!", kwlist , &pylv_obj_Type, &parent)) return NULL;
 
-    if (lock) lock(lock_arg);         
+    LVGL_LOCK         
     lv_obj_set_parent(self->ref, parent->ref);
-    if (unlock) unlock(unlock_arg);
+    LVGL_UNLOCK
     Py_RETURN_NONE;
 }
 
@@ -1006,9 +1097,9 @@ pylv_obj_set_pos(pylv_Obj *self, PyObject *args, PyObject *kwds)
     short int y;
     if (!PyArg_ParseTupleAndKeywords(args, kwds, "hh", kwlist , &x, &y)) return NULL;
 
-    if (lock) lock(lock_arg);         
+    LVGL_LOCK         
     lv_obj_set_pos(self->ref, x, y);
-    if (unlock) unlock(unlock_arg);
+    LVGL_UNLOCK
     Py_RETURN_NONE;
 }
 
@@ -1019,9 +1110,9 @@ pylv_obj_set_x(pylv_Obj *self, PyObject *args, PyObject *kwds)
     short int x;
     if (!PyArg_ParseTupleAndKeywords(args, kwds, "h", kwlist , &x)) return NULL;
 
-    if (lock) lock(lock_arg);         
+    LVGL_LOCK         
     lv_obj_set_x(self->ref, x);
-    if (unlock) unlock(unlock_arg);
+    LVGL_UNLOCK
     Py_RETURN_NONE;
 }
 
@@ -1032,9 +1123,9 @@ pylv_obj_set_y(pylv_Obj *self, PyObject *args, PyObject *kwds)
     short int y;
     if (!PyArg_ParseTupleAndKeywords(args, kwds, "h", kwlist , &y)) return NULL;
 
-    if (lock) lock(lock_arg);         
+    LVGL_LOCK         
     lv_obj_set_y(self->ref, y);
-    if (unlock) unlock(unlock_arg);
+    LVGL_UNLOCK
     Py_RETURN_NONE;
 }
 
@@ -1046,9 +1137,9 @@ pylv_obj_set_size(pylv_Obj *self, PyObject *args, PyObject *kwds)
     short int h;
     if (!PyArg_ParseTupleAndKeywords(args, kwds, "hh", kwlist , &w, &h)) return NULL;
 
-    if (lock) lock(lock_arg);         
+    LVGL_LOCK         
     lv_obj_set_size(self->ref, w, h);
-    if (unlock) unlock(unlock_arg);
+    LVGL_UNLOCK
     Py_RETURN_NONE;
 }
 
@@ -1059,9 +1150,9 @@ pylv_obj_set_width(pylv_Obj *self, PyObject *args, PyObject *kwds)
     short int w;
     if (!PyArg_ParseTupleAndKeywords(args, kwds, "h", kwlist , &w)) return NULL;
 
-    if (lock) lock(lock_arg);         
+    LVGL_LOCK         
     lv_obj_set_width(self->ref, w);
-    if (unlock) unlock(unlock_arg);
+    LVGL_UNLOCK
     Py_RETURN_NONE;
 }
 
@@ -1072,9 +1163,9 @@ pylv_obj_set_height(pylv_Obj *self, PyObject *args, PyObject *kwds)
     short int h;
     if (!PyArg_ParseTupleAndKeywords(args, kwds, "h", kwlist , &h)) return NULL;
 
-    if (lock) lock(lock_arg);         
+    LVGL_LOCK         
     lv_obj_set_height(self->ref, h);
-    if (unlock) unlock(unlock_arg);
+    LVGL_UNLOCK
     Py_RETURN_NONE;
 }
 
@@ -1088,9 +1179,9 @@ pylv_obj_align(pylv_Obj *self, PyObject *args, PyObject *kwds)
     short int y_mod;
     if (!PyArg_ParseTupleAndKeywords(args, kwds, "O!ihh", kwlist , &pylv_obj_Type, &base, &align, &x_mod, &y_mod)) return NULL;
 
-    if (lock) lock(lock_arg);         
+    LVGL_LOCK         
     lv_obj_align(self->ref, base->ref, align, x_mod, y_mod);
-    if (unlock) unlock(unlock_arg);
+    LVGL_UNLOCK
     Py_RETURN_NONE;
 }
 
@@ -1101,9 +1192,9 @@ pylv_obj_set_style(pylv_Obj *self, PyObject *args, PyObject *kwds)
     Style_Object * style;
     if (!PyArg_ParseTupleAndKeywords(args, kwds, "O!", kwlist , &Style_Type, &style)) return NULL;
 
-    if (lock) lock(lock_arg);         
+    LVGL_LOCK         
     lv_obj_set_style(self->ref, style->ref);
-    if (unlock) unlock(unlock_arg);
+    LVGL_UNLOCK
     Py_RETURN_NONE;
 }
 
@@ -1113,9 +1204,9 @@ pylv_obj_refresh_style(pylv_Obj *self, PyObject *args, PyObject *kwds)
     static char *kwlist[] = {NULL};
     if (!PyArg_ParseTupleAndKeywords(args, kwds, "", kwlist )) return NULL;
 
-    if (lock) lock(lock_arg);         
+    LVGL_LOCK         
     lv_obj_refresh_style(self->ref);
-    if (unlock) unlock(unlock_arg);
+    LVGL_UNLOCK
     Py_RETURN_NONE;
 }
 
@@ -1126,9 +1217,9 @@ pylv_obj_set_hidden(pylv_Obj *self, PyObject *args, PyObject *kwds)
     int en;
     if (!PyArg_ParseTupleAndKeywords(args, kwds, "p", kwlist , &en)) return NULL;
 
-    if (lock) lock(lock_arg);         
+    LVGL_LOCK         
     lv_obj_set_hidden(self->ref, en);
-    if (unlock) unlock(unlock_arg);
+    LVGL_UNLOCK
     Py_RETURN_NONE;
 }
 
@@ -1139,9 +1230,9 @@ pylv_obj_set_click(pylv_Obj *self, PyObject *args, PyObject *kwds)
     int en;
     if (!PyArg_ParseTupleAndKeywords(args, kwds, "p", kwlist , &en)) return NULL;
 
-    if (lock) lock(lock_arg);         
+    LVGL_LOCK         
     lv_obj_set_click(self->ref, en);
-    if (unlock) unlock(unlock_arg);
+    LVGL_UNLOCK
     Py_RETURN_NONE;
 }
 
@@ -1152,9 +1243,9 @@ pylv_obj_set_top(pylv_Obj *self, PyObject *args, PyObject *kwds)
     int en;
     if (!PyArg_ParseTupleAndKeywords(args, kwds, "p", kwlist , &en)) return NULL;
 
-    if (lock) lock(lock_arg);         
+    LVGL_LOCK         
     lv_obj_set_top(self->ref, en);
-    if (unlock) unlock(unlock_arg);
+    LVGL_UNLOCK
     Py_RETURN_NONE;
 }
 
@@ -1165,9 +1256,9 @@ pylv_obj_set_drag(pylv_Obj *self, PyObject *args, PyObject *kwds)
     int en;
     if (!PyArg_ParseTupleAndKeywords(args, kwds, "p", kwlist , &en)) return NULL;
 
-    if (lock) lock(lock_arg);         
+    LVGL_LOCK         
     lv_obj_set_drag(self->ref, en);
-    if (unlock) unlock(unlock_arg);
+    LVGL_UNLOCK
     Py_RETURN_NONE;
 }
 
@@ -1178,9 +1269,9 @@ pylv_obj_set_drag_throw(pylv_Obj *self, PyObject *args, PyObject *kwds)
     int en;
     if (!PyArg_ParseTupleAndKeywords(args, kwds, "p", kwlist , &en)) return NULL;
 
-    if (lock) lock(lock_arg);         
+    LVGL_LOCK         
     lv_obj_set_drag_throw(self->ref, en);
-    if (unlock) unlock(unlock_arg);
+    LVGL_UNLOCK
     Py_RETURN_NONE;
 }
 
@@ -1191,9 +1282,9 @@ pylv_obj_set_drag_parent(pylv_Obj *self, PyObject *args, PyObject *kwds)
     int en;
     if (!PyArg_ParseTupleAndKeywords(args, kwds, "p", kwlist , &en)) return NULL;
 
-    if (lock) lock(lock_arg);         
+    LVGL_LOCK         
     lv_obj_set_drag_parent(self->ref, en);
-    if (unlock) unlock(unlock_arg);
+    LVGL_UNLOCK
     Py_RETURN_NONE;
 }
 
@@ -1204,9 +1295,9 @@ pylv_obj_set_protect(pylv_Obj *self, PyObject *args, PyObject *kwds)
     unsigned char prot;
     if (!PyArg_ParseTupleAndKeywords(args, kwds, "b", kwlist , &prot)) return NULL;
 
-    if (lock) lock(lock_arg);         
+    LVGL_LOCK         
     lv_obj_set_protect(self->ref, prot);
-    if (unlock) unlock(unlock_arg);
+    LVGL_UNLOCK
     Py_RETURN_NONE;
 }
 
@@ -1217,9 +1308,9 @@ pylv_obj_clear_protect(pylv_Obj *self, PyObject *args, PyObject *kwds)
     unsigned char prot;
     if (!PyArg_ParseTupleAndKeywords(args, kwds, "b", kwlist , &prot)) return NULL;
 
-    if (lock) lock(lock_arg);         
+    LVGL_LOCK         
     lv_obj_clear_protect(self->ref, prot);
-    if (unlock) unlock(unlock_arg);
+    LVGL_UNLOCK
     Py_RETURN_NONE;
 }
 
@@ -1236,9 +1327,9 @@ pylv_obj_refresh_ext_size(pylv_Obj *self, PyObject *args, PyObject *kwds)
     static char *kwlist[] = {NULL};
     if (!PyArg_ParseTupleAndKeywords(args, kwds, "", kwlist )) return NULL;
 
-    if (lock) lock(lock_arg);         
+    LVGL_LOCK         
     lv_obj_refresh_ext_size(self->ref);
-    if (unlock) unlock(unlock_arg);
+    LVGL_UNLOCK
     Py_RETURN_NONE;
 }
 
@@ -1248,11 +1339,10 @@ pylv_obj_get_screen(pylv_Obj *self, PyObject *args, PyObject *kwds)
     static char *kwlist[] = {NULL};
     if (!PyArg_ParseTupleAndKeywords(args, kwds, "", kwlist )) return NULL;
 
-        
-    if (lock) lock(lock_arg);
+    LVGL_LOCK
     lv_obj_t *result = lv_obj_get_screen(self->ref);
+    LVGL_UNLOCK
     PyObject *retobj = pyobj_from_lv(result);
-    if (unlock) unlock(unlock_arg);
     
     return retobj;
 }
@@ -1263,11 +1353,10 @@ pylv_obj_get_parent(pylv_Obj *self, PyObject *args, PyObject *kwds)
     static char *kwlist[] = {NULL};
     if (!PyArg_ParseTupleAndKeywords(args, kwds, "", kwlist )) return NULL;
 
-        
-    if (lock) lock(lock_arg);
+    LVGL_LOCK
     lv_obj_t *result = lv_obj_get_parent(self->ref);
+    LVGL_UNLOCK
     PyObject *retobj = pyobj_from_lv(result);
-    if (unlock) unlock(unlock_arg);
     
     return retobj;
 }
@@ -1278,9 +1367,9 @@ pylv_obj_count_children(pylv_Obj *self, PyObject *args, PyObject *kwds)
     static char *kwlist[] = {NULL};
     if (!PyArg_ParseTupleAndKeywords(args, kwds, "", kwlist )) return NULL;
 
-    if (lock) lock(lock_arg);         
+    LVGL_LOCK        
     unsigned short int result = lv_obj_count_children(self->ref);
-    if (unlock) unlock(unlock_arg);
+    LVGL_UNLOCK
     return Py_BuildValue("H", result);
 }
 
@@ -1297,9 +1386,9 @@ pylv_obj_get_x(pylv_Obj *self, PyObject *args, PyObject *kwds)
     static char *kwlist[] = {NULL};
     if (!PyArg_ParseTupleAndKeywords(args, kwds, "", kwlist )) return NULL;
 
-    if (lock) lock(lock_arg);         
+    LVGL_LOCK        
     short int result = lv_obj_get_x(self->ref);
-    if (unlock) unlock(unlock_arg);
+    LVGL_UNLOCK
     return Py_BuildValue("h", result);
 }
 
@@ -1309,9 +1398,9 @@ pylv_obj_get_y(pylv_Obj *self, PyObject *args, PyObject *kwds)
     static char *kwlist[] = {NULL};
     if (!PyArg_ParseTupleAndKeywords(args, kwds, "", kwlist )) return NULL;
 
-    if (lock) lock(lock_arg);         
+    LVGL_LOCK        
     short int result = lv_obj_get_y(self->ref);
-    if (unlock) unlock(unlock_arg);
+    LVGL_UNLOCK
     return Py_BuildValue("h", result);
 }
 
@@ -1321,9 +1410,9 @@ pylv_obj_get_width(pylv_Obj *self, PyObject *args, PyObject *kwds)
     static char *kwlist[] = {NULL};
     if (!PyArg_ParseTupleAndKeywords(args, kwds, "", kwlist )) return NULL;
 
-    if (lock) lock(lock_arg);         
+    LVGL_LOCK        
     short int result = lv_obj_get_width(self->ref);
-    if (unlock) unlock(unlock_arg);
+    LVGL_UNLOCK
     return Py_BuildValue("h", result);
 }
 
@@ -1333,9 +1422,9 @@ pylv_obj_get_height(pylv_Obj *self, PyObject *args, PyObject *kwds)
     static char *kwlist[] = {NULL};
     if (!PyArg_ParseTupleAndKeywords(args, kwds, "", kwlist )) return NULL;
 
-    if (lock) lock(lock_arg);         
+    LVGL_LOCK        
     short int result = lv_obj_get_height(self->ref);
-    if (unlock) unlock(unlock_arg);
+    LVGL_UNLOCK
     return Py_BuildValue("h", result);
 }
 
@@ -1345,9 +1434,9 @@ pylv_obj_get_ext_size(pylv_Obj *self, PyObject *args, PyObject *kwds)
     static char *kwlist[] = {NULL};
     if (!PyArg_ParseTupleAndKeywords(args, kwds, "", kwlist )) return NULL;
 
-    if (lock) lock(lock_arg);         
+    LVGL_LOCK        
     short int result = lv_obj_get_ext_size(self->ref);
-    if (unlock) unlock(unlock_arg);
+    LVGL_UNLOCK
     return Py_BuildValue("h", result);
 }
 
@@ -1365,9 +1454,9 @@ pylv_obj_get_hidden(pylv_Obj *self, PyObject *args, PyObject *kwds)
     static char *kwlist[] = {NULL};
     if (!PyArg_ParseTupleAndKeywords(args, kwds, "", kwlist )) return NULL;
 
-    if (lock) lock(lock_arg);         
+    LVGL_LOCK        
     int result = lv_obj_get_hidden(self->ref);
-    if (unlock) unlock(unlock_arg);
+    LVGL_UNLOCK
     if (result) {Py_RETURN_TRUE;} else {Py_RETURN_FALSE;}
 }
 
@@ -1377,9 +1466,9 @@ pylv_obj_get_click(pylv_Obj *self, PyObject *args, PyObject *kwds)
     static char *kwlist[] = {NULL};
     if (!PyArg_ParseTupleAndKeywords(args, kwds, "", kwlist )) return NULL;
 
-    if (lock) lock(lock_arg);         
+    LVGL_LOCK        
     int result = lv_obj_get_click(self->ref);
-    if (unlock) unlock(unlock_arg);
+    LVGL_UNLOCK
     if (result) {Py_RETURN_TRUE;} else {Py_RETURN_FALSE;}
 }
 
@@ -1389,9 +1478,9 @@ pylv_obj_get_top(pylv_Obj *self, PyObject *args, PyObject *kwds)
     static char *kwlist[] = {NULL};
     if (!PyArg_ParseTupleAndKeywords(args, kwds, "", kwlist )) return NULL;
 
-    if (lock) lock(lock_arg);         
+    LVGL_LOCK        
     int result = lv_obj_get_top(self->ref);
-    if (unlock) unlock(unlock_arg);
+    LVGL_UNLOCK
     if (result) {Py_RETURN_TRUE;} else {Py_RETURN_FALSE;}
 }
 
@@ -1401,9 +1490,9 @@ pylv_obj_get_drag(pylv_Obj *self, PyObject *args, PyObject *kwds)
     static char *kwlist[] = {NULL};
     if (!PyArg_ParseTupleAndKeywords(args, kwds, "", kwlist )) return NULL;
 
-    if (lock) lock(lock_arg);         
+    LVGL_LOCK        
     int result = lv_obj_get_drag(self->ref);
-    if (unlock) unlock(unlock_arg);
+    LVGL_UNLOCK
     if (result) {Py_RETURN_TRUE;} else {Py_RETURN_FALSE;}
 }
 
@@ -1413,9 +1502,9 @@ pylv_obj_get_drag_throw(pylv_Obj *self, PyObject *args, PyObject *kwds)
     static char *kwlist[] = {NULL};
     if (!PyArg_ParseTupleAndKeywords(args, kwds, "", kwlist )) return NULL;
 
-    if (lock) lock(lock_arg);         
+    LVGL_LOCK        
     int result = lv_obj_get_drag_throw(self->ref);
-    if (unlock) unlock(unlock_arg);
+    LVGL_UNLOCK
     if (result) {Py_RETURN_TRUE;} else {Py_RETURN_FALSE;}
 }
 
@@ -1425,9 +1514,9 @@ pylv_obj_get_drag_parent(pylv_Obj *self, PyObject *args, PyObject *kwds)
     static char *kwlist[] = {NULL};
     if (!PyArg_ParseTupleAndKeywords(args, kwds, "", kwlist )) return NULL;
 
-    if (lock) lock(lock_arg);         
+    LVGL_LOCK        
     int result = lv_obj_get_drag_parent(self->ref);
-    if (unlock) unlock(unlock_arg);
+    LVGL_UNLOCK
     if (result) {Py_RETURN_TRUE;} else {Py_RETURN_FALSE;}
 }
 
@@ -1437,9 +1526,9 @@ pylv_obj_get_protect(pylv_Obj *self, PyObject *args, PyObject *kwds)
     static char *kwlist[] = {NULL};
     if (!PyArg_ParseTupleAndKeywords(args, kwds, "", kwlist )) return NULL;
 
-    if (lock) lock(lock_arg);         
+    LVGL_LOCK        
     unsigned char result = lv_obj_get_protect(self->ref);
-    if (unlock) unlock(unlock_arg);
+    LVGL_UNLOCK
     return Py_BuildValue("b", result);
 }
 
@@ -1450,9 +1539,9 @@ pylv_obj_is_protected(pylv_Obj *self, PyObject *args, PyObject *kwds)
     unsigned char prot;
     if (!PyArg_ParseTupleAndKeywords(args, kwds, "b", kwlist , &prot)) return NULL;
 
-    if (lock) lock(lock_arg);         
+    LVGL_LOCK        
     int result = lv_obj_is_protected(self->ref, prot);
-    if (unlock) unlock(unlock_arg);
+    LVGL_UNLOCK
     if (result) {Py_RETURN_TRUE;} else {Py_RETURN_FALSE;}
 }
 
@@ -1551,10 +1640,10 @@ pylv_win_init(pylv_Win *self, PyObject *args, PyObject *kwds)
         return -1;
     }   
     
-    if (lock) lock(lock_arg);
+    LVGL_LOCK
     self->ref = lv_win_create(parent ? parent->ref : NULL, copy ? copy->ref : NULL);
     lv_obj_set_free_ptr(self->ref, self);
-    if (unlock) unlock(unlock_arg);
+    LVGL_UNLOCK
 
     return 0;
 }
@@ -1573,9 +1662,9 @@ pylv_win_close_action(pylv_Obj *self, PyObject *args, PyObject *kwds)
     static char *kwlist[] = {NULL};
     if (!PyArg_ParseTupleAndKeywords(args, kwds, "", kwlist )) return NULL;
 
-    if (lock) lock(lock_arg);         
+    LVGL_LOCK        
     int result = lv_win_close_action(self->ref);
-    if (unlock) unlock(unlock_arg);
+    LVGL_UNLOCK
     return Py_BuildValue("i", result);
 }
 
@@ -1586,9 +1675,9 @@ pylv_win_set_title(pylv_Obj *self, PyObject *args, PyObject *kwds)
     char * title;
     if (!PyArg_ParseTupleAndKeywords(args, kwds, "s", kwlist , &title)) return NULL;
 
-    if (lock) lock(lock_arg);         
+    LVGL_LOCK         
     lv_win_set_title(self->ref, title);
-    if (unlock) unlock(unlock_arg);
+    LVGL_UNLOCK
     Py_RETURN_NONE;
 }
 
@@ -1599,9 +1688,9 @@ pylv_win_set_btn_size(pylv_Obj *self, PyObject *args, PyObject *kwds)
     short int size;
     if (!PyArg_ParseTupleAndKeywords(args, kwds, "h", kwlist , &size)) return NULL;
 
-    if (lock) lock(lock_arg);         
+    LVGL_LOCK         
     lv_win_set_btn_size(self->ref, size);
-    if (unlock) unlock(unlock_arg);
+    LVGL_UNLOCK
     Py_RETURN_NONE;
 }
 
@@ -1612,9 +1701,9 @@ pylv_win_set_sb_mode(pylv_Obj *self, PyObject *args, PyObject *kwds)
     int sb_mode;
     if (!PyArg_ParseTupleAndKeywords(args, kwds, "i", kwlist , &sb_mode)) return NULL;
 
-    if (lock) lock(lock_arg);         
+    LVGL_LOCK         
     lv_win_set_sb_mode(self->ref, sb_mode);
-    if (unlock) unlock(unlock_arg);
+    LVGL_UNLOCK
     Py_RETURN_NONE;
 }
 
@@ -1625,9 +1714,9 @@ pylv_win_set_layout(pylv_Obj *self, PyObject *args, PyObject *kwds)
     int layout;
     if (!PyArg_ParseTupleAndKeywords(args, kwds, "i", kwlist , &layout)) return NULL;
 
-    if (lock) lock(lock_arg);         
+    LVGL_LOCK         
     lv_win_set_layout(self->ref, layout);
-    if (unlock) unlock(unlock_arg);
+    LVGL_UNLOCK
     Py_RETURN_NONE;
 }
 
@@ -1639,9 +1728,9 @@ pylv_win_set_style(pylv_Obj *self, PyObject *args, PyObject *kwds)
     Style_Object * style;
     if (!PyArg_ParseTupleAndKeywords(args, kwds, "iO!", kwlist , &type, &Style_Type, &style)) return NULL;
 
-    if (lock) lock(lock_arg);         
+    LVGL_LOCK         
     lv_win_set_style(self->ref, type, style->ref);
-    if (unlock) unlock(unlock_arg);
+    LVGL_UNLOCK
     Py_RETURN_NONE;
 }
 
@@ -1651,9 +1740,9 @@ pylv_win_get_btn_size(pylv_Obj *self, PyObject *args, PyObject *kwds)
     static char *kwlist[] = {NULL};
     if (!PyArg_ParseTupleAndKeywords(args, kwds, "", kwlist )) return NULL;
 
-    if (lock) lock(lock_arg);         
+    LVGL_LOCK        
     short int result = lv_win_get_btn_size(self->ref);
-    if (unlock) unlock(unlock_arg);
+    LVGL_UNLOCK
     return Py_BuildValue("h", result);
 }
 
@@ -1663,9 +1752,9 @@ pylv_win_get_layout(pylv_Obj *self, PyObject *args, PyObject *kwds)
     static char *kwlist[] = {NULL};
     if (!PyArg_ParseTupleAndKeywords(args, kwds, "", kwlist )) return NULL;
 
-    if (lock) lock(lock_arg);         
+    LVGL_LOCK        
     int result = lv_win_get_layout(self->ref);
-    if (unlock) unlock(unlock_arg);
+    LVGL_UNLOCK
     return Py_BuildValue("i", result);
 }
 
@@ -1675,9 +1764,9 @@ pylv_win_get_sb_mode(pylv_Obj *self, PyObject *args, PyObject *kwds)
     static char *kwlist[] = {NULL};
     if (!PyArg_ParseTupleAndKeywords(args, kwds, "", kwlist )) return NULL;
 
-    if (lock) lock(lock_arg);         
+    LVGL_LOCK        
     int result = lv_win_get_sb_mode(self->ref);
-    if (unlock) unlock(unlock_arg);
+    LVGL_UNLOCK
     return Py_BuildValue("i", result);
 }
 
@@ -1687,9 +1776,9 @@ pylv_win_get_width(pylv_Obj *self, PyObject *args, PyObject *kwds)
     static char *kwlist[] = {NULL};
     if (!PyArg_ParseTupleAndKeywords(args, kwds, "", kwlist )) return NULL;
 
-    if (lock) lock(lock_arg);         
+    LVGL_LOCK        
     short int result = lv_win_get_width(self->ref);
-    if (unlock) unlock(unlock_arg);
+    LVGL_UNLOCK
     return Py_BuildValue("h", result);
 }
 
@@ -1699,11 +1788,10 @@ pylv_win_get_from_btn(pylv_Obj *self, PyObject *args, PyObject *kwds)
     static char *kwlist[] = {NULL};
     if (!PyArg_ParseTupleAndKeywords(args, kwds, "", kwlist )) return NULL;
 
-        
-    if (lock) lock(lock_arg);
+    LVGL_LOCK
     lv_obj_t *result = lv_win_get_from_btn(self->ref);
+    LVGL_UNLOCK
     PyObject *retobj = pyobj_from_lv(result);
-    if (unlock) unlock(unlock_arg);
     
     return retobj;
 }
@@ -1725,9 +1813,9 @@ pylv_win_focus(pylv_Obj *self, PyObject *args, PyObject *kwds)
     unsigned short int anim_time;
     if (!PyArg_ParseTupleAndKeywords(args, kwds, "O!H", kwlist , &pylv_obj_Type, &obj, &anim_time)) return NULL;
 
-    if (lock) lock(lock_arg);         
+    LVGL_LOCK         
     lv_win_focus(self->ref, obj->ref, anim_time);
-    if (unlock) unlock(unlock_arg);
+    LVGL_UNLOCK
     Py_RETURN_NONE;
 }
 
@@ -1781,10 +1869,10 @@ pylv_label_init(pylv_Label *self, PyObject *args, PyObject *kwds)
         return -1;
     }   
     
-    if (lock) lock(lock_arg);
+    LVGL_LOCK
     self->ref = lv_label_create(parent ? parent->ref : NULL, copy ? copy->ref : NULL);
     lv_obj_set_free_ptr(self->ref, self);
-    if (unlock) unlock(unlock_arg);
+    LVGL_UNLOCK
 
     return 0;
 }
@@ -1797,9 +1885,9 @@ pylv_label_set_text(pylv_Obj *self, PyObject *args, PyObject *kwds)
     char * text;
     if (!PyArg_ParseTupleAndKeywords(args, kwds, "s", kwlist , &text)) return NULL;
 
-    if (lock) lock(lock_arg);         
+    LVGL_LOCK         
     lv_label_set_text(self->ref, text);
-    if (unlock) unlock(unlock_arg);
+    LVGL_UNLOCK
     Py_RETURN_NONE;
 }
 
@@ -1811,9 +1899,9 @@ pylv_label_set_array_text(pylv_Obj *self, PyObject *args, PyObject *kwds)
     unsigned short int size;
     if (!PyArg_ParseTupleAndKeywords(args, kwds, "sH", kwlist , &array, &size)) return NULL;
 
-    if (lock) lock(lock_arg);         
+    LVGL_LOCK         
     lv_label_set_array_text(self->ref, array, size);
-    if (unlock) unlock(unlock_arg);
+    LVGL_UNLOCK
     Py_RETURN_NONE;
 }
 
@@ -1824,9 +1912,9 @@ pylv_label_set_static_text(pylv_Obj *self, PyObject *args, PyObject *kwds)
     char * text;
     if (!PyArg_ParseTupleAndKeywords(args, kwds, "s", kwlist , &text)) return NULL;
 
-    if (lock) lock(lock_arg);         
+    LVGL_LOCK         
     lv_label_set_static_text(self->ref, text);
-    if (unlock) unlock(unlock_arg);
+    LVGL_UNLOCK
     Py_RETURN_NONE;
 }
 
@@ -1837,9 +1925,9 @@ pylv_label_set_long_mode(pylv_Obj *self, PyObject *args, PyObject *kwds)
     int long_mode;
     if (!PyArg_ParseTupleAndKeywords(args, kwds, "i", kwlist , &long_mode)) return NULL;
 
-    if (lock) lock(lock_arg);         
+    LVGL_LOCK         
     lv_label_set_long_mode(self->ref, long_mode);
-    if (unlock) unlock(unlock_arg);
+    LVGL_UNLOCK
     Py_RETURN_NONE;
 }
 
@@ -1850,9 +1938,9 @@ pylv_label_set_align(pylv_Obj *self, PyObject *args, PyObject *kwds)
     int align;
     if (!PyArg_ParseTupleAndKeywords(args, kwds, "i", kwlist , &align)) return NULL;
 
-    if (lock) lock(lock_arg);         
+    LVGL_LOCK         
     lv_label_set_align(self->ref, align);
-    if (unlock) unlock(unlock_arg);
+    LVGL_UNLOCK
     Py_RETURN_NONE;
 }
 
@@ -1863,9 +1951,9 @@ pylv_label_set_recolor(pylv_Obj *self, PyObject *args, PyObject *kwds)
     int recolor_en;
     if (!PyArg_ParseTupleAndKeywords(args, kwds, "p", kwlist , &recolor_en)) return NULL;
 
-    if (lock) lock(lock_arg);         
+    LVGL_LOCK         
     lv_label_set_recolor(self->ref, recolor_en);
-    if (unlock) unlock(unlock_arg);
+    LVGL_UNLOCK
     Py_RETURN_NONE;
 }
 
@@ -1876,9 +1964,9 @@ pylv_label_set_no_break(pylv_Obj *self, PyObject *args, PyObject *kwds)
     int no_break_en;
     if (!PyArg_ParseTupleAndKeywords(args, kwds, "p", kwlist , &no_break_en)) return NULL;
 
-    if (lock) lock(lock_arg);         
+    LVGL_LOCK         
     lv_label_set_no_break(self->ref, no_break_en);
-    if (unlock) unlock(unlock_arg);
+    LVGL_UNLOCK
     Py_RETURN_NONE;
 }
 
@@ -1889,9 +1977,9 @@ pylv_label_set_body_draw(pylv_Obj *self, PyObject *args, PyObject *kwds)
     int body_en;
     if (!PyArg_ParseTupleAndKeywords(args, kwds, "p", kwlist , &body_en)) return NULL;
 
-    if (lock) lock(lock_arg);         
+    LVGL_LOCK         
     lv_label_set_body_draw(self->ref, body_en);
-    if (unlock) unlock(unlock_arg);
+    LVGL_UNLOCK
     Py_RETURN_NONE;
 }
 
@@ -1902,9 +1990,9 @@ pylv_label_set_anim_speed(pylv_Obj *self, PyObject *args, PyObject *kwds)
     unsigned short int anim_speed;
     if (!PyArg_ParseTupleAndKeywords(args, kwds, "H", kwlist , &anim_speed)) return NULL;
 
-    if (lock) lock(lock_arg);         
+    LVGL_LOCK         
     lv_label_set_anim_speed(self->ref, anim_speed);
-    if (unlock) unlock(unlock_arg);
+    LVGL_UNLOCK
     Py_RETURN_NONE;
 }
 
@@ -1914,9 +2002,9 @@ pylv_label_get_long_mode(pylv_Obj *self, PyObject *args, PyObject *kwds)
     static char *kwlist[] = {NULL};
     if (!PyArg_ParseTupleAndKeywords(args, kwds, "", kwlist )) return NULL;
 
-    if (lock) lock(lock_arg);         
+    LVGL_LOCK        
     int result = lv_label_get_long_mode(self->ref);
-    if (unlock) unlock(unlock_arg);
+    LVGL_UNLOCK
     return Py_BuildValue("i", result);
 }
 
@@ -1926,9 +2014,9 @@ pylv_label_get_align(pylv_Obj *self, PyObject *args, PyObject *kwds)
     static char *kwlist[] = {NULL};
     if (!PyArg_ParseTupleAndKeywords(args, kwds, "", kwlist )) return NULL;
 
-    if (lock) lock(lock_arg);         
+    LVGL_LOCK        
     int result = lv_label_get_align(self->ref);
-    if (unlock) unlock(unlock_arg);
+    LVGL_UNLOCK
     return Py_BuildValue("i", result);
 }
 
@@ -1938,9 +2026,9 @@ pylv_label_get_recolor(pylv_Obj *self, PyObject *args, PyObject *kwds)
     static char *kwlist[] = {NULL};
     if (!PyArg_ParseTupleAndKeywords(args, kwds, "", kwlist )) return NULL;
 
-    if (lock) lock(lock_arg);         
+    LVGL_LOCK        
     int result = lv_label_get_recolor(self->ref);
-    if (unlock) unlock(unlock_arg);
+    LVGL_UNLOCK
     if (result) {Py_RETURN_TRUE;} else {Py_RETURN_FALSE;}
 }
 
@@ -1950,9 +2038,9 @@ pylv_label_get_no_break(pylv_Obj *self, PyObject *args, PyObject *kwds)
     static char *kwlist[] = {NULL};
     if (!PyArg_ParseTupleAndKeywords(args, kwds, "", kwlist )) return NULL;
 
-    if (lock) lock(lock_arg);         
+    LVGL_LOCK        
     int result = lv_label_get_no_break(self->ref);
-    if (unlock) unlock(unlock_arg);
+    LVGL_UNLOCK
     if (result) {Py_RETURN_TRUE;} else {Py_RETURN_FALSE;}
 }
 
@@ -1962,9 +2050,9 @@ pylv_label_get_body_draw(pylv_Obj *self, PyObject *args, PyObject *kwds)
     static char *kwlist[] = {NULL};
     if (!PyArg_ParseTupleAndKeywords(args, kwds, "", kwlist )) return NULL;
 
-    if (lock) lock(lock_arg);         
+    LVGL_LOCK        
     int result = lv_label_get_body_draw(self->ref);
-    if (unlock) unlock(unlock_arg);
+    LVGL_UNLOCK
     if (result) {Py_RETURN_TRUE;} else {Py_RETURN_FALSE;}
 }
 
@@ -1974,9 +2062,9 @@ pylv_label_get_anim_speed(pylv_Obj *self, PyObject *args, PyObject *kwds)
     static char *kwlist[] = {NULL};
     if (!PyArg_ParseTupleAndKeywords(args, kwds, "", kwlist )) return NULL;
 
-    if (lock) lock(lock_arg);         
+    LVGL_LOCK        
     unsigned short int result = lv_label_get_anim_speed(self->ref);
-    if (unlock) unlock(unlock_arg);
+    LVGL_UNLOCK
     return Py_BuildValue("H", result);
 }
 
@@ -1988,9 +2076,9 @@ pylv_label_ins_text(pylv_Obj *self, PyObject *args, PyObject *kwds)
     char * txt;
     if (!PyArg_ParseTupleAndKeywords(args, kwds, "Is", kwlist , &pos, &txt)) return NULL;
 
-    if (lock) lock(lock_arg);         
+    LVGL_LOCK         
     lv_label_ins_text(self->ref, pos, txt);
-    if (unlock) unlock(unlock_arg);
+    LVGL_UNLOCK
     Py_RETURN_NONE;
 }
 
@@ -2002,9 +2090,9 @@ pylv_label_cut_text(pylv_Obj *self, PyObject *args, PyObject *kwds)
     unsigned int cnt;
     if (!PyArg_ParseTupleAndKeywords(args, kwds, "II", kwlist , &pos, &cnt)) return NULL;
 
-    if (lock) lock(lock_arg);         
+    LVGL_LOCK         
     lv_label_cut_text(self->ref, pos, cnt);
-    if (unlock) unlock(unlock_arg);
+    LVGL_UNLOCK
     Py_RETURN_NONE;
 }
 
@@ -2063,10 +2151,10 @@ pylv_lmeter_init(pylv_Lmeter *self, PyObject *args, PyObject *kwds)
         return -1;
     }   
     
-    if (lock) lock(lock_arg);
+    LVGL_LOCK
     self->ref = lv_lmeter_create(parent ? parent->ref : NULL, copy ? copy->ref : NULL);
     lv_obj_set_free_ptr(self->ref, self);
-    if (unlock) unlock(unlock_arg);
+    LVGL_UNLOCK
 
     return 0;
 }
@@ -2079,9 +2167,9 @@ pylv_lmeter_set_value(pylv_Obj *self, PyObject *args, PyObject *kwds)
     short int value;
     if (!PyArg_ParseTupleAndKeywords(args, kwds, "h", kwlist , &value)) return NULL;
 
-    if (lock) lock(lock_arg);         
+    LVGL_LOCK         
     lv_lmeter_set_value(self->ref, value);
-    if (unlock) unlock(unlock_arg);
+    LVGL_UNLOCK
     Py_RETURN_NONE;
 }
 
@@ -2093,9 +2181,9 @@ pylv_lmeter_set_range(pylv_Obj *self, PyObject *args, PyObject *kwds)
     short int max;
     if (!PyArg_ParseTupleAndKeywords(args, kwds, "hh", kwlist , &min, &max)) return NULL;
 
-    if (lock) lock(lock_arg);         
+    LVGL_LOCK         
     lv_lmeter_set_range(self->ref, min, max);
-    if (unlock) unlock(unlock_arg);
+    LVGL_UNLOCK
     Py_RETURN_NONE;
 }
 
@@ -2107,9 +2195,9 @@ pylv_lmeter_set_scale(pylv_Obj *self, PyObject *args, PyObject *kwds)
     unsigned char line_cnt;
     if (!PyArg_ParseTupleAndKeywords(args, kwds, "Hb", kwlist , &angle, &line_cnt)) return NULL;
 
-    if (lock) lock(lock_arg);         
+    LVGL_LOCK         
     lv_lmeter_set_scale(self->ref, angle, line_cnt);
-    if (unlock) unlock(unlock_arg);
+    LVGL_UNLOCK
     Py_RETURN_NONE;
 }
 
@@ -2119,9 +2207,9 @@ pylv_lmeter_get_value(pylv_Obj *self, PyObject *args, PyObject *kwds)
     static char *kwlist[] = {NULL};
     if (!PyArg_ParseTupleAndKeywords(args, kwds, "", kwlist )) return NULL;
 
-    if (lock) lock(lock_arg);         
+    LVGL_LOCK        
     short int result = lv_lmeter_get_value(self->ref);
-    if (unlock) unlock(unlock_arg);
+    LVGL_UNLOCK
     return Py_BuildValue("h", result);
 }
 
@@ -2131,9 +2219,9 @@ pylv_lmeter_get_min_value(pylv_Obj *self, PyObject *args, PyObject *kwds)
     static char *kwlist[] = {NULL};
     if (!PyArg_ParseTupleAndKeywords(args, kwds, "", kwlist )) return NULL;
 
-    if (lock) lock(lock_arg);         
+    LVGL_LOCK        
     short int result = lv_lmeter_get_min_value(self->ref);
-    if (unlock) unlock(unlock_arg);
+    LVGL_UNLOCK
     return Py_BuildValue("h", result);
 }
 
@@ -2143,9 +2231,9 @@ pylv_lmeter_get_max_value(pylv_Obj *self, PyObject *args, PyObject *kwds)
     static char *kwlist[] = {NULL};
     if (!PyArg_ParseTupleAndKeywords(args, kwds, "", kwlist )) return NULL;
 
-    if (lock) lock(lock_arg);         
+    LVGL_LOCK        
     short int result = lv_lmeter_get_max_value(self->ref);
-    if (unlock) unlock(unlock_arg);
+    LVGL_UNLOCK
     return Py_BuildValue("h", result);
 }
 
@@ -2155,9 +2243,9 @@ pylv_lmeter_get_line_count(pylv_Obj *self, PyObject *args, PyObject *kwds)
     static char *kwlist[] = {NULL};
     if (!PyArg_ParseTupleAndKeywords(args, kwds, "", kwlist )) return NULL;
 
-    if (lock) lock(lock_arg);         
+    LVGL_LOCK        
     unsigned char result = lv_lmeter_get_line_count(self->ref);
-    if (unlock) unlock(unlock_arg);
+    LVGL_UNLOCK
     return Py_BuildValue("b", result);
 }
 
@@ -2167,9 +2255,9 @@ pylv_lmeter_get_scale_angle(pylv_Obj *self, PyObject *args, PyObject *kwds)
     static char *kwlist[] = {NULL};
     if (!PyArg_ParseTupleAndKeywords(args, kwds, "", kwlist )) return NULL;
 
-    if (lock) lock(lock_arg);         
+    LVGL_LOCK        
     unsigned short int result = lv_lmeter_get_scale_angle(self->ref);
-    if (unlock) unlock(unlock_arg);
+    LVGL_UNLOCK
     return Py_BuildValue("H", result);
 }
 
@@ -2226,10 +2314,10 @@ pylv_btnm_init(pylv_Btnm *self, PyObject *args, PyObject *kwds)
         return -1;
     }   
     
-    if (lock) lock(lock_arg);
+    LVGL_LOCK
     self->ref = lv_btnm_create(parent ? parent->ref : NULL, copy ? copy->ref : NULL);
     lv_obj_set_free_ptr(self->ref, self);
-    if (unlock) unlock(unlock_arg);
+    LVGL_UNLOCK
 
     return 0;
 }
@@ -2250,9 +2338,9 @@ pylv_btnm_set_toggle(pylv_Obj *self, PyObject *args, PyObject *kwds)
     unsigned short int id;
     if (!PyArg_ParseTupleAndKeywords(args, kwds, "pH", kwlist , &en, &id)) return NULL;
 
-    if (lock) lock(lock_arg);         
+    LVGL_LOCK         
     lv_btnm_set_toggle(self->ref, en, id);
-    if (unlock) unlock(unlock_arg);
+    LVGL_UNLOCK
     Py_RETURN_NONE;
 }
 
@@ -2264,9 +2352,9 @@ pylv_btnm_set_style(pylv_Obj *self, PyObject *args, PyObject *kwds)
     Style_Object * style;
     if (!PyArg_ParseTupleAndKeywords(args, kwds, "iO!", kwlist , &type, &Style_Type, &style)) return NULL;
 
-    if (lock) lock(lock_arg);         
+    LVGL_LOCK         
     lv_btnm_set_style(self->ref, type, style->ref);
-    if (unlock) unlock(unlock_arg);
+    LVGL_UNLOCK
     Py_RETURN_NONE;
 }
 
@@ -2283,9 +2371,9 @@ pylv_btnm_get_toggled(pylv_Obj *self, PyObject *args, PyObject *kwds)
     static char *kwlist[] = {NULL};
     if (!PyArg_ParseTupleAndKeywords(args, kwds, "", kwlist )) return NULL;
 
-    if (lock) lock(lock_arg);         
+    LVGL_LOCK        
     unsigned short int result = lv_btnm_get_toggled(self->ref);
-    if (unlock) unlock(unlock_arg);
+    LVGL_UNLOCK
     return Py_BuildValue("H", result);
 }
 
@@ -2341,10 +2429,10 @@ pylv_chart_init(pylv_Chart *self, PyObject *args, PyObject *kwds)
         return -1;
     }   
     
-    if (lock) lock(lock_arg);
+    LVGL_LOCK
     self->ref = lv_chart_create(parent ? parent->ref : NULL, copy ? copy->ref : NULL);
     lv_obj_set_free_ptr(self->ref, self);
-    if (unlock) unlock(unlock_arg);
+    LVGL_UNLOCK
 
     return 0;
 }
@@ -2365,9 +2453,9 @@ pylv_chart_set_div_line_count(pylv_Obj *self, PyObject *args, PyObject *kwds)
     unsigned char vdiv;
     if (!PyArg_ParseTupleAndKeywords(args, kwds, "bb", kwlist , &hdiv, &vdiv)) return NULL;
 
-    if (lock) lock(lock_arg);         
+    LVGL_LOCK         
     lv_chart_set_div_line_count(self->ref, hdiv, vdiv);
-    if (unlock) unlock(unlock_arg);
+    LVGL_UNLOCK
     Py_RETURN_NONE;
 }
 
@@ -2379,9 +2467,9 @@ pylv_chart_set_range(pylv_Obj *self, PyObject *args, PyObject *kwds)
     short int ymax;
     if (!PyArg_ParseTupleAndKeywords(args, kwds, "hh", kwlist , &ymin, &ymax)) return NULL;
 
-    if (lock) lock(lock_arg);         
+    LVGL_LOCK         
     lv_chart_set_range(self->ref, ymin, ymax);
-    if (unlock) unlock(unlock_arg);
+    LVGL_UNLOCK
     Py_RETURN_NONE;
 }
 
@@ -2392,9 +2480,9 @@ pylv_chart_set_type(pylv_Obj *self, PyObject *args, PyObject *kwds)
     int type;
     if (!PyArg_ParseTupleAndKeywords(args, kwds, "i", kwlist , &type)) return NULL;
 
-    if (lock) lock(lock_arg);         
+    LVGL_LOCK         
     lv_chart_set_type(self->ref, type);
-    if (unlock) unlock(unlock_arg);
+    LVGL_UNLOCK
     Py_RETURN_NONE;
 }
 
@@ -2405,9 +2493,9 @@ pylv_chart_set_point_count(pylv_Obj *self, PyObject *args, PyObject *kwds)
     unsigned short int point_cnt;
     if (!PyArg_ParseTupleAndKeywords(args, kwds, "H", kwlist , &point_cnt)) return NULL;
 
-    if (lock) lock(lock_arg);         
+    LVGL_LOCK         
     lv_chart_set_point_count(self->ref, point_cnt);
-    if (unlock) unlock(unlock_arg);
+    LVGL_UNLOCK
     Py_RETURN_NONE;
 }
 
@@ -2418,9 +2506,9 @@ pylv_chart_set_series_opa(pylv_Obj *self, PyObject *args, PyObject *kwds)
     unsigned char opa;
     if (!PyArg_ParseTupleAndKeywords(args, kwds, "b", kwlist , &opa)) return NULL;
 
-    if (lock) lock(lock_arg);         
+    LVGL_LOCK         
     lv_chart_set_series_opa(self->ref, opa);
-    if (unlock) unlock(unlock_arg);
+    LVGL_UNLOCK
     Py_RETURN_NONE;
 }
 
@@ -2431,9 +2519,9 @@ pylv_chart_set_series_width(pylv_Obj *self, PyObject *args, PyObject *kwds)
     short int width;
     if (!PyArg_ParseTupleAndKeywords(args, kwds, "h", kwlist , &width)) return NULL;
 
-    if (lock) lock(lock_arg);         
+    LVGL_LOCK         
     lv_chart_set_series_width(self->ref, width);
-    if (unlock) unlock(unlock_arg);
+    LVGL_UNLOCK
     Py_RETURN_NONE;
 }
 
@@ -2444,9 +2532,9 @@ pylv_chart_set_series_darking(pylv_Obj *self, PyObject *args, PyObject *kwds)
     unsigned char dark_eff;
     if (!PyArg_ParseTupleAndKeywords(args, kwds, "b", kwlist , &dark_eff)) return NULL;
 
-    if (lock) lock(lock_arg);         
+    LVGL_LOCK         
     lv_chart_set_series_darking(self->ref, dark_eff);
-    if (unlock) unlock(unlock_arg);
+    LVGL_UNLOCK
     Py_RETURN_NONE;
 }
 
@@ -2477,9 +2565,9 @@ pylv_chart_get_type(pylv_Obj *self, PyObject *args, PyObject *kwds)
     static char *kwlist[] = {NULL};
     if (!PyArg_ParseTupleAndKeywords(args, kwds, "", kwlist )) return NULL;
 
-    if (lock) lock(lock_arg);         
+    LVGL_LOCK        
     int result = lv_chart_get_type(self->ref);
-    if (unlock) unlock(unlock_arg);
+    LVGL_UNLOCK
     return Py_BuildValue("i", result);
 }
 
@@ -2489,9 +2577,9 @@ pylv_chart_get_point_cnt(pylv_Obj *self, PyObject *args, PyObject *kwds)
     static char *kwlist[] = {NULL};
     if (!PyArg_ParseTupleAndKeywords(args, kwds, "", kwlist )) return NULL;
 
-    if (lock) lock(lock_arg);         
+    LVGL_LOCK        
     unsigned short int result = lv_chart_get_point_cnt(self->ref);
-    if (unlock) unlock(unlock_arg);
+    LVGL_UNLOCK
     return Py_BuildValue("H", result);
 }
 
@@ -2501,9 +2589,9 @@ pylv_chart_get_series_opa(pylv_Obj *self, PyObject *args, PyObject *kwds)
     static char *kwlist[] = {NULL};
     if (!PyArg_ParseTupleAndKeywords(args, kwds, "", kwlist )) return NULL;
 
-    if (lock) lock(lock_arg);         
+    LVGL_LOCK        
     unsigned char result = lv_chart_get_series_opa(self->ref);
-    if (unlock) unlock(unlock_arg);
+    LVGL_UNLOCK
     return Py_BuildValue("b", result);
 }
 
@@ -2513,9 +2601,9 @@ pylv_chart_get_series_width(pylv_Obj *self, PyObject *args, PyObject *kwds)
     static char *kwlist[] = {NULL};
     if (!PyArg_ParseTupleAndKeywords(args, kwds, "", kwlist )) return NULL;
 
-    if (lock) lock(lock_arg);         
+    LVGL_LOCK        
     short int result = lv_chart_get_series_width(self->ref);
-    if (unlock) unlock(unlock_arg);
+    LVGL_UNLOCK
     return Py_BuildValue("h", result);
 }
 
@@ -2525,9 +2613,9 @@ pylv_chart_get_series_darking(pylv_Obj *self, PyObject *args, PyObject *kwds)
     static char *kwlist[] = {NULL};
     if (!PyArg_ParseTupleAndKeywords(args, kwds, "", kwlist )) return NULL;
 
-    if (lock) lock(lock_arg);         
+    LVGL_LOCK        
     unsigned char result = lv_chart_get_series_darking(self->ref);
-    if (unlock) unlock(unlock_arg);
+    LVGL_UNLOCK
     return Py_BuildValue("b", result);
 }
 
@@ -2537,9 +2625,9 @@ pylv_chart_refresh(pylv_Obj *self, PyObject *args, PyObject *kwds)
     static char *kwlist[] = {NULL};
     if (!PyArg_ParseTupleAndKeywords(args, kwds, "", kwlist )) return NULL;
 
-    if (lock) lock(lock_arg);         
+    LVGL_LOCK         
     lv_chart_refresh(self->ref);
-    if (unlock) unlock(unlock_arg);
+    LVGL_UNLOCK
     Py_RETURN_NONE;
 }
 
@@ -2596,10 +2684,10 @@ pylv_cont_init(pylv_Cont *self, PyObject *args, PyObject *kwds)
         return -1;
     }   
     
-    if (lock) lock(lock_arg);
+    LVGL_LOCK
     self->ref = lv_cont_create(parent ? parent->ref : NULL, copy ? copy->ref : NULL);
     lv_obj_set_free_ptr(self->ref, self);
-    if (unlock) unlock(unlock_arg);
+    LVGL_UNLOCK
 
     return 0;
 }
@@ -2612,9 +2700,9 @@ pylv_cont_set_layout(pylv_Obj *self, PyObject *args, PyObject *kwds)
     int layout;
     if (!PyArg_ParseTupleAndKeywords(args, kwds, "i", kwlist , &layout)) return NULL;
 
-    if (lock) lock(lock_arg);         
+    LVGL_LOCK         
     lv_cont_set_layout(self->ref, layout);
-    if (unlock) unlock(unlock_arg);
+    LVGL_UNLOCK
     Py_RETURN_NONE;
 }
 
@@ -2626,9 +2714,9 @@ pylv_cont_set_fit(pylv_Obj *self, PyObject *args, PyObject *kwds)
     int ver_en;
     if (!PyArg_ParseTupleAndKeywords(args, kwds, "pp", kwlist , &hor_en, &ver_en)) return NULL;
 
-    if (lock) lock(lock_arg);         
+    LVGL_LOCK         
     lv_cont_set_fit(self->ref, hor_en, ver_en);
-    if (unlock) unlock(unlock_arg);
+    LVGL_UNLOCK
     Py_RETURN_NONE;
 }
 
@@ -2638,9 +2726,9 @@ pylv_cont_get_layout(pylv_Obj *self, PyObject *args, PyObject *kwds)
     static char *kwlist[] = {NULL};
     if (!PyArg_ParseTupleAndKeywords(args, kwds, "", kwlist )) return NULL;
 
-    if (lock) lock(lock_arg);         
+    LVGL_LOCK        
     int result = lv_cont_get_layout(self->ref);
-    if (unlock) unlock(unlock_arg);
+    LVGL_UNLOCK
     return Py_BuildValue("i", result);
 }
 
@@ -2650,9 +2738,9 @@ pylv_cont_get_hor_fit(pylv_Obj *self, PyObject *args, PyObject *kwds)
     static char *kwlist[] = {NULL};
     if (!PyArg_ParseTupleAndKeywords(args, kwds, "", kwlist )) return NULL;
 
-    if (lock) lock(lock_arg);         
+    LVGL_LOCK        
     int result = lv_cont_get_hor_fit(self->ref);
-    if (unlock) unlock(unlock_arg);
+    LVGL_UNLOCK
     if (result) {Py_RETURN_TRUE;} else {Py_RETURN_FALSE;}
 }
 
@@ -2662,9 +2750,9 @@ pylv_cont_get_ver_fit(pylv_Obj *self, PyObject *args, PyObject *kwds)
     static char *kwlist[] = {NULL};
     if (!PyArg_ParseTupleAndKeywords(args, kwds, "", kwlist )) return NULL;
 
-    if (lock) lock(lock_arg);         
+    LVGL_LOCK        
     int result = lv_cont_get_ver_fit(self->ref);
-    if (unlock) unlock(unlock_arg);
+    LVGL_UNLOCK
     if (result) {Py_RETURN_TRUE;} else {Py_RETURN_FALSE;}
 }
 
@@ -2709,10 +2797,10 @@ pylv_led_init(pylv_Led *self, PyObject *args, PyObject *kwds)
         return -1;
     }   
     
-    if (lock) lock(lock_arg);
+    LVGL_LOCK
     self->ref = lv_led_create(parent ? parent->ref : NULL, copy ? copy->ref : NULL);
     lv_obj_set_free_ptr(self->ref, self);
-    if (unlock) unlock(unlock_arg);
+    LVGL_UNLOCK
 
     return 0;
 }
@@ -2725,9 +2813,9 @@ pylv_led_set_bright(pylv_Obj *self, PyObject *args, PyObject *kwds)
     unsigned char bright;
     if (!PyArg_ParseTupleAndKeywords(args, kwds, "b", kwlist , &bright)) return NULL;
 
-    if (lock) lock(lock_arg);         
+    LVGL_LOCK         
     lv_led_set_bright(self->ref, bright);
-    if (unlock) unlock(unlock_arg);
+    LVGL_UNLOCK
     Py_RETURN_NONE;
 }
 
@@ -2737,9 +2825,9 @@ pylv_led_on(pylv_Obj *self, PyObject *args, PyObject *kwds)
     static char *kwlist[] = {NULL};
     if (!PyArg_ParseTupleAndKeywords(args, kwds, "", kwlist )) return NULL;
 
-    if (lock) lock(lock_arg);         
+    LVGL_LOCK         
     lv_led_on(self->ref);
-    if (unlock) unlock(unlock_arg);
+    LVGL_UNLOCK
     Py_RETURN_NONE;
 }
 
@@ -2749,9 +2837,9 @@ pylv_led_off(pylv_Obj *self, PyObject *args, PyObject *kwds)
     static char *kwlist[] = {NULL};
     if (!PyArg_ParseTupleAndKeywords(args, kwds, "", kwlist )) return NULL;
 
-    if (lock) lock(lock_arg);         
+    LVGL_LOCK         
     lv_led_off(self->ref);
-    if (unlock) unlock(unlock_arg);
+    LVGL_UNLOCK
     Py_RETURN_NONE;
 }
 
@@ -2761,9 +2849,9 @@ pylv_led_toggle(pylv_Obj *self, PyObject *args, PyObject *kwds)
     static char *kwlist[] = {NULL};
     if (!PyArg_ParseTupleAndKeywords(args, kwds, "", kwlist )) return NULL;
 
-    if (lock) lock(lock_arg);         
+    LVGL_LOCK         
     lv_led_toggle(self->ref);
-    if (unlock) unlock(unlock_arg);
+    LVGL_UNLOCK
     Py_RETURN_NONE;
 }
 
@@ -2773,9 +2861,9 @@ pylv_led_get_bright(pylv_Obj *self, PyObject *args, PyObject *kwds)
     static char *kwlist[] = {NULL};
     if (!PyArg_ParseTupleAndKeywords(args, kwds, "", kwlist )) return NULL;
 
-    if (lock) lock(lock_arg);         
+    LVGL_LOCK        
     unsigned char result = lv_led_get_bright(self->ref);
-    if (unlock) unlock(unlock_arg);
+    LVGL_UNLOCK
     return Py_BuildValue("b", result);
 }
 
@@ -2820,10 +2908,10 @@ pylv_kb_init(pylv_Kb *self, PyObject *args, PyObject *kwds)
         return -1;
     }   
     
-    if (lock) lock(lock_arg);
+    LVGL_LOCK
     self->ref = lv_kb_create(parent ? parent->ref : NULL, copy ? copy->ref : NULL);
     lv_obj_set_free_ptr(self->ref, self);
-    if (unlock) unlock(unlock_arg);
+    LVGL_UNLOCK
 
     return 0;
 }
@@ -2832,12 +2920,26 @@ pylv_kb_init(pylv_Kb *self, PyObject *args, PyObject *kwds)
 lv_res_t pylv_kb_ok_action_callback(lv_obj_t* obj) {
     pylv_Kb *pyobj;
     PyObject *handler;
+    PyGILState_STATE gstate;
+
+    gstate = PyGILState_Ensure();
+    
     pyobj = lv_obj_get_free_ptr(obj);
     if (pyobj) {
         handler = pyobj->ok_action;
-        if (handler) PyObject_CallFunctionObjArgs(handler, NULL);
-        if (PyErr_Occurred()) PyErr_Print();
+        if (handler) {
+            if (unlock) unlock(unlock_arg); 
+            PyObject_CallFunctionObjArgs(handler, NULL);
+            if (PyErr_Occurred()) PyErr_Print();
+            
+            PyGILState_Release(gstate);
+            if (lock) lock(lock_arg); 
+            return LV_RES_OK;
+
+        }
+
     }
+    PyGILState_Release(gstate);
     return LV_RES_OK;
 }
 
@@ -2880,12 +2982,26 @@ pylv_kb_set_ok_action(pylv_Kb *self, PyObject *args, PyObject *kwds)
 lv_res_t pylv_kb_hide_action_callback(lv_obj_t* obj) {
     pylv_Kb *pyobj;
     PyObject *handler;
+    PyGILState_STATE gstate;
+
+    gstate = PyGILState_Ensure();
+    
     pyobj = lv_obj_get_free_ptr(obj);
     if (pyobj) {
         handler = pyobj->hide_action;
-        if (handler) PyObject_CallFunctionObjArgs(handler, NULL);
-        if (PyErr_Occurred()) PyErr_Print();
+        if (handler) {
+            if (unlock) unlock(unlock_arg); 
+            PyObject_CallFunctionObjArgs(handler, NULL);
+            if (PyErr_Occurred()) PyErr_Print();
+            
+            PyGILState_Release(gstate);
+            if (lock) lock(lock_arg); 
+            return LV_RES_OK;
+
+        }
+
     }
+    PyGILState_Release(gstate);
     return LV_RES_OK;
 }
 
@@ -2932,9 +3048,9 @@ pylv_kb_set_ta(pylv_Obj *self, PyObject *args, PyObject *kwds)
     pylv_Obj * ta;
     if (!PyArg_ParseTupleAndKeywords(args, kwds, "O!", kwlist , &pylv_obj_Type, &ta)) return NULL;
 
-    if (lock) lock(lock_arg);         
+    LVGL_LOCK         
     lv_kb_set_ta(self->ref, ta->ref);
-    if (unlock) unlock(unlock_arg);
+    LVGL_UNLOCK
     Py_RETURN_NONE;
 }
 
@@ -2945,9 +3061,9 @@ pylv_kb_set_mode(pylv_Obj *self, PyObject *args, PyObject *kwds)
     int mode;
     if (!PyArg_ParseTupleAndKeywords(args, kwds, "i", kwlist , &mode)) return NULL;
 
-    if (lock) lock(lock_arg);         
+    LVGL_LOCK         
     lv_kb_set_mode(self->ref, mode);
-    if (unlock) unlock(unlock_arg);
+    LVGL_UNLOCK
     Py_RETURN_NONE;
 }
 
@@ -2958,9 +3074,9 @@ pylv_kb_set_cursor_manage(pylv_Obj *self, PyObject *args, PyObject *kwds)
     int en;
     if (!PyArg_ParseTupleAndKeywords(args, kwds, "p", kwlist , &en)) return NULL;
 
-    if (lock) lock(lock_arg);         
+    LVGL_LOCK         
     lv_kb_set_cursor_manage(self->ref, en);
-    if (unlock) unlock(unlock_arg);
+    LVGL_UNLOCK
     Py_RETURN_NONE;
 }
 
@@ -2972,9 +3088,9 @@ pylv_kb_set_style(pylv_Obj *self, PyObject *args, PyObject *kwds)
     Style_Object * style;
     if (!PyArg_ParseTupleAndKeywords(args, kwds, "iO!", kwlist , &type, &Style_Type, &style)) return NULL;
 
-    if (lock) lock(lock_arg);         
+    LVGL_LOCK         
     lv_kb_set_style(self->ref, type, style->ref);
-    if (unlock) unlock(unlock_arg);
+    LVGL_UNLOCK
     Py_RETURN_NONE;
 }
 
@@ -2984,11 +3100,10 @@ pylv_kb_get_ta(pylv_Obj *self, PyObject *args, PyObject *kwds)
     static char *kwlist[] = {NULL};
     if (!PyArg_ParseTupleAndKeywords(args, kwds, "", kwlist )) return NULL;
 
-        
-    if (lock) lock(lock_arg);
+    LVGL_LOCK
     lv_obj_t *result = lv_kb_get_ta(self->ref);
+    LVGL_UNLOCK
     PyObject *retobj = pyobj_from_lv(result);
-    if (unlock) unlock(unlock_arg);
     
     return retobj;
 }
@@ -2999,9 +3114,9 @@ pylv_kb_get_mode(pylv_Obj *self, PyObject *args, PyObject *kwds)
     static char *kwlist[] = {NULL};
     if (!PyArg_ParseTupleAndKeywords(args, kwds, "", kwlist )) return NULL;
 
-    if (lock) lock(lock_arg);         
+    LVGL_LOCK        
     int result = lv_kb_get_mode(self->ref);
-    if (unlock) unlock(unlock_arg);
+    LVGL_UNLOCK
     return Py_BuildValue("i", result);
 }
 
@@ -3011,9 +3126,9 @@ pylv_kb_get_cursor_manage(pylv_Obj *self, PyObject *args, PyObject *kwds)
     static char *kwlist[] = {NULL};
     if (!PyArg_ParseTupleAndKeywords(args, kwds, "", kwlist )) return NULL;
 
-    if (lock) lock(lock_arg);         
+    LVGL_LOCK        
     int result = lv_kb_get_cursor_manage(self->ref);
-    if (unlock) unlock(unlock_arg);
+    LVGL_UNLOCK
     if (result) {Py_RETURN_TRUE;} else {Py_RETURN_FALSE;}
 }
 
@@ -3074,10 +3189,10 @@ pylv_img_init(pylv_Img *self, PyObject *args, PyObject *kwds)
         return -1;
     }   
     
-    if (lock) lock(lock_arg);
+    LVGL_LOCK
     self->ref = lv_img_create(parent ? parent->ref : NULL, copy ? copy->ref : NULL);
     lv_obj_set_free_ptr(self->ref, self);
-    if (unlock) unlock(unlock_arg);
+    LVGL_UNLOCK
 
     return 0;
 }
@@ -3097,9 +3212,9 @@ pylv_img_set_file(pylv_Obj *self, PyObject *args, PyObject *kwds)
     char * fn;
     if (!PyArg_ParseTupleAndKeywords(args, kwds, "s", kwlist , &fn)) return NULL;
 
-    if (lock) lock(lock_arg);         
+    LVGL_LOCK         
     lv_img_set_file(self->ref, fn);
-    if (unlock) unlock(unlock_arg);
+    LVGL_UNLOCK
     Py_RETURN_NONE;
 }
 
@@ -3110,9 +3225,9 @@ pylv_img_set_auto_size(pylv_Obj *self, PyObject *args, PyObject *kwds)
     int autosize_en;
     if (!PyArg_ParseTupleAndKeywords(args, kwds, "p", kwlist , &autosize_en)) return NULL;
 
-    if (lock) lock(lock_arg);         
+    LVGL_LOCK         
     lv_img_set_auto_size(self->ref, autosize_en);
-    if (unlock) unlock(unlock_arg);
+    LVGL_UNLOCK
     Py_RETURN_NONE;
 }
 
@@ -3123,9 +3238,9 @@ pylv_img_set_upscale(pylv_Obj *self, PyObject *args, PyObject *kwds)
     int upcale;
     if (!PyArg_ParseTupleAndKeywords(args, kwds, "p", kwlist , &upcale)) return NULL;
 
-    if (lock) lock(lock_arg);         
+    LVGL_LOCK         
     lv_img_set_upscale(self->ref, upcale);
-    if (unlock) unlock(unlock_arg);
+    LVGL_UNLOCK
     Py_RETURN_NONE;
 }
 
@@ -3142,9 +3257,9 @@ pylv_img_get_auto_size(pylv_Obj *self, PyObject *args, PyObject *kwds)
     static char *kwlist[] = {NULL};
     if (!PyArg_ParseTupleAndKeywords(args, kwds, "", kwlist )) return NULL;
 
-    if (lock) lock(lock_arg);         
+    LVGL_LOCK        
     int result = lv_img_get_auto_size(self->ref);
-    if (unlock) unlock(unlock_arg);
+    LVGL_UNLOCK
     if (result) {Py_RETURN_TRUE;} else {Py_RETURN_FALSE;}
 }
 
@@ -3154,9 +3269,9 @@ pylv_img_get_upscale(pylv_Obj *self, PyObject *args, PyObject *kwds)
     static char *kwlist[] = {NULL};
     if (!PyArg_ParseTupleAndKeywords(args, kwds, "", kwlist )) return NULL;
 
-    if (lock) lock(lock_arg);         
+    LVGL_LOCK        
     int result = lv_img_get_upscale(self->ref);
-    if (unlock) unlock(unlock_arg);
+    LVGL_UNLOCK
     if (result) {Py_RETURN_TRUE;} else {Py_RETURN_FALSE;}
 }
 
@@ -3203,10 +3318,10 @@ pylv_bar_init(pylv_Bar *self, PyObject *args, PyObject *kwds)
         return -1;
     }   
     
-    if (lock) lock(lock_arg);
+    LVGL_LOCK
     self->ref = lv_bar_create(parent ? parent->ref : NULL, copy ? copy->ref : NULL);
     lv_obj_set_free_ptr(self->ref, self);
-    if (unlock) unlock(unlock_arg);
+    LVGL_UNLOCK
 
     return 0;
 }
@@ -3219,9 +3334,9 @@ pylv_bar_set_value(pylv_Obj *self, PyObject *args, PyObject *kwds)
     short int value;
     if (!PyArg_ParseTupleAndKeywords(args, kwds, "h", kwlist , &value)) return NULL;
 
-    if (lock) lock(lock_arg);         
+    LVGL_LOCK         
     lv_bar_set_value(self->ref, value);
-    if (unlock) unlock(unlock_arg);
+    LVGL_UNLOCK
     Py_RETURN_NONE;
 }
 
@@ -3233,9 +3348,9 @@ pylv_bar_set_value_anim(pylv_Obj *self, PyObject *args, PyObject *kwds)
     unsigned short int anim_time;
     if (!PyArg_ParseTupleAndKeywords(args, kwds, "hH", kwlist , &value, &anim_time)) return NULL;
 
-    if (lock) lock(lock_arg);         
+    LVGL_LOCK         
     lv_bar_set_value_anim(self->ref, value, anim_time);
-    if (unlock) unlock(unlock_arg);
+    LVGL_UNLOCK
     Py_RETURN_NONE;
 }
 
@@ -3247,9 +3362,9 @@ pylv_bar_set_range(pylv_Obj *self, PyObject *args, PyObject *kwds)
     short int max;
     if (!PyArg_ParseTupleAndKeywords(args, kwds, "hh", kwlist , &min, &max)) return NULL;
 
-    if (lock) lock(lock_arg);         
+    LVGL_LOCK         
     lv_bar_set_range(self->ref, min, max);
-    if (unlock) unlock(unlock_arg);
+    LVGL_UNLOCK
     Py_RETURN_NONE;
 }
 
@@ -3261,9 +3376,9 @@ pylv_bar_set_style(pylv_Obj *self, PyObject *args, PyObject *kwds)
     Style_Object * style;
     if (!PyArg_ParseTupleAndKeywords(args, kwds, "iO!", kwlist , &type, &Style_Type, &style)) return NULL;
 
-    if (lock) lock(lock_arg);         
+    LVGL_LOCK         
     lv_bar_set_style(self->ref, type, style->ref);
-    if (unlock) unlock(unlock_arg);
+    LVGL_UNLOCK
     Py_RETURN_NONE;
 }
 
@@ -3273,9 +3388,9 @@ pylv_bar_get_value(pylv_Obj *self, PyObject *args, PyObject *kwds)
     static char *kwlist[] = {NULL};
     if (!PyArg_ParseTupleAndKeywords(args, kwds, "", kwlist )) return NULL;
 
-    if (lock) lock(lock_arg);         
+    LVGL_LOCK        
     short int result = lv_bar_get_value(self->ref);
-    if (unlock) unlock(unlock_arg);
+    LVGL_UNLOCK
     return Py_BuildValue("h", result);
 }
 
@@ -3285,9 +3400,9 @@ pylv_bar_get_min_value(pylv_Obj *self, PyObject *args, PyObject *kwds)
     static char *kwlist[] = {NULL};
     if (!PyArg_ParseTupleAndKeywords(args, kwds, "", kwlist )) return NULL;
 
-    if (lock) lock(lock_arg);         
+    LVGL_LOCK        
     short int result = lv_bar_get_min_value(self->ref);
-    if (unlock) unlock(unlock_arg);
+    LVGL_UNLOCK
     return Py_BuildValue("h", result);
 }
 
@@ -3297,9 +3412,9 @@ pylv_bar_get_max_value(pylv_Obj *self, PyObject *args, PyObject *kwds)
     static char *kwlist[] = {NULL};
     if (!PyArg_ParseTupleAndKeywords(args, kwds, "", kwlist )) return NULL;
 
-    if (lock) lock(lock_arg);         
+    LVGL_LOCK        
     short int result = lv_bar_get_max_value(self->ref);
-    if (unlock) unlock(unlock_arg);
+    LVGL_UNLOCK
     return Py_BuildValue("h", result);
 }
 
@@ -3356,10 +3471,10 @@ pylv_line_init(pylv_Line *self, PyObject *args, PyObject *kwds)
         return -1;
     }   
     
-    if (lock) lock(lock_arg);
+    LVGL_LOCK
     self->ref = lv_line_create(parent ? parent->ref : NULL, copy ? copy->ref : NULL);
     lv_obj_set_free_ptr(self->ref, self);
-    if (unlock) unlock(unlock_arg);
+    LVGL_UNLOCK
 
     return 0;
 }
@@ -3379,9 +3494,9 @@ pylv_line_set_auto_size(pylv_Obj *self, PyObject *args, PyObject *kwds)
     int autosize_en;
     if (!PyArg_ParseTupleAndKeywords(args, kwds, "p", kwlist , &autosize_en)) return NULL;
 
-    if (lock) lock(lock_arg);         
+    LVGL_LOCK         
     lv_line_set_auto_size(self->ref, autosize_en);
-    if (unlock) unlock(unlock_arg);
+    LVGL_UNLOCK
     Py_RETURN_NONE;
 }
 
@@ -3392,9 +3507,9 @@ pylv_line_set_y_invert(pylv_Obj *self, PyObject *args, PyObject *kwds)
     int yinv_en;
     if (!PyArg_ParseTupleAndKeywords(args, kwds, "p", kwlist , &yinv_en)) return NULL;
 
-    if (lock) lock(lock_arg);         
+    LVGL_LOCK         
     lv_line_set_y_invert(self->ref, yinv_en);
-    if (unlock) unlock(unlock_arg);
+    LVGL_UNLOCK
     Py_RETURN_NONE;
 }
 
@@ -3405,9 +3520,9 @@ pylv_line_set_upscale(pylv_Obj *self, PyObject *args, PyObject *kwds)
     int upcale;
     if (!PyArg_ParseTupleAndKeywords(args, kwds, "p", kwlist , &upcale)) return NULL;
 
-    if (lock) lock(lock_arg);         
+    LVGL_LOCK         
     lv_line_set_upscale(self->ref, upcale);
-    if (unlock) unlock(unlock_arg);
+    LVGL_UNLOCK
     Py_RETURN_NONE;
 }
 
@@ -3417,9 +3532,9 @@ pylv_line_get_auto_size(pylv_Obj *self, PyObject *args, PyObject *kwds)
     static char *kwlist[] = {NULL};
     if (!PyArg_ParseTupleAndKeywords(args, kwds, "", kwlist )) return NULL;
 
-    if (lock) lock(lock_arg);         
+    LVGL_LOCK        
     int result = lv_line_get_auto_size(self->ref);
-    if (unlock) unlock(unlock_arg);
+    LVGL_UNLOCK
     if (result) {Py_RETURN_TRUE;} else {Py_RETURN_FALSE;}
 }
 
@@ -3429,9 +3544,9 @@ pylv_line_get_y_inv(pylv_Obj *self, PyObject *args, PyObject *kwds)
     static char *kwlist[] = {NULL};
     if (!PyArg_ParseTupleAndKeywords(args, kwds, "", kwlist )) return NULL;
 
-    if (lock) lock(lock_arg);         
+    LVGL_LOCK        
     int result = lv_line_get_y_inv(self->ref);
-    if (unlock) unlock(unlock_arg);
+    LVGL_UNLOCK
     if (result) {Py_RETURN_TRUE;} else {Py_RETURN_FALSE;}
 }
 
@@ -3441,9 +3556,9 @@ pylv_line_get_upscale(pylv_Obj *self, PyObject *args, PyObject *kwds)
     static char *kwlist[] = {NULL};
     if (!PyArg_ParseTupleAndKeywords(args, kwds, "", kwlist )) return NULL;
 
-    if (lock) lock(lock_arg);         
+    LVGL_LOCK        
     int result = lv_line_get_upscale(self->ref);
-    if (unlock) unlock(unlock_arg);
+    LVGL_UNLOCK
     if (result) {Py_RETURN_TRUE;} else {Py_RETURN_FALSE;}
 }
 
@@ -3490,10 +3605,10 @@ pylv_tabview_init(pylv_Tabview *self, PyObject *args, PyObject *kwds)
         return -1;
     }   
     
-    if (lock) lock(lock_arg);
+    LVGL_LOCK
     self->ref = lv_tabview_create(parent ? parent->ref : NULL, copy ? copy->ref : NULL);
     lv_obj_set_free_ptr(self->ref, self);
-    if (unlock) unlock(unlock_arg);
+    LVGL_UNLOCK
 
     return 0;
 }
@@ -3506,11 +3621,10 @@ pylv_tabview_add_tab(pylv_Obj *self, PyObject *args, PyObject *kwds)
     char * name;
     if (!PyArg_ParseTupleAndKeywords(args, kwds, "s", kwlist , &name)) return NULL;
 
-        
-    if (lock) lock(lock_arg);
+    LVGL_LOCK
     lv_obj_t *result = lv_tabview_add_tab(self->ref, name);
+    LVGL_UNLOCK
     PyObject *retobj = pyobj_from_lv(result);
-    if (unlock) unlock(unlock_arg);
     
     return retobj;
 }
@@ -3523,9 +3637,9 @@ pylv_tabview_set_tab_act(pylv_Obj *self, PyObject *args, PyObject *kwds)
     int anim_en;
     if (!PyArg_ParseTupleAndKeywords(args, kwds, "Hp", kwlist , &id, &anim_en)) return NULL;
 
-    if (lock) lock(lock_arg);         
+    LVGL_LOCK         
     lv_tabview_set_tab_act(self->ref, id, anim_en);
-    if (unlock) unlock(unlock_arg);
+    LVGL_UNLOCK
     Py_RETURN_NONE;
 }
 
@@ -3543,9 +3657,9 @@ pylv_tabview_set_sliding(pylv_Obj *self, PyObject *args, PyObject *kwds)
     int en;
     if (!PyArg_ParseTupleAndKeywords(args, kwds, "p", kwlist , &en)) return NULL;
 
-    if (lock) lock(lock_arg);         
+    LVGL_LOCK         
     lv_tabview_set_sliding(self->ref, en);
-    if (unlock) unlock(unlock_arg);
+    LVGL_UNLOCK
     Py_RETURN_NONE;
 }
 
@@ -3556,9 +3670,9 @@ pylv_tabview_set_anim_time(pylv_Obj *self, PyObject *args, PyObject *kwds)
     unsigned short int anim_time;
     if (!PyArg_ParseTupleAndKeywords(args, kwds, "H", kwlist , &anim_time)) return NULL;
 
-    if (lock) lock(lock_arg);         
+    LVGL_LOCK         
     lv_tabview_set_anim_time(self->ref, anim_time);
-    if (unlock) unlock(unlock_arg);
+    LVGL_UNLOCK
     Py_RETURN_NONE;
 }
 
@@ -3570,9 +3684,9 @@ pylv_tabview_set_style(pylv_Obj *self, PyObject *args, PyObject *kwds)
     Style_Object * style;
     if (!PyArg_ParseTupleAndKeywords(args, kwds, "iO!", kwlist , &type, &Style_Type, &style)) return NULL;
 
-    if (lock) lock(lock_arg);         
+    LVGL_LOCK         
     lv_tabview_set_style(self->ref, type, style->ref);
-    if (unlock) unlock(unlock_arg);
+    LVGL_UNLOCK
     Py_RETURN_NONE;
 }
 
@@ -3582,9 +3696,9 @@ pylv_tabview_get_tab_act(pylv_Obj *self, PyObject *args, PyObject *kwds)
     static char *kwlist[] = {NULL};
     if (!PyArg_ParseTupleAndKeywords(args, kwds, "", kwlist )) return NULL;
 
-    if (lock) lock(lock_arg);         
+    LVGL_LOCK        
     unsigned short int result = lv_tabview_get_tab_act(self->ref);
-    if (unlock) unlock(unlock_arg);
+    LVGL_UNLOCK
     return Py_BuildValue("H", result);
 }
 
@@ -3594,9 +3708,9 @@ pylv_tabview_get_tab_count(pylv_Obj *self, PyObject *args, PyObject *kwds)
     static char *kwlist[] = {NULL};
     if (!PyArg_ParseTupleAndKeywords(args, kwds, "", kwlist )) return NULL;
 
-    if (lock) lock(lock_arg);         
+    LVGL_LOCK        
     unsigned short int result = lv_tabview_get_tab_count(self->ref);
-    if (unlock) unlock(unlock_arg);
+    LVGL_UNLOCK
     return Py_BuildValue("H", result);
 }
 
@@ -3607,11 +3721,10 @@ pylv_tabview_get_tab(pylv_Obj *self, PyObject *args, PyObject *kwds)
     unsigned short int id;
     if (!PyArg_ParseTupleAndKeywords(args, kwds, "H", kwlist , &id)) return NULL;
 
-        
-    if (lock) lock(lock_arg);
+    LVGL_LOCK
     lv_obj_t *result = lv_tabview_get_tab(self->ref, id);
+    LVGL_UNLOCK
     PyObject *retobj = pyobj_from_lv(result);
-    if (unlock) unlock(unlock_arg);
     
     return retobj;
 }
@@ -3629,9 +3742,9 @@ pylv_tabview_get_sliding(pylv_Obj *self, PyObject *args, PyObject *kwds)
     static char *kwlist[] = {NULL};
     if (!PyArg_ParseTupleAndKeywords(args, kwds, "", kwlist )) return NULL;
 
-    if (lock) lock(lock_arg);         
+    LVGL_LOCK        
     int result = lv_tabview_get_sliding(self->ref);
-    if (unlock) unlock(unlock_arg);
+    LVGL_UNLOCK
     if (result) {Py_RETURN_TRUE;} else {Py_RETURN_FALSE;}
 }
 
@@ -3641,9 +3754,9 @@ pylv_tabview_get_anim_time(pylv_Obj *self, PyObject *args, PyObject *kwds)
     static char *kwlist[] = {NULL};
     if (!PyArg_ParseTupleAndKeywords(args, kwds, "", kwlist )) return NULL;
 
-    if (lock) lock(lock_arg);         
+    LVGL_LOCK        
     unsigned short int result = lv_tabview_get_anim_time(self->ref);
-    if (unlock) unlock(unlock_arg);
+    LVGL_UNLOCK
     return Py_BuildValue("H", result);
 }
 
@@ -3705,10 +3818,10 @@ pylv_mbox_init(pylv_Mbox *self, PyObject *args, PyObject *kwds)
         return -1;
     }   
     
-    if (lock) lock(lock_arg);
+    LVGL_LOCK
     self->ref = lv_mbox_create(parent ? parent->ref : NULL, copy ? copy->ref : NULL);
     lv_obj_set_free_ptr(self->ref, self);
-    if (unlock) unlock(unlock_arg);
+    LVGL_UNLOCK
 
     return 0;
 }
@@ -3728,9 +3841,9 @@ pylv_mbox_set_text(pylv_Obj *self, PyObject *args, PyObject *kwds)
     char * txt;
     if (!PyArg_ParseTupleAndKeywords(args, kwds, "s", kwlist , &txt)) return NULL;
 
-    if (lock) lock(lock_arg);         
+    LVGL_LOCK         
     lv_mbox_set_text(self->ref, txt);
-    if (unlock) unlock(unlock_arg);
+    LVGL_UNLOCK
     Py_RETURN_NONE;
 }
 
@@ -3748,9 +3861,9 @@ pylv_mbox_set_anim_time(pylv_Obj *self, PyObject *args, PyObject *kwds)
     unsigned short int anim_time;
     if (!PyArg_ParseTupleAndKeywords(args, kwds, "H", kwlist , &anim_time)) return NULL;
 
-    if (lock) lock(lock_arg);         
+    LVGL_LOCK         
     lv_mbox_set_anim_time(self->ref, anim_time);
-    if (unlock) unlock(unlock_arg);
+    LVGL_UNLOCK
     Py_RETURN_NONE;
 }
 
@@ -3761,9 +3874,9 @@ pylv_mbox_start_auto_close(pylv_Obj *self, PyObject *args, PyObject *kwds)
     unsigned short int delay;
     if (!PyArg_ParseTupleAndKeywords(args, kwds, "H", kwlist , &delay)) return NULL;
 
-    if (lock) lock(lock_arg);         
+    LVGL_LOCK         
     lv_mbox_start_auto_close(self->ref, delay);
-    if (unlock) unlock(unlock_arg);
+    LVGL_UNLOCK
     Py_RETURN_NONE;
 }
 
@@ -3773,9 +3886,9 @@ pylv_mbox_stop_auto_close(pylv_Obj *self, PyObject *args, PyObject *kwds)
     static char *kwlist[] = {NULL};
     if (!PyArg_ParseTupleAndKeywords(args, kwds, "", kwlist )) return NULL;
 
-    if (lock) lock(lock_arg);         
+    LVGL_LOCK         
     lv_mbox_stop_auto_close(self->ref);
-    if (unlock) unlock(unlock_arg);
+    LVGL_UNLOCK
     Py_RETURN_NONE;
 }
 
@@ -3787,9 +3900,9 @@ pylv_mbox_set_style(pylv_Obj *self, PyObject *args, PyObject *kwds)
     Style_Object * style;
     if (!PyArg_ParseTupleAndKeywords(args, kwds, "iO!", kwlist , &type, &Style_Type, &style)) return NULL;
 
-    if (lock) lock(lock_arg);         
+    LVGL_LOCK         
     lv_mbox_set_style(self->ref, type, style->ref);
-    if (unlock) unlock(unlock_arg);
+    LVGL_UNLOCK
     Py_RETURN_NONE;
 }
 
@@ -3799,11 +3912,10 @@ pylv_mbox_get_from_btn(pylv_Obj *self, PyObject *args, PyObject *kwds)
     static char *kwlist[] = {NULL};
     if (!PyArg_ParseTupleAndKeywords(args, kwds, "", kwlist )) return NULL;
 
-        
-    if (lock) lock(lock_arg);
+    LVGL_LOCK
     lv_obj_t *result = lv_mbox_get_from_btn(self->ref);
+    LVGL_UNLOCK
     PyObject *retobj = pyobj_from_lv(result);
-    if (unlock) unlock(unlock_arg);
     
     return retobj;
 }
@@ -3814,9 +3926,9 @@ pylv_mbox_get_anim_time(pylv_Obj *self, PyObject *args, PyObject *kwds)
     static char *kwlist[] = {NULL};
     if (!PyArg_ParseTupleAndKeywords(args, kwds, "", kwlist )) return NULL;
 
-    if (lock) lock(lock_arg);         
+    LVGL_LOCK        
     unsigned short int result = lv_mbox_get_anim_time(self->ref);
-    if (unlock) unlock(unlock_arg);
+    LVGL_UNLOCK
     return Py_BuildValue("H", result);
 }
 
@@ -3875,10 +3987,10 @@ pylv_gauge_init(pylv_Gauge *self, PyObject *args, PyObject *kwds)
         return -1;
     }   
     
-    if (lock) lock(lock_arg);
+    LVGL_LOCK
     self->ref = lv_gauge_create(parent ? parent->ref : NULL, copy ? copy->ref : NULL);
     lv_obj_set_free_ptr(self->ref, self);
-    if (unlock) unlock(unlock_arg);
+    LVGL_UNLOCK
 
     return 0;
 }
@@ -3899,9 +4011,9 @@ pylv_gauge_set_value(pylv_Obj *self, PyObject *args, PyObject *kwds)
     short int value;
     if (!PyArg_ParseTupleAndKeywords(args, kwds, "bh", kwlist , &needle_id, &value)) return NULL;
 
-    if (lock) lock(lock_arg);         
+    LVGL_LOCK         
     lv_gauge_set_value(self->ref, needle_id, value);
-    if (unlock) unlock(unlock_arg);
+    LVGL_UNLOCK
     Py_RETURN_NONE;
 }
 
@@ -3912,9 +4024,9 @@ pylv_gauge_set_critical_value(pylv_Obj *self, PyObject *args, PyObject *kwds)
     short int value;
     if (!PyArg_ParseTupleAndKeywords(args, kwds, "h", kwlist , &value)) return NULL;
 
-    if (lock) lock(lock_arg);         
+    LVGL_LOCK         
     lv_gauge_set_critical_value(self->ref, value);
-    if (unlock) unlock(unlock_arg);
+    LVGL_UNLOCK
     Py_RETURN_NONE;
 }
 
@@ -3927,9 +4039,9 @@ pylv_gauge_set_scale(pylv_Obj *self, PyObject *args, PyObject *kwds)
     unsigned char label_cnt;
     if (!PyArg_ParseTupleAndKeywords(args, kwds, "Hbb", kwlist , &angle, &line_cnt, &label_cnt)) return NULL;
 
-    if (lock) lock(lock_arg);         
+    LVGL_LOCK         
     lv_gauge_set_scale(self->ref, angle, line_cnt, label_cnt);
-    if (unlock) unlock(unlock_arg);
+    LVGL_UNLOCK
     Py_RETURN_NONE;
 }
 
@@ -3940,9 +4052,9 @@ pylv_gauge_get_value(pylv_Obj *self, PyObject *args, PyObject *kwds)
     unsigned char needle;
     if (!PyArg_ParseTupleAndKeywords(args, kwds, "b", kwlist , &needle)) return NULL;
 
-    if (lock) lock(lock_arg);         
+    LVGL_LOCK        
     short int result = lv_gauge_get_value(self->ref, needle);
-    if (unlock) unlock(unlock_arg);
+    LVGL_UNLOCK
     return Py_BuildValue("h", result);
 }
 
@@ -3952,9 +4064,9 @@ pylv_gauge_get_needle_count(pylv_Obj *self, PyObject *args, PyObject *kwds)
     static char *kwlist[] = {NULL};
     if (!PyArg_ParseTupleAndKeywords(args, kwds, "", kwlist )) return NULL;
 
-    if (lock) lock(lock_arg);         
+    LVGL_LOCK        
     unsigned char result = lv_gauge_get_needle_count(self->ref);
-    if (unlock) unlock(unlock_arg);
+    LVGL_UNLOCK
     return Py_BuildValue("b", result);
 }
 
@@ -3964,9 +4076,9 @@ pylv_gauge_get_critical_value(pylv_Obj *self, PyObject *args, PyObject *kwds)
     static char *kwlist[] = {NULL};
     if (!PyArg_ParseTupleAndKeywords(args, kwds, "", kwlist )) return NULL;
 
-    if (lock) lock(lock_arg);         
+    LVGL_LOCK        
     short int result = lv_gauge_get_critical_value(self->ref);
-    if (unlock) unlock(unlock_arg);
+    LVGL_UNLOCK
     return Py_BuildValue("h", result);
 }
 
@@ -3976,9 +4088,9 @@ pylv_gauge_get_label_count(pylv_Obj *self, PyObject *args, PyObject *kwds)
     static char *kwlist[] = {NULL};
     if (!PyArg_ParseTupleAndKeywords(args, kwds, "", kwlist )) return NULL;
 
-    if (lock) lock(lock_arg);         
+    LVGL_LOCK        
     unsigned char result = lv_gauge_get_label_count(self->ref);
-    if (unlock) unlock(unlock_arg);
+    LVGL_UNLOCK
     return Py_BuildValue("b", result);
 }
 
@@ -4026,10 +4138,10 @@ pylv_page_init(pylv_Page *self, PyObject *args, PyObject *kwds)
         return -1;
     }   
     
-    if (lock) lock(lock_arg);
+    LVGL_LOCK
     self->ref = lv_page_create(parent ? parent->ref : NULL, copy ? copy->ref : NULL);
     lv_obj_set_free_ptr(self->ref, self);
-    if (unlock) unlock(unlock_arg);
+    LVGL_UNLOCK
 
     return 0;
 }
@@ -4038,12 +4150,26 @@ pylv_page_init(pylv_Page *self, PyObject *args, PyObject *kwds)
 lv_res_t pylv_page_rel_action_callback(lv_obj_t* obj) {
     pylv_Page *pyobj;
     PyObject *handler;
+    PyGILState_STATE gstate;
+
+    gstate = PyGILState_Ensure();
+    
     pyobj = lv_obj_get_free_ptr(obj);
     if (pyobj) {
         handler = pyobj->rel_action;
-        if (handler) PyObject_CallFunctionObjArgs(handler, NULL);
-        if (PyErr_Occurred()) PyErr_Print();
+        if (handler) {
+            if (unlock) unlock(unlock_arg); 
+            PyObject_CallFunctionObjArgs(handler, NULL);
+            if (PyErr_Occurred()) PyErr_Print();
+            
+            PyGILState_Release(gstate);
+            if (lock) lock(lock_arg); 
+            return LV_RES_OK;
+
+        }
+
     }
+    PyGILState_Release(gstate);
     return LV_RES_OK;
 }
 
@@ -4086,12 +4212,26 @@ pylv_page_set_rel_action(pylv_Page *self, PyObject *args, PyObject *kwds)
 lv_res_t pylv_page_pr_action_callback(lv_obj_t* obj) {
     pylv_Page *pyobj;
     PyObject *handler;
+    PyGILState_STATE gstate;
+
+    gstate = PyGILState_Ensure();
+    
     pyobj = lv_obj_get_free_ptr(obj);
     if (pyobj) {
         handler = pyobj->pr_action;
-        if (handler) PyObject_CallFunctionObjArgs(handler, NULL);
-        if (PyErr_Occurred()) PyErr_Print();
+        if (handler) {
+            if (unlock) unlock(unlock_arg); 
+            PyObject_CallFunctionObjArgs(handler, NULL);
+            if (PyErr_Occurred()) PyErr_Print();
+            
+            PyGILState_Release(gstate);
+            if (lock) lock(lock_arg); 
+            return LV_RES_OK;
+
+        }
+
     }
+    PyGILState_Release(gstate);
     return LV_RES_OK;
 }
 
@@ -4137,11 +4277,10 @@ pylv_page_get_scrl(pylv_Obj *self, PyObject *args, PyObject *kwds)
     static char *kwlist[] = {NULL};
     if (!PyArg_ParseTupleAndKeywords(args, kwds, "", kwlist )) return NULL;
 
-        
-    if (lock) lock(lock_arg);
+    LVGL_LOCK
     lv_obj_t *result = lv_page_get_scrl(self->ref);
+    LVGL_UNLOCK
     PyObject *retobj = pyobj_from_lv(result);
-    if (unlock) unlock(unlock_arg);
     
     return retobj;
 }
@@ -4153,9 +4292,9 @@ pylv_page_set_sb_mode(pylv_Obj *self, PyObject *args, PyObject *kwds)
     int sb_mode;
     if (!PyArg_ParseTupleAndKeywords(args, kwds, "i", kwlist , &sb_mode)) return NULL;
 
-    if (lock) lock(lock_arg);         
+    LVGL_LOCK         
     lv_page_set_sb_mode(self->ref, sb_mode);
-    if (unlock) unlock(unlock_arg);
+    LVGL_UNLOCK
     Py_RETURN_NONE;
 }
 
@@ -4167,9 +4306,9 @@ pylv_page_set_scrl_fit(pylv_Obj *self, PyObject *args, PyObject *kwds)
     int ver_en;
     if (!PyArg_ParseTupleAndKeywords(args, kwds, "pp", kwlist , &hor_en, &ver_en)) return NULL;
 
-    if (lock) lock(lock_arg);         
+    LVGL_LOCK         
     lv_page_set_scrl_fit(self->ref, hor_en, ver_en);
-    if (unlock) unlock(unlock_arg);
+    LVGL_UNLOCK
     Py_RETURN_NONE;
 }
 
@@ -4180,9 +4319,9 @@ pylv_page_set_scrl_width(pylv_Obj *self, PyObject *args, PyObject *kwds)
     short int w;
     if (!PyArg_ParseTupleAndKeywords(args, kwds, "h", kwlist , &w)) return NULL;
 
-    if (lock) lock(lock_arg);         
+    LVGL_LOCK         
     lv_page_set_scrl_width(self->ref, w);
-    if (unlock) unlock(unlock_arg);
+    LVGL_UNLOCK
     Py_RETURN_NONE;
 }
 
@@ -4193,9 +4332,9 @@ pylv_page_set_scrl_height(pylv_Obj *self, PyObject *args, PyObject *kwds)
     short int h;
     if (!PyArg_ParseTupleAndKeywords(args, kwds, "h", kwlist , &h)) return NULL;
 
-    if (lock) lock(lock_arg);         
+    LVGL_LOCK         
     lv_page_set_scrl_height(self->ref, h);
-    if (unlock) unlock(unlock_arg);
+    LVGL_UNLOCK
     Py_RETURN_NONE;
 }
 
@@ -4206,9 +4345,9 @@ pylv_page_set_scrl_layout(pylv_Obj *self, PyObject *args, PyObject *kwds)
     int layout;
     if (!PyArg_ParseTupleAndKeywords(args, kwds, "i", kwlist , &layout)) return NULL;
 
-    if (lock) lock(lock_arg);         
+    LVGL_LOCK         
     lv_page_set_scrl_layout(self->ref, layout);
-    if (unlock) unlock(unlock_arg);
+    LVGL_UNLOCK
     Py_RETURN_NONE;
 }
 
@@ -4220,9 +4359,9 @@ pylv_page_set_style(pylv_Obj *self, PyObject *args, PyObject *kwds)
     Style_Object * style;
     if (!PyArg_ParseTupleAndKeywords(args, kwds, "iO!", kwlist , &type, &Style_Type, &style)) return NULL;
 
-    if (lock) lock(lock_arg);         
+    LVGL_LOCK         
     lv_page_set_style(self->ref, type, style->ref);
-    if (unlock) unlock(unlock_arg);
+    LVGL_UNLOCK
     Py_RETURN_NONE;
 }
 
@@ -4232,9 +4371,9 @@ pylv_page_get_sb_mode(pylv_Obj *self, PyObject *args, PyObject *kwds)
     static char *kwlist[] = {NULL};
     if (!PyArg_ParseTupleAndKeywords(args, kwds, "", kwlist )) return NULL;
 
-    if (lock) lock(lock_arg);         
+    LVGL_LOCK        
     int result = lv_page_get_sb_mode(self->ref);
-    if (unlock) unlock(unlock_arg);
+    LVGL_UNLOCK
     return Py_BuildValue("i", result);
 }
 
@@ -4244,9 +4383,9 @@ pylv_page_get_scrl_width(pylv_Obj *self, PyObject *args, PyObject *kwds)
     static char *kwlist[] = {NULL};
     if (!PyArg_ParseTupleAndKeywords(args, kwds, "", kwlist )) return NULL;
 
-    if (lock) lock(lock_arg);         
+    LVGL_LOCK        
     short int result = lv_page_get_scrl_width(self->ref);
-    if (unlock) unlock(unlock_arg);
+    LVGL_UNLOCK
     return Py_BuildValue("h", result);
 }
 
@@ -4256,9 +4395,9 @@ pylv_page_get_scrl_height(pylv_Obj *self, PyObject *args, PyObject *kwds)
     static char *kwlist[] = {NULL};
     if (!PyArg_ParseTupleAndKeywords(args, kwds, "", kwlist )) return NULL;
 
-    if (lock) lock(lock_arg);         
+    LVGL_LOCK        
     short int result = lv_page_get_scrl_height(self->ref);
-    if (unlock) unlock(unlock_arg);
+    LVGL_UNLOCK
     return Py_BuildValue("h", result);
 }
 
@@ -4268,9 +4407,9 @@ pylv_page_get_scrl_layout(pylv_Obj *self, PyObject *args, PyObject *kwds)
     static char *kwlist[] = {NULL};
     if (!PyArg_ParseTupleAndKeywords(args, kwds, "", kwlist )) return NULL;
 
-    if (lock) lock(lock_arg);         
+    LVGL_LOCK        
     int result = lv_page_get_scrl_layout(self->ref);
-    if (unlock) unlock(unlock_arg);
+    LVGL_UNLOCK
     return Py_BuildValue("i", result);
 }
 
@@ -4280,9 +4419,9 @@ pylv_page_get_scrl_hor_fit(pylv_Obj *self, PyObject *args, PyObject *kwds)
     static char *kwlist[] = {NULL};
     if (!PyArg_ParseTupleAndKeywords(args, kwds, "", kwlist )) return NULL;
 
-    if (lock) lock(lock_arg);         
+    LVGL_LOCK        
     int result = lv_page_get_scrl_hor_fit(self->ref);
-    if (unlock) unlock(unlock_arg);
+    LVGL_UNLOCK
     if (result) {Py_RETURN_TRUE;} else {Py_RETURN_FALSE;}
 }
 
@@ -4292,9 +4431,9 @@ pylv_page_get_scrl_fit_ver(pylv_Obj *self, PyObject *args, PyObject *kwds)
     static char *kwlist[] = {NULL};
     if (!PyArg_ParseTupleAndKeywords(args, kwds, "", kwlist )) return NULL;
 
-    if (lock) lock(lock_arg);         
+    LVGL_LOCK        
     int result = lv_page_get_scrl_fit_ver(self->ref);
-    if (unlock) unlock(unlock_arg);
+    LVGL_UNLOCK
     if (result) {Py_RETURN_TRUE;} else {Py_RETURN_FALSE;}
 }
 
@@ -4314,9 +4453,9 @@ pylv_page_glue_obj(pylv_Obj *self, PyObject *args, PyObject *kwds)
     int glue;
     if (!PyArg_ParseTupleAndKeywords(args, kwds, "p", kwlist , &glue)) return NULL;
 
-    if (lock) lock(lock_arg);         
+    LVGL_LOCK         
     lv_page_glue_obj(self->ref, glue);
-    if (unlock) unlock(unlock_arg);
+    LVGL_UNLOCK
     Py_RETURN_NONE;
 }
 
@@ -4328,9 +4467,9 @@ pylv_page_focus(pylv_Obj *self, PyObject *args, PyObject *kwds)
     unsigned short int anim_time;
     if (!PyArg_ParseTupleAndKeywords(args, kwds, "O!H", kwlist , &pylv_obj_Type, &obj, &anim_time)) return NULL;
 
-    if (lock) lock(lock_arg);         
+    LVGL_LOCK         
     lv_page_focus(self->ref, obj->ref, anim_time);
-    if (unlock) unlock(unlock_arg);
+    LVGL_UNLOCK
     Py_RETURN_NONE;
 }
 
@@ -4388,10 +4527,10 @@ pylv_ta_init(pylv_Ta *self, PyObject *args, PyObject *kwds)
         return -1;
     }   
     
-    if (lock) lock(lock_arg);
+    LVGL_LOCK
     self->ref = lv_ta_create(parent ? parent->ref : NULL, copy ? copy->ref : NULL);
     lv_obj_set_free_ptr(self->ref, self);
-    if (unlock) unlock(unlock_arg);
+    LVGL_UNLOCK
 
     return 0;
 }
@@ -4404,9 +4543,9 @@ pylv_ta_add_char(pylv_Obj *self, PyObject *args, PyObject *kwds)
     char c;
     if (!PyArg_ParseTupleAndKeywords(args, kwds, "c", kwlist , &c)) return NULL;
 
-    if (lock) lock(lock_arg);         
+    LVGL_LOCK         
     lv_ta_add_char(self->ref, c);
-    if (unlock) unlock(unlock_arg);
+    LVGL_UNLOCK
     Py_RETURN_NONE;
 }
 
@@ -4417,9 +4556,9 @@ pylv_ta_add_text(pylv_Obj *self, PyObject *args, PyObject *kwds)
     char * txt;
     if (!PyArg_ParseTupleAndKeywords(args, kwds, "s", kwlist , &txt)) return NULL;
 
-    if (lock) lock(lock_arg);         
+    LVGL_LOCK         
     lv_ta_add_text(self->ref, txt);
-    if (unlock) unlock(unlock_arg);
+    LVGL_UNLOCK
     Py_RETURN_NONE;
 }
 
@@ -4429,9 +4568,9 @@ pylv_ta_del_char(pylv_Obj *self, PyObject *args, PyObject *kwds)
     static char *kwlist[] = {NULL};
     if (!PyArg_ParseTupleAndKeywords(args, kwds, "", kwlist )) return NULL;
 
-    if (lock) lock(lock_arg);         
+    LVGL_LOCK         
     lv_ta_del_char(self->ref);
-    if (unlock) unlock(unlock_arg);
+    LVGL_UNLOCK
     Py_RETURN_NONE;
 }
 
@@ -4442,9 +4581,9 @@ pylv_ta_set_text(pylv_Obj *self, PyObject *args, PyObject *kwds)
     char * txt;
     if (!PyArg_ParseTupleAndKeywords(args, kwds, "s", kwlist , &txt)) return NULL;
 
-    if (lock) lock(lock_arg);         
+    LVGL_LOCK         
     lv_ta_set_text(self->ref, txt);
-    if (unlock) unlock(unlock_arg);
+    LVGL_UNLOCK
     Py_RETURN_NONE;
 }
 
@@ -4455,9 +4594,9 @@ pylv_ta_set_cursor_pos(pylv_Obj *self, PyObject *args, PyObject *kwds)
     short int pos;
     if (!PyArg_ParseTupleAndKeywords(args, kwds, "h", kwlist , &pos)) return NULL;
 
-    if (lock) lock(lock_arg);         
+    LVGL_LOCK         
     lv_ta_set_cursor_pos(self->ref, pos);
-    if (unlock) unlock(unlock_arg);
+    LVGL_UNLOCK
     Py_RETURN_NONE;
 }
 
@@ -4468,9 +4607,9 @@ pylv_ta_set_cursor_type(pylv_Obj *self, PyObject *args, PyObject *kwds)
     int cur_type;
     if (!PyArg_ParseTupleAndKeywords(args, kwds, "i", kwlist , &cur_type)) return NULL;
 
-    if (lock) lock(lock_arg);         
+    LVGL_LOCK         
     lv_ta_set_cursor_type(self->ref, cur_type);
-    if (unlock) unlock(unlock_arg);
+    LVGL_UNLOCK
     Py_RETURN_NONE;
 }
 
@@ -4481,9 +4620,9 @@ pylv_ta_set_pwd_mode(pylv_Obj *self, PyObject *args, PyObject *kwds)
     int pwd_en;
     if (!PyArg_ParseTupleAndKeywords(args, kwds, "p", kwlist , &pwd_en)) return NULL;
 
-    if (lock) lock(lock_arg);         
+    LVGL_LOCK         
     lv_ta_set_pwd_mode(self->ref, pwd_en);
-    if (unlock) unlock(unlock_arg);
+    LVGL_UNLOCK
     Py_RETURN_NONE;
 }
 
@@ -4494,9 +4633,9 @@ pylv_ta_set_one_line(pylv_Obj *self, PyObject *args, PyObject *kwds)
     int en;
     if (!PyArg_ParseTupleAndKeywords(args, kwds, "p", kwlist , &en)) return NULL;
 
-    if (lock) lock(lock_arg);         
+    LVGL_LOCK         
     lv_ta_set_one_line(self->ref, en);
-    if (unlock) unlock(unlock_arg);
+    LVGL_UNLOCK
     Py_RETURN_NONE;
 }
 
@@ -4508,9 +4647,9 @@ pylv_ta_set_style(pylv_Obj *self, PyObject *args, PyObject *kwds)
     Style_Object * style;
     if (!PyArg_ParseTupleAndKeywords(args, kwds, "iO!", kwlist , &type, &Style_Type, &style)) return NULL;
 
-    if (lock) lock(lock_arg);         
+    LVGL_LOCK         
     lv_ta_set_style(self->ref, type, style->ref);
-    if (unlock) unlock(unlock_arg);
+    LVGL_UNLOCK
     Py_RETURN_NONE;
 }
 
@@ -4520,11 +4659,10 @@ pylv_ta_get_label(pylv_Obj *self, PyObject *args, PyObject *kwds)
     static char *kwlist[] = {NULL};
     if (!PyArg_ParseTupleAndKeywords(args, kwds, "", kwlist )) return NULL;
 
-        
-    if (lock) lock(lock_arg);
+    LVGL_LOCK
     lv_obj_t *result = lv_ta_get_label(self->ref);
+    LVGL_UNLOCK
     PyObject *retobj = pyobj_from_lv(result);
-    if (unlock) unlock(unlock_arg);
     
     return retobj;
 }
@@ -4535,9 +4673,9 @@ pylv_ta_get_cursor_pos(pylv_Obj *self, PyObject *args, PyObject *kwds)
     static char *kwlist[] = {NULL};
     if (!PyArg_ParseTupleAndKeywords(args, kwds, "", kwlist )) return NULL;
 
-    if (lock) lock(lock_arg);         
+    LVGL_LOCK        
     unsigned short int result = lv_ta_get_cursor_pos(self->ref);
-    if (unlock) unlock(unlock_arg);
+    LVGL_UNLOCK
     return Py_BuildValue("H", result);
 }
 
@@ -4547,9 +4685,9 @@ pylv_ta_get_cursor_type(pylv_Obj *self, PyObject *args, PyObject *kwds)
     static char *kwlist[] = {NULL};
     if (!PyArg_ParseTupleAndKeywords(args, kwds, "", kwlist )) return NULL;
 
-    if (lock) lock(lock_arg);         
+    LVGL_LOCK        
     int result = lv_ta_get_cursor_type(self->ref);
-    if (unlock) unlock(unlock_arg);
+    LVGL_UNLOCK
     return Py_BuildValue("i", result);
 }
 
@@ -4559,9 +4697,9 @@ pylv_ta_get_pwd_mode(pylv_Obj *self, PyObject *args, PyObject *kwds)
     static char *kwlist[] = {NULL};
     if (!PyArg_ParseTupleAndKeywords(args, kwds, "", kwlist )) return NULL;
 
-    if (lock) lock(lock_arg);         
+    LVGL_LOCK        
     int result = lv_ta_get_pwd_mode(self->ref);
-    if (unlock) unlock(unlock_arg);
+    LVGL_UNLOCK
     if (result) {Py_RETURN_TRUE;} else {Py_RETURN_FALSE;}
 }
 
@@ -4571,9 +4709,9 @@ pylv_ta_get_one_line(pylv_Obj *self, PyObject *args, PyObject *kwds)
     static char *kwlist[] = {NULL};
     if (!PyArg_ParseTupleAndKeywords(args, kwds, "", kwlist )) return NULL;
 
-    if (lock) lock(lock_arg);         
+    LVGL_LOCK        
     int result = lv_ta_get_one_line(self->ref);
-    if (unlock) unlock(unlock_arg);
+    LVGL_UNLOCK
     if (result) {Py_RETURN_TRUE;} else {Py_RETURN_FALSE;}
 }
 
@@ -4592,9 +4730,9 @@ pylv_ta_cursor_right(pylv_Obj *self, PyObject *args, PyObject *kwds)
     static char *kwlist[] = {NULL};
     if (!PyArg_ParseTupleAndKeywords(args, kwds, "", kwlist )) return NULL;
 
-    if (lock) lock(lock_arg);         
+    LVGL_LOCK         
     lv_ta_cursor_right(self->ref);
-    if (unlock) unlock(unlock_arg);
+    LVGL_UNLOCK
     Py_RETURN_NONE;
 }
 
@@ -4604,9 +4742,9 @@ pylv_ta_cursor_left(pylv_Obj *self, PyObject *args, PyObject *kwds)
     static char *kwlist[] = {NULL};
     if (!PyArg_ParseTupleAndKeywords(args, kwds, "", kwlist )) return NULL;
 
-    if (lock) lock(lock_arg);         
+    LVGL_LOCK         
     lv_ta_cursor_left(self->ref);
-    if (unlock) unlock(unlock_arg);
+    LVGL_UNLOCK
     Py_RETURN_NONE;
 }
 
@@ -4616,9 +4754,9 @@ pylv_ta_cursor_down(pylv_Obj *self, PyObject *args, PyObject *kwds)
     static char *kwlist[] = {NULL};
     if (!PyArg_ParseTupleAndKeywords(args, kwds, "", kwlist )) return NULL;
 
-    if (lock) lock(lock_arg);         
+    LVGL_LOCK         
     lv_ta_cursor_down(self->ref);
-    if (unlock) unlock(unlock_arg);
+    LVGL_UNLOCK
     Py_RETURN_NONE;
 }
 
@@ -4628,9 +4766,9 @@ pylv_ta_cursor_up(pylv_Obj *self, PyObject *args, PyObject *kwds)
     static char *kwlist[] = {NULL};
     if (!PyArg_ParseTupleAndKeywords(args, kwds, "", kwlist )) return NULL;
 
-    if (lock) lock(lock_arg);         
+    LVGL_LOCK         
     lv_ta_cursor_up(self->ref);
-    if (unlock) unlock(unlock_arg);
+    LVGL_UNLOCK
     Py_RETURN_NONE;
 }
 
@@ -4689,10 +4827,10 @@ pylv_btn_init(pylv_Btn *self, PyObject *args, PyObject *kwds)
         return -1;
     }   
     
-    if (lock) lock(lock_arg);
+    LVGL_LOCK
     self->ref = lv_btn_create(parent ? parent->ref : NULL, copy ? copy->ref : NULL);
     lv_obj_set_free_ptr(self->ref, self);
-    if (unlock) unlock(unlock_arg);
+    LVGL_UNLOCK
 
     return 0;
 }
@@ -4705,9 +4843,9 @@ pylv_btn_set_toggle(pylv_Obj *self, PyObject *args, PyObject *kwds)
     int tgl;
     if (!PyArg_ParseTupleAndKeywords(args, kwds, "p", kwlist , &tgl)) return NULL;
 
-    if (lock) lock(lock_arg);         
+    LVGL_LOCK         
     lv_btn_set_toggle(self->ref, tgl);
-    if (unlock) unlock(unlock_arg);
+    LVGL_UNLOCK
     Py_RETURN_NONE;
 }
 
@@ -4718,9 +4856,9 @@ pylv_btn_set_state(pylv_Obj *self, PyObject *args, PyObject *kwds)
     int state;
     if (!PyArg_ParseTupleAndKeywords(args, kwds, "i", kwlist , &state)) return NULL;
 
-    if (lock) lock(lock_arg);         
+    LVGL_LOCK         
     lv_btn_set_state(self->ref, state);
-    if (unlock) unlock(unlock_arg);
+    LVGL_UNLOCK
     Py_RETURN_NONE;
 }
 
@@ -4730,9 +4868,9 @@ pylv_btn_toggle(pylv_Obj *self, PyObject *args, PyObject *kwds)
     static char *kwlist[] = {NULL};
     if (!PyArg_ParseTupleAndKeywords(args, kwds, "", kwlist )) return NULL;
 
-    if (lock) lock(lock_arg);         
+    LVGL_LOCK         
     lv_btn_toggle(self->ref);
-    if (unlock) unlock(unlock_arg);
+    LVGL_UNLOCK
     Py_RETURN_NONE;
 }
 
@@ -4744,9 +4882,9 @@ pylv_btn_set_style(pylv_Obj *self, PyObject *args, PyObject *kwds)
     Style_Object * style;
     if (!PyArg_ParseTupleAndKeywords(args, kwds, "iO!", kwlist , &type, &Style_Type, &style)) return NULL;
 
-    if (lock) lock(lock_arg);         
+    LVGL_LOCK         
     lv_btn_set_style(self->ref, type, style->ref);
-    if (unlock) unlock(unlock_arg);
+    LVGL_UNLOCK
     Py_RETURN_NONE;
 }
 
@@ -4756,9 +4894,9 @@ pylv_btn_get_state(pylv_Obj *self, PyObject *args, PyObject *kwds)
     static char *kwlist[] = {NULL};
     if (!PyArg_ParseTupleAndKeywords(args, kwds, "", kwlist )) return NULL;
 
-    if (lock) lock(lock_arg);         
+    LVGL_LOCK        
     int result = lv_btn_get_state(self->ref);
-    if (unlock) unlock(unlock_arg);
+    LVGL_UNLOCK
     return Py_BuildValue("i", result);
 }
 
@@ -4768,9 +4906,9 @@ pylv_btn_get_toggle(pylv_Obj *self, PyObject *args, PyObject *kwds)
     static char *kwlist[] = {NULL};
     if (!PyArg_ParseTupleAndKeywords(args, kwds, "", kwlist )) return NULL;
 
-    if (lock) lock(lock_arg);         
+    LVGL_LOCK        
     int result = lv_btn_get_toggle(self->ref);
-    if (unlock) unlock(unlock_arg);
+    LVGL_UNLOCK
     if (result) {Py_RETURN_TRUE;} else {Py_RETURN_FALSE;}
 }
 
@@ -4828,10 +4966,10 @@ pylv_ddlist_init(pylv_Ddlist *self, PyObject *args, PyObject *kwds)
         return -1;
     }   
     
-    if (lock) lock(lock_arg);
+    LVGL_LOCK
     self->ref = lv_ddlist_create(parent ? parent->ref : NULL, copy ? copy->ref : NULL);
     lv_obj_set_free_ptr(self->ref, self);
-    if (unlock) unlock(unlock_arg);
+    LVGL_UNLOCK
 
     return 0;
 }
@@ -4840,12 +4978,26 @@ pylv_ddlist_init(pylv_Ddlist *self, PyObject *args, PyObject *kwds)
 lv_res_t pylv_ddlist_action_callback(lv_obj_t* obj) {
     pylv_Ddlist *pyobj;
     PyObject *handler;
+    PyGILState_STATE gstate;
+
+    gstate = PyGILState_Ensure();
+    
     pyobj = lv_obj_get_free_ptr(obj);
     if (pyobj) {
         handler = pyobj->action;
-        if (handler) PyObject_CallFunctionObjArgs(handler, NULL);
-        if (PyErr_Occurred()) PyErr_Print();
+        if (handler) {
+            if (unlock) unlock(unlock_arg); 
+            PyObject_CallFunctionObjArgs(handler, NULL);
+            if (PyErr_Occurred()) PyErr_Print();
+            
+            PyGILState_Release(gstate);
+            if (lock) lock(lock_arg); 
+            return LV_RES_OK;
+
+        }
+
     }
+    PyGILState_Release(gstate);
     return LV_RES_OK;
 }
 
@@ -4892,9 +5044,9 @@ pylv_ddlist_set_options(pylv_Obj *self, PyObject *args, PyObject *kwds)
     char * options;
     if (!PyArg_ParseTupleAndKeywords(args, kwds, "s", kwlist , &options)) return NULL;
 
-    if (lock) lock(lock_arg);         
+    LVGL_LOCK         
     lv_ddlist_set_options(self->ref, options);
-    if (unlock) unlock(unlock_arg);
+    LVGL_UNLOCK
     Py_RETURN_NONE;
 }
 
@@ -4905,9 +5057,9 @@ pylv_ddlist_set_selected(pylv_Obj *self, PyObject *args, PyObject *kwds)
     unsigned short int sel_opt;
     if (!PyArg_ParseTupleAndKeywords(args, kwds, "H", kwlist , &sel_opt)) return NULL;
 
-    if (lock) lock(lock_arg);         
+    LVGL_LOCK         
     lv_ddlist_set_selected(self->ref, sel_opt);
-    if (unlock) unlock(unlock_arg);
+    LVGL_UNLOCK
     Py_RETURN_NONE;
 }
 
@@ -4918,9 +5070,9 @@ pylv_ddlist_set_fix_height(pylv_Obj *self, PyObject *args, PyObject *kwds)
     short int h;
     if (!PyArg_ParseTupleAndKeywords(args, kwds, "h", kwlist , &h)) return NULL;
 
-    if (lock) lock(lock_arg);         
+    LVGL_LOCK         
     lv_ddlist_set_fix_height(self->ref, h);
-    if (unlock) unlock(unlock_arg);
+    LVGL_UNLOCK
     Py_RETURN_NONE;
 }
 
@@ -4931,9 +5083,9 @@ pylv_ddlist_set_hor_fit(pylv_Obj *self, PyObject *args, PyObject *kwds)
     int fit_en;
     if (!PyArg_ParseTupleAndKeywords(args, kwds, "p", kwlist , &fit_en)) return NULL;
 
-    if (lock) lock(lock_arg);         
+    LVGL_LOCK         
     lv_ddlist_set_hor_fit(self->ref, fit_en);
-    if (unlock) unlock(unlock_arg);
+    LVGL_UNLOCK
     Py_RETURN_NONE;
 }
 
@@ -4944,9 +5096,9 @@ pylv_ddlist_set_anim_time(pylv_Obj *self, PyObject *args, PyObject *kwds)
     unsigned short int anim_time;
     if (!PyArg_ParseTupleAndKeywords(args, kwds, "H", kwlist , &anim_time)) return NULL;
 
-    if (lock) lock(lock_arg);         
+    LVGL_LOCK         
     lv_ddlist_set_anim_time(self->ref, anim_time);
-    if (unlock) unlock(unlock_arg);
+    LVGL_UNLOCK
     Py_RETURN_NONE;
 }
 
@@ -4958,9 +5110,9 @@ pylv_ddlist_set_style(pylv_Obj *self, PyObject *args, PyObject *kwds)
     Style_Object * style;
     if (!PyArg_ParseTupleAndKeywords(args, kwds, "iO!", kwlist , &type, &Style_Type, &style)) return NULL;
 
-    if (lock) lock(lock_arg);         
+    LVGL_LOCK         
     lv_ddlist_set_style(self->ref, type, style->ref);
-    if (unlock) unlock(unlock_arg);
+    LVGL_UNLOCK
     Py_RETURN_NONE;
 }
 
@@ -4970,9 +5122,9 @@ pylv_ddlist_get_selected(pylv_Obj *self, PyObject *args, PyObject *kwds)
     static char *kwlist[] = {NULL};
     if (!PyArg_ParseTupleAndKeywords(args, kwds, "", kwlist )) return NULL;
 
-    if (lock) lock(lock_arg);         
+    LVGL_LOCK        
     unsigned short int result = lv_ddlist_get_selected(self->ref);
-    if (unlock) unlock(unlock_arg);
+    LVGL_UNLOCK
     return Py_BuildValue("H", result);
 }
 
@@ -4983,9 +5135,9 @@ pylv_ddlist_get_selected_str(pylv_Obj *self, PyObject *args, PyObject *kwds)
     char * buf;
     if (!PyArg_ParseTupleAndKeywords(args, kwds, "s", kwlist , &buf)) return NULL;
 
-    if (lock) lock(lock_arg);         
+    LVGL_LOCK         
     lv_ddlist_get_selected_str(self->ref, buf);
-    if (unlock) unlock(unlock_arg);
+    LVGL_UNLOCK
     Py_RETURN_NONE;
 }
 
@@ -4995,9 +5147,9 @@ pylv_ddlist_get_fix_height(pylv_Obj *self, PyObject *args, PyObject *kwds)
     static char *kwlist[] = {NULL};
     if (!PyArg_ParseTupleAndKeywords(args, kwds, "", kwlist )) return NULL;
 
-    if (lock) lock(lock_arg);         
+    LVGL_LOCK        
     short int result = lv_ddlist_get_fix_height(self->ref);
-    if (unlock) unlock(unlock_arg);
+    LVGL_UNLOCK
     return Py_BuildValue("h", result);
 }
 
@@ -5007,9 +5159,9 @@ pylv_ddlist_get_anim_time(pylv_Obj *self, PyObject *args, PyObject *kwds)
     static char *kwlist[] = {NULL};
     if (!PyArg_ParseTupleAndKeywords(args, kwds, "", kwlist )) return NULL;
 
-    if (lock) lock(lock_arg);         
+    LVGL_LOCK        
     unsigned short int result = lv_ddlist_get_anim_time(self->ref);
-    if (unlock) unlock(unlock_arg);
+    LVGL_UNLOCK
     return Py_BuildValue("H", result);
 }
 
@@ -5029,9 +5181,9 @@ pylv_ddlist_open(pylv_Obj *self, PyObject *args, PyObject *kwds)
     int anim;
     if (!PyArg_ParseTupleAndKeywords(args, kwds, "p", kwlist , &anim)) return NULL;
 
-    if (lock) lock(lock_arg);         
+    LVGL_LOCK         
     lv_ddlist_open(self->ref, anim);
-    if (unlock) unlock(unlock_arg);
+    LVGL_UNLOCK
     Py_RETURN_NONE;
 }
 
@@ -5085,10 +5237,10 @@ pylv_list_init(pylv_List *self, PyObject *args, PyObject *kwds)
         return -1;
     }   
     
-    if (lock) lock(lock_arg);
+    LVGL_LOCK
     self->ref = lv_list_create(parent ? parent->ref : NULL, copy ? copy->ref : NULL);
     lv_obj_set_free_ptr(self->ref, self);
-    if (unlock) unlock(unlock_arg);
+    LVGL_UNLOCK
 
     return 0;
 }
@@ -5101,9 +5253,9 @@ pylv_list_set_anim_time(pylv_Obj *self, PyObject *args, PyObject *kwds)
     unsigned short int anim_time;
     if (!PyArg_ParseTupleAndKeywords(args, kwds, "H", kwlist , &anim_time)) return NULL;
 
-    if (lock) lock(lock_arg);         
+    LVGL_LOCK         
     lv_list_set_anim_time(self->ref, anim_time);
-    if (unlock) unlock(unlock_arg);
+    LVGL_UNLOCK
     Py_RETURN_NONE;
 }
 
@@ -5115,9 +5267,9 @@ pylv_list_set_style(pylv_Obj *self, PyObject *args, PyObject *kwds)
     Style_Object * style;
     if (!PyArg_ParseTupleAndKeywords(args, kwds, "iO!", kwlist , &type, &Style_Type, &style)) return NULL;
 
-    if (lock) lock(lock_arg);         
+    LVGL_LOCK         
     lv_list_set_style(self->ref, type, style->ref);
-    if (unlock) unlock(unlock_arg);
+    LVGL_UNLOCK
     Py_RETURN_NONE;
 }
 
@@ -5127,11 +5279,10 @@ pylv_list_get_btn_label(pylv_Obj *self, PyObject *args, PyObject *kwds)
     static char *kwlist[] = {NULL};
     if (!PyArg_ParseTupleAndKeywords(args, kwds, "", kwlist )) return NULL;
 
-        
-    if (lock) lock(lock_arg);
+    LVGL_LOCK
     lv_obj_t *result = lv_list_get_btn_label(self->ref);
+    LVGL_UNLOCK
     PyObject *retobj = pyobj_from_lv(result);
-    if (unlock) unlock(unlock_arg);
     
     return retobj;
 }
@@ -5142,11 +5293,10 @@ pylv_list_get_btn_img(pylv_Obj *self, PyObject *args, PyObject *kwds)
     static char *kwlist[] = {NULL};
     if (!PyArg_ParseTupleAndKeywords(args, kwds, "", kwlist )) return NULL;
 
-        
-    if (lock) lock(lock_arg);
+    LVGL_LOCK
     lv_obj_t *result = lv_list_get_btn_img(self->ref);
+    LVGL_UNLOCK
     PyObject *retobj = pyobj_from_lv(result);
-    if (unlock) unlock(unlock_arg);
     
     return retobj;
 }
@@ -5157,9 +5307,9 @@ pylv_list_get_anim_time(pylv_Obj *self, PyObject *args, PyObject *kwds)
     static char *kwlist[] = {NULL};
     if (!PyArg_ParseTupleAndKeywords(args, kwds, "", kwlist )) return NULL;
 
-    if (lock) lock(lock_arg);         
+    LVGL_LOCK        
     unsigned short int result = lv_list_get_anim_time(self->ref);
-    if (unlock) unlock(unlock_arg);
+    LVGL_UNLOCK
     return Py_BuildValue("H", result);
 }
 
@@ -5178,9 +5328,9 @@ pylv_list_up(pylv_Obj *self, PyObject *args, PyObject *kwds)
     static char *kwlist[] = {NULL};
     if (!PyArg_ParseTupleAndKeywords(args, kwds, "", kwlist )) return NULL;
 
-    if (lock) lock(lock_arg);         
+    LVGL_LOCK         
     lv_list_up(self->ref);
-    if (unlock) unlock(unlock_arg);
+    LVGL_UNLOCK
     Py_RETURN_NONE;
 }
 
@@ -5190,9 +5340,9 @@ pylv_list_down(pylv_Obj *self, PyObject *args, PyObject *kwds)
     static char *kwlist[] = {NULL};
     if (!PyArg_ParseTupleAndKeywords(args, kwds, "", kwlist )) return NULL;
 
-    if (lock) lock(lock_arg);         
+    LVGL_LOCK         
     lv_list_down(self->ref);
-    if (unlock) unlock(unlock_arg);
+    LVGL_UNLOCK
     Py_RETURN_NONE;
 }
 
@@ -5242,10 +5392,10 @@ pylv_slider_init(pylv_Slider *self, PyObject *args, PyObject *kwds)
         return -1;
     }   
     
-    if (lock) lock(lock_arg);
+    LVGL_LOCK
     self->ref = lv_slider_create(parent ? parent->ref : NULL, copy ? copy->ref : NULL);
     lv_obj_set_free_ptr(self->ref, self);
-    if (unlock) unlock(unlock_arg);
+    LVGL_UNLOCK
 
     return 0;
 }
@@ -5254,12 +5404,26 @@ pylv_slider_init(pylv_Slider *self, PyObject *args, PyObject *kwds)
 lv_res_t pylv_slider_action_callback(lv_obj_t* obj) {
     pylv_Slider *pyobj;
     PyObject *handler;
+    PyGILState_STATE gstate;
+
+    gstate = PyGILState_Ensure();
+    
     pyobj = lv_obj_get_free_ptr(obj);
     if (pyobj) {
         handler = pyobj->action;
-        if (handler) PyObject_CallFunctionObjArgs(handler, NULL);
-        if (PyErr_Occurred()) PyErr_Print();
+        if (handler) {
+            if (unlock) unlock(unlock_arg); 
+            PyObject_CallFunctionObjArgs(handler, NULL);
+            if (PyErr_Occurred()) PyErr_Print();
+            
+            PyGILState_Release(gstate);
+            if (lock) lock(lock_arg); 
+            return LV_RES_OK;
+
+        }
+
     }
+    PyGILState_Release(gstate);
     return LV_RES_OK;
 }
 
@@ -5306,9 +5470,9 @@ pylv_slider_set_knob_in(pylv_Obj *self, PyObject *args, PyObject *kwds)
     int in;
     if (!PyArg_ParseTupleAndKeywords(args, kwds, "p", kwlist , &in)) return NULL;
 
-    if (lock) lock(lock_arg);         
+    LVGL_LOCK         
     lv_slider_set_knob_in(self->ref, in);
-    if (unlock) unlock(unlock_arg);
+    LVGL_UNLOCK
     Py_RETURN_NONE;
 }
 
@@ -5320,9 +5484,9 @@ pylv_slider_set_style(pylv_Obj *self, PyObject *args, PyObject *kwds)
     Style_Object * style;
     if (!PyArg_ParseTupleAndKeywords(args, kwds, "iO!", kwlist , &type, &Style_Type, &style)) return NULL;
 
-    if (lock) lock(lock_arg);         
+    LVGL_LOCK         
     lv_slider_set_style(self->ref, type, style->ref);
-    if (unlock) unlock(unlock_arg);
+    LVGL_UNLOCK
     Py_RETURN_NONE;
 }
 
@@ -5332,9 +5496,9 @@ pylv_slider_get_value(pylv_Obj *self, PyObject *args, PyObject *kwds)
     static char *kwlist[] = {NULL};
     if (!PyArg_ParseTupleAndKeywords(args, kwds, "", kwlist )) return NULL;
 
-    if (lock) lock(lock_arg);         
+    LVGL_LOCK        
     short int result = lv_slider_get_value(self->ref);
-    if (unlock) unlock(unlock_arg);
+    LVGL_UNLOCK
     return Py_BuildValue("h", result);
 }
 
@@ -5344,9 +5508,9 @@ pylv_slider_is_dragged(pylv_Obj *self, PyObject *args, PyObject *kwds)
     static char *kwlist[] = {NULL};
     if (!PyArg_ParseTupleAndKeywords(args, kwds, "", kwlist )) return NULL;
 
-    if (lock) lock(lock_arg);         
+    LVGL_LOCK        
     int result = lv_slider_is_dragged(self->ref);
-    if (unlock) unlock(unlock_arg);
+    LVGL_UNLOCK
     if (result) {Py_RETURN_TRUE;} else {Py_RETURN_FALSE;}
 }
 
@@ -5356,9 +5520,9 @@ pylv_slider_get_knob_in(pylv_Obj *self, PyObject *args, PyObject *kwds)
     static char *kwlist[] = {NULL};
     if (!PyArg_ParseTupleAndKeywords(args, kwds, "", kwlist )) return NULL;
 
-    if (lock) lock(lock_arg);         
+    LVGL_LOCK        
     int result = lv_slider_get_knob_in(self->ref);
-    if (unlock) unlock(unlock_arg);
+    LVGL_UNLOCK
     if (result) {Py_RETURN_TRUE;} else {Py_RETURN_FALSE;}
 }
 
@@ -5415,10 +5579,10 @@ pylv_sw_init(pylv_Sw *self, PyObject *args, PyObject *kwds)
         return -1;
     }   
     
-    if (lock) lock(lock_arg);
+    LVGL_LOCK
     self->ref = lv_sw_create(parent ? parent->ref : NULL, copy ? copy->ref : NULL);
     lv_obj_set_free_ptr(self->ref, self);
-    if (unlock) unlock(unlock_arg);
+    LVGL_UNLOCK
 
     return 0;
 }
@@ -5430,9 +5594,9 @@ pylv_sw_on(pylv_Obj *self, PyObject *args, PyObject *kwds)
     static char *kwlist[] = {NULL};
     if (!PyArg_ParseTupleAndKeywords(args, kwds, "", kwlist )) return NULL;
 
-    if (lock) lock(lock_arg);         
+    LVGL_LOCK         
     lv_sw_on(self->ref);
-    if (unlock) unlock(unlock_arg);
+    LVGL_UNLOCK
     Py_RETURN_NONE;
 }
 
@@ -5442,9 +5606,9 @@ pylv_sw_off(pylv_Obj *self, PyObject *args, PyObject *kwds)
     static char *kwlist[] = {NULL};
     if (!PyArg_ParseTupleAndKeywords(args, kwds, "", kwlist )) return NULL;
 
-    if (lock) lock(lock_arg);         
+    LVGL_LOCK         
     lv_sw_off(self->ref);
-    if (unlock) unlock(unlock_arg);
+    LVGL_UNLOCK
     Py_RETURN_NONE;
 }
 
@@ -5456,9 +5620,9 @@ pylv_sw_set_style(pylv_Obj *self, PyObject *args, PyObject *kwds)
     Style_Object * style;
     if (!PyArg_ParseTupleAndKeywords(args, kwds, "iO!", kwlist , &type, &Style_Type, &style)) return NULL;
 
-    if (lock) lock(lock_arg);         
+    LVGL_LOCK         
     lv_sw_set_style(self->ref, type, style->ref);
-    if (unlock) unlock(unlock_arg);
+    LVGL_UNLOCK
     Py_RETURN_NONE;
 }
 
@@ -5468,9 +5632,9 @@ pylv_sw_get_state(pylv_Obj *self, PyObject *args, PyObject *kwds)
     static char *kwlist[] = {NULL};
     if (!PyArg_ParseTupleAndKeywords(args, kwds, "", kwlist )) return NULL;
 
-    if (lock) lock(lock_arg);         
+    LVGL_LOCK        
     int result = lv_sw_get_state(self->ref);
-    if (unlock) unlock(unlock_arg);
+    LVGL_UNLOCK
     if (result) {Py_RETURN_TRUE;} else {Py_RETURN_FALSE;}
 }
 
@@ -5524,10 +5688,10 @@ pylv_cb_init(pylv_Cb *self, PyObject *args, PyObject *kwds)
         return -1;
     }   
     
-    if (lock) lock(lock_arg);
+    LVGL_LOCK
     self->ref = lv_cb_create(parent ? parent->ref : NULL, copy ? copy->ref : NULL);
     lv_obj_set_free_ptr(self->ref, self);
-    if (unlock) unlock(unlock_arg);
+    LVGL_UNLOCK
 
     return 0;
 }
@@ -5536,12 +5700,26 @@ pylv_cb_init(pylv_Cb *self, PyObject *args, PyObject *kwds)
 lv_res_t pylv_cb_action_callback(lv_obj_t* obj) {
     pylv_Cb *pyobj;
     PyObject *handler;
+    PyGILState_STATE gstate;
+
+    gstate = PyGILState_Ensure();
+    
     pyobj = lv_obj_get_free_ptr(obj);
     if (pyobj) {
         handler = pyobj->action;
-        if (handler) PyObject_CallFunctionObjArgs(handler, NULL);
-        if (PyErr_Occurred()) PyErr_Print();
+        if (handler) {
+            if (unlock) unlock(unlock_arg); 
+            PyObject_CallFunctionObjArgs(handler, NULL);
+            if (PyErr_Occurred()) PyErr_Print();
+            
+            PyGILState_Release(gstate);
+            if (lock) lock(lock_arg); 
+            return LV_RES_OK;
+
+        }
+
     }
+    PyGILState_Release(gstate);
     return LV_RES_OK;
 }
 
@@ -5588,9 +5766,9 @@ pylv_cb_set_text(pylv_Obj *self, PyObject *args, PyObject *kwds)
     char * txt;
     if (!PyArg_ParseTupleAndKeywords(args, kwds, "s", kwlist , &txt)) return NULL;
 
-    if (lock) lock(lock_arg);         
+    LVGL_LOCK         
     lv_cb_set_text(self->ref, txt);
-    if (unlock) unlock(unlock_arg);
+    LVGL_UNLOCK
     Py_RETURN_NONE;
 }
 
@@ -5601,9 +5779,9 @@ pylv_cb_set_checked(pylv_Obj *self, PyObject *args, PyObject *kwds)
     int checked;
     if (!PyArg_ParseTupleAndKeywords(args, kwds, "p", kwlist , &checked)) return NULL;
 
-    if (lock) lock(lock_arg);         
+    LVGL_LOCK         
     lv_cb_set_checked(self->ref, checked);
-    if (unlock) unlock(unlock_arg);
+    LVGL_UNLOCK
     Py_RETURN_NONE;
 }
 
@@ -5613,9 +5791,9 @@ pylv_cb_set_inactive(pylv_Obj *self, PyObject *args, PyObject *kwds)
     static char *kwlist[] = {NULL};
     if (!PyArg_ParseTupleAndKeywords(args, kwds, "", kwlist )) return NULL;
 
-    if (lock) lock(lock_arg);         
+    LVGL_LOCK         
     lv_cb_set_inactive(self->ref);
-    if (unlock) unlock(unlock_arg);
+    LVGL_UNLOCK
     Py_RETURN_NONE;
 }
 
@@ -5627,9 +5805,9 @@ pylv_cb_set_style(pylv_Obj *self, PyObject *args, PyObject *kwds)
     Style_Object * style;
     if (!PyArg_ParseTupleAndKeywords(args, kwds, "iO!", kwlist , &type, &Style_Type, &style)) return NULL;
 
-    if (lock) lock(lock_arg);         
+    LVGL_LOCK         
     lv_cb_set_style(self->ref, type, style->ref);
-    if (unlock) unlock(unlock_arg);
+    LVGL_UNLOCK
     Py_RETURN_NONE;
 }
 
@@ -5639,9 +5817,9 @@ pylv_cb_is_checked(pylv_Obj *self, PyObject *args, PyObject *kwds)
     static char *kwlist[] = {NULL};
     if (!PyArg_ParseTupleAndKeywords(args, kwds, "", kwlist )) return NULL;
 
-    if (lock) lock(lock_arg);         
+    LVGL_LOCK        
     int result = lv_cb_is_checked(self->ref);
-    if (unlock) unlock(unlock_arg);
+    LVGL_UNLOCK
     if (result) {Py_RETURN_TRUE;} else {Py_RETURN_FALSE;}
 }
 
@@ -5698,10 +5876,10 @@ pylv_roller_init(pylv_Roller *self, PyObject *args, PyObject *kwds)
         return -1;
     }   
     
-    if (lock) lock(lock_arg);
+    LVGL_LOCK
     self->ref = lv_roller_create(parent ? parent->ref : NULL, copy ? copy->ref : NULL);
     lv_obj_set_free_ptr(self->ref, self);
-    if (unlock) unlock(unlock_arg);
+    LVGL_UNLOCK
 
     return 0;
 }
@@ -5715,9 +5893,9 @@ pylv_roller_set_selected(pylv_Obj *self, PyObject *args, PyObject *kwds)
     int anim_en;
     if (!PyArg_ParseTupleAndKeywords(args, kwds, "Hp", kwlist , &sel_opt, &anim_en)) return NULL;
 
-    if (lock) lock(lock_arg);         
+    LVGL_LOCK         
     lv_roller_set_selected(self->ref, sel_opt, anim_en);
-    if (unlock) unlock(unlock_arg);
+    LVGL_UNLOCK
     Py_RETURN_NONE;
 }
 
@@ -5728,9 +5906,9 @@ pylv_roller_set_visible_row_count(pylv_Obj *self, PyObject *args, PyObject *kwds
     unsigned char row_cnt;
     if (!PyArg_ParseTupleAndKeywords(args, kwds, "b", kwlist , &row_cnt)) return NULL;
 
-    if (lock) lock(lock_arg);         
+    LVGL_LOCK         
     lv_roller_set_visible_row_count(self->ref, row_cnt);
-    if (unlock) unlock(unlock_arg);
+    LVGL_UNLOCK
     Py_RETURN_NONE;
 }
 
@@ -5742,9 +5920,9 @@ pylv_roller_set_style(pylv_Obj *self, PyObject *args, PyObject *kwds)
     Style_Object * style;
     if (!PyArg_ParseTupleAndKeywords(args, kwds, "iO!", kwlist , &type, &Style_Type, &style)) return NULL;
 
-    if (lock) lock(lock_arg);         
+    LVGL_LOCK         
     lv_roller_set_style(self->ref, type, style->ref);
-    if (unlock) unlock(unlock_arg);
+    LVGL_UNLOCK
     Py_RETURN_NONE;
 }
 
@@ -5754,9 +5932,9 @@ pylv_roller_get_hor_fit(pylv_Obj *self, PyObject *args, PyObject *kwds)
     static char *kwlist[] = {NULL};
     if (!PyArg_ParseTupleAndKeywords(args, kwds, "", kwlist )) return NULL;
 
-    if (lock) lock(lock_arg);         
+    LVGL_LOCK        
     int result = lv_roller_get_hor_fit(self->ref);
-    if (unlock) unlock(unlock_arg);
+    LVGL_UNLOCK
     if (result) {Py_RETURN_TRUE;} else {Py_RETURN_FALSE;}
 }
 
@@ -5801,9 +5979,9 @@ static PyTypeObject pylv_roller_Type = {
 static PyObject *
 pylv_scr_act(PyObject *self, PyObject *args) {
     lv_obj_t *scr;
-    if (lock) lock(lock_arg);
+    LVGL_LOCK
     scr = lv_scr_act();
-    if (unlock) unlock(unlock_arg);
+    LVGL_UNLOCK
     return pyobj_from_lv(scr);
 }
 
@@ -5812,9 +5990,9 @@ pylv_scr_load(PyObject *self, PyObject *args, PyObject *kwds) {
     static char *kwlist[] = {"scr", NULL};
     pylv_Obj *scr;
     if (!PyArg_ParseTupleAndKeywords(args, kwds, "O!", kwlist, &pylv_obj_Type, &scr)) return NULL;
-    if (lock) lock(lock_arg);
+    LVGL_LOCK
     lv_scr_load(scr->ref);
-    if (unlock) unlock(unlock_arg);
+    LVGL_UNLOCK
     
     Py_RETURN_NONE;
 }
@@ -5822,10 +6000,10 @@ pylv_scr_load(PyObject *self, PyObject *args, PyObject *kwds) {
 
 static PyObject *
 poll(PyObject *self, PyObject *args) {
-    if (lock) lock(lock_arg);
+    LVGL_LOCK
     lv_tick_inc(1);
     lv_task_handler();
-    if (unlock) unlock(unlock_arg);
+    LVGL_UNLOCK
     
     Py_RETURN_NONE;
 }
@@ -5839,9 +6017,9 @@ report_style_mod(PyObject *self, PyObject *args, PyObject *kwds) {
         return NULL;
     }
     
-    if (lock) unlock(lock_arg);
+    LVGL_LOCK
     lv_obj_report_style_mod(style ? style->ref: NULL);
-    if (unlock) unlock(unlock_arg);
+    LVGL_UNLOCK
     
     Py_RETURN_NONE;
 }

@@ -6,6 +6,30 @@
 #error Only 16 bits color depth is currently supported
 #endif
 
+
+/* Note on the lvgl lock and the GIL:
+ *
+ * Any attempt to aquire the lock should be with the GIL released. Otherwise,
+ * The following situation could occur:
+ *
+ * Thread 1:                    Thread 2 (lv_poll called)
+ *   has the GIL                  has the lvgl lock
+ *   waits for lvgl lock          process callback --> aquire GIL
+ *
+ * This would be a deadlock situation
+ */
+
+#define LVGL_LOCK \
+    if (lock) { \
+        Py_BEGIN_ALLOW_THREADS \
+        lock(lock_arg); \
+        Py_END_ALLOW_THREADS \
+    }
+
+#define LVGL_UNLOCK \
+    if (unlock) { unlock(unlock_arg); }
+ 
+
 /****************************************************************
  * Object struct definitions                                    *
  ****************************************************************/
@@ -409,7 +433,7 @@ pylv_obj_get_children(pylv_Obj *self, PyObject *args, PyObject *kwds)
     PyObject *ret = PyList_New(0);
     if (!ret) return NULL;
     
-    if (lock) lock(lock_arg);
+    LVGL_LOCK
     
     while (1) {
         child = lv_obj_get_child(self->ref, child);
@@ -425,7 +449,7 @@ pylv_obj_get_children(pylv_Obj *self, PyObject *args, PyObject *kwds)
         Py_DECREF(pychild);
     }
 
-    if (unlock) unlock(unlock_arg);
+    LVGL_UNLOCK
     
     return ret;
 }
@@ -437,8 +461,9 @@ pylv_obj_get_type(pylv_Obj *self, PyObject *args, PyObject *kwds)
     PyObject *list = NULL;
     PyObject *str = NULL;
     
-    if (lock) lock(lock_arg);
+    LVGL_LOCK
     lv_obj_get_type(self->ref, &result);
+    LVGL_UNLOCK
     
     list = PyList_New(0);
     
@@ -450,14 +475,12 @@ pylv_obj_get_type(pylv_Obj *self, PyObject *args, PyObject *kwds)
         
         if (PyList_Append(list, str)) goto error; // PyList_Append increases refcount
     }
-
-    if (unlock) unlock(unlock_arg);   
+  
     return list;
     
 error:
     Py_XDECREF(list);
-    Py_XDECREF(str);
-    if (unlock) unlock(unlock_arg);   
+    Py_XDECREF(str);  
     return NULL;
 }
 
@@ -468,10 +491,15 @@ lv_res_t pylv_obj_signal_callback(lv_obj_t* obj, lv_signal_t signal, void *param
     lv_res_t result;
     lv_point_t point,drag_vect;
     PyObject *dragging;
+
+    PyGILState_STATE gstate;
+
+    gstate = PyGILState_Ensure();
     
     pyobj = lv_obj_get_free_ptr(obj);
     if (pyobj) {
         result = pyobj->orig_c_signal_func(obj, signal, param);
+        
         if (result == LV_RES_OK) {
             handler = pyobj->signal_func;
             if (handler) {
@@ -514,16 +542,23 @@ lv_res_t pylv_obj_signal_callback(lv_obj_t* obj, lv_signal_t signal, void *param
                 // Release it since we are allowed to call lv_ functions now
                 // (Would otherwise result in deadlock when lvgl calls are made from
                 // with the signal handler)
-                if (unlock) unlock(unlock_arg);            
+                if (unlock) unlock(unlock_arg);
                 PyObject_CallFunction(handler, "iO", (int) signal, pyarg);
-                if (lock) lock(lock_arg);
-
                 
                 Py_DECREF(pyarg);
+                if (PyErr_Occurred()) PyErr_Print();
+                
+                PyGILState_Release(gstate);
+                if (lock) lock(lock_arg);
+
+                return LV_RES_OK;
+
             }
-            if (PyErr_Occurred()) PyErr_Print();
+
         }
     }
+    
+    PyGILState_Release(gstate);
     return LV_RES_OK;
 }
 
@@ -555,12 +590,12 @@ pylv_obj_set_signal_func(pylv_Ddlist *self, PyObject *args, PyObject *kwds)
         self->signal_func = signal_func;
         Py_INCREF(signal_func);
         
-        if (lock) lock(lock_arg);
+        LVGL_LOCK
         if (!self->orig_c_signal_func) {
             self->orig_c_signal_func = lv_obj_get_signal_func(self->ref);
         }
         lv_obj_set_signal_func(self->ref, pylv_obj_signal_callback);
-        if (unlock) unlock(unlock_arg);
+        LVGL_UNLOCK
     }
     Py_XDECREF(tmp); // Old action (tmp) could be NULL
 
@@ -576,9 +611,9 @@ pylv_label_get_letter_pos(pylv_Label *self, PyObject *args, PyObject *kwds)
     lv_point_t pos;
     if (!PyArg_ParseTupleAndKeywords(args, kwds, "i", kwlist , &index)) return NULL;   
     
-    if (lock) lock(lock_arg);
+    LVGL_LOCK
     lv_label_get_letter_pos(self->ref, index, &pos);
-    if (unlock) unlock(unlock_arg);
+    LVGL_UNLOCK
 
     return Py_BuildValue("ii", (int) pos.x, (int) pos.y);
 }
@@ -594,9 +629,9 @@ pylv_label_get_letter_on(pylv_Label *self, PyObject *args, PyObject *kwds)
     pos.x = x;
     pos.y = y;
     
-    if (lock) lock(lock_arg);
+    LVGL_LOCK
     index = lv_label_get_letter_on(self->ref, &pos);
-    if (unlock) unlock(unlock_arg);
+    LVGL_UNLOCK
 
     return Py_BuildValue("i", index);
 }
@@ -613,9 +648,9 @@ pylv_btnm_set_map(pylv_Btnm *self, PyObject *args, PyObject *kwds)
     cmap = buildstringmap(map);
     if (!cmap) return NULL;
     
-    if (lock) lock(lock_arg);
+    LVGL_LOCK
     lv_btnm_set_map(self->ref, cmap);
-    if (unlock) unlock(unlock_arg);
+    LVGL_UNLOCK
 
     // Free the old map (if any) and store the new one to be able to free it later
     if (self->map) PyMem_Free(self->map);
@@ -642,9 +677,9 @@ pylv_list_add(pylv_List *self, PyObject *args, PyObject *kwds)
         return NULL;
     } 
 
-    if (lock) lock(lock_arg);
+    LVGL_LOCK
     ret = pyobj_from_lv(lv_list_add(self->ref, NULL, txt, NULL));
-    if (unlock) unlock(unlock_arg);
+    LVGL_UNLOCK
     
     return ret;
 
@@ -661,7 +696,7 @@ pylv_list_focus(pylv_List *self, PyObject *args, PyObject *kwds)
     int anim_en;
     if (!PyArg_ParseTupleAndKeywords(args, kwds, "O!p", kwlist , &pylv_btn_Type, &obj, &anim_en)) return NULL;
     
-    if (lock) lock(lock_arg);         
+    LVGL_LOCK         
     
     parent = lv_obj_get_parent(obj->ref);
     if (parent) parent = lv_obj_get_parent(parent); // get the obj's parent's parent in a safe way
@@ -673,7 +708,7 @@ pylv_list_focus(pylv_List *self, PyObject *args, PyObject *kwds)
     
     lv_list_focus(obj->ref, anim_en);
     
-    if (unlock) unlock(unlock_arg);
+    LVGL_UNLOCK
     Py_RETURN_NONE;
 }
 
@@ -746,10 +781,10 @@ py{name}_init(pylv_{pyname} *self, PyObject *args, PyObject *kwds)
         return -1;
     }}   
     
-    if (lock) lock(lock_arg);
+    LVGL_LOCK
     self->ref = {name}_create(parent ? parent->ref : NULL, copy ? copy->ref : NULL);
     lv_obj_set_free_ptr(self->ref, self);
-    if (unlock) unlock(unlock_arg);
+    LVGL_UNLOCK
 
     return 0;
 }}
@@ -780,9 +815,9 @@ static PyTypeObject py{name}_Type = {{
 static PyObject *
 pylv_scr_act(PyObject *self, PyObject *args) {
     lv_obj_t *scr;
-    if (lock) lock(lock_arg);
+    LVGL_LOCK
     scr = lv_scr_act();
-    if (unlock) unlock(unlock_arg);
+    LVGL_UNLOCK
     return pyobj_from_lv(scr);
 }
 
@@ -791,9 +826,9 @@ pylv_scr_load(PyObject *self, PyObject *args, PyObject *kwds) {
     static char *kwlist[] = {"scr", NULL};
     pylv_Obj *scr;
     if (!PyArg_ParseTupleAndKeywords(args, kwds, "O!", kwlist, &pylv_obj_Type, &scr)) return NULL;
-    if (lock) lock(lock_arg);
+    LVGL_LOCK
     lv_scr_load(scr->ref);
-    if (unlock) unlock(unlock_arg);
+    LVGL_UNLOCK
     
     Py_RETURN_NONE;
 }
@@ -801,10 +836,10 @@ pylv_scr_load(PyObject *self, PyObject *args, PyObject *kwds) {
 
 static PyObject *
 poll(PyObject *self, PyObject *args) {
-    if (lock) lock(lock_arg);
+    LVGL_LOCK
     lv_tick_inc(1);
     lv_task_handler();
-    if (unlock) unlock(unlock_arg);
+    LVGL_UNLOCK
     
     Py_RETURN_NONE;
 }
@@ -818,9 +853,9 @@ report_style_mod(PyObject *self, PyObject *args, PyObject *kwds) {
         return NULL;
     }
     
-    if (lock) unlock(lock_arg);
+    LVGL_LOCK
     lv_obj_report_style_mod(style ? style->ref: NULL);
-    if (unlock) unlock(unlock_arg);
+    LVGL_UNLOCK
     
     Py_RETURN_NONE;
 }

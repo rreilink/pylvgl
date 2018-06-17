@@ -322,11 +322,10 @@ py{function.name}(pylv_Obj *self, PyObject *args, PyObject *kwds)
         # Result of function is an lv_obj; find or create the corresponding Python
         # object using pyobj_from_lv helper
         code += f'''
-        
-    if (lock) lock(lock_arg);
+    LVGL_LOCK
     lv_obj_t *result = {callcode};
+    LVGL_UNLOCK
     PyObject *retobj = pyobj_from_lv(result);
-    if (unlock) unlock(unlock_arg);
     
     return retobj;
 '''
@@ -334,9 +333,9 @@ py{function.name}(pylv_Obj *self, PyObject *args, PyObject *kwds)
     elif resctype == 'Style_Object *':
         code += f'    return Style_From_lv_style({callcode});\n'
         xcode = f'''
-    if (lock) lock(lock_arg);    
+    LVGL_LOCK    
     lv_style_t *result = {callcode};
-    if (unlock) unlock(unlock_arg);
+    LVGL_UNLOCK
     if (!result) Py_RETURN_NONE;
     
     Style_Object *retobj = PyObject_New(Style_Object, &Style_Type);
@@ -346,16 +345,16 @@ py{function.name}(pylv_Obj *self, PyObject *args, PyObject *kwds)
     
     elif resctype is None:
         code += f'''
-    if (lock) lock(lock_arg);         
+    LVGL_LOCK         
     {callcode};
-    if (unlock) unlock(unlock_arg);
+    LVGL_UNLOCK
     Py_RETURN_NONE;
 '''
     else:
         code += f'''
-    if (lock) lock(lock_arg);         
+    LVGL_LOCK        
     {resctype} result = {callcode};
-    if (unlock) unlock(unlock_arg);
+    LVGL_UNLOCK
 '''
         if resfmt == 'p': # Py_BuildValue does not support 'p' (which is supported by PyArg_ParseTuple..)
             code += '    if (result) {Py_RETURN_TRUE;} else {Py_RETURN_FALSE;}\n'
@@ -371,12 +370,26 @@ def actioncallbackcode(obj, action, attrname):
 lv_res_t py{obj.name}_{action}_callback(lv_obj_t* obj) {{
     pylv_{obj.pyname} *pyobj;
     PyObject *handler;
+    PyGILState_STATE gstate;
+
+    gstate = PyGILState_Ensure();
+    
     pyobj = lv_obj_get_free_ptr(obj);
     if (pyobj) {{
         handler = pyobj->{attrname};
-        if (handler) PyObject_CallFunctionObjArgs(handler, NULL);
-        if (PyErr_Occurred()) PyErr_Print();
+        if (handler) {{
+            if (unlock) unlock(unlock_arg); 
+            PyObject_CallFunctionObjArgs(handler, NULL);
+            if (PyErr_Occurred()) PyErr_Print();
+            
+            PyGILState_Release(gstate);
+            if (lock) lock(lock_arg); 
+            return LV_RES_OK;
+
+        }}
+
     }}
+    PyGILState_Release(gstate);
     return LV_RES_OK;
 }}
 '''
