@@ -1,7 +1,7 @@
 import lvgl
 import faulthandler
 faulthandler.enable()
-from PySide2 import QtGui, QtWidgets, QtCore
+from PyQt5 import QtGui, QtWidgets, QtCore
 app = QtWidgets.QApplication([])
 
 class LvglWindow(QtWidgets.QLabel):
@@ -22,7 +22,8 @@ class LvglWindow(QtWidgets.QLabel):
         lvgl.send_mouse_event(pos.x(), pos.y(), evt.buttons() & QtCore.Qt.LeftButton)
     def update(self):
         # Poll lvgl and display the framebuffer
-        lvgl.poll()
+        for i in range(10):
+            lvgl.poll()
     
         data = bytes(lvgl.framebuffer)
         img = QtGui.QImage(data, lvgl.HOR_RES, lvgl.VER_RES, QtGui.QImage.Format_RGB16) 
