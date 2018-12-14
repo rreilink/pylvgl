@@ -16,14 +16,11 @@ module1 = Extension('lvgl',
     sources = sources
     )
 
-setup (name = 'lvgl',
+dist = setup (name = 'lvgl',
        version = '0.1',
        description = 'lvgl bindings',
        ext_modules = [module1])
 
-if os.name == 'nt':
-    shutil.copy(r'build\lib.win-amd64-3.6\lvgl.cp36-win_amd64.pyd', '.')
+for output in dist.get_command_obj('build_ext').get_outputs():
+    shutil.copy(output, '.')
 
-else:
-    shutil.copy('build/lib.macosx-10.7-x86_64-3.6/lvgl.cpython-36m-darwin.so', '.')
-    
