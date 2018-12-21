@@ -41,4 +41,4 @@ To be implemented:
 
 ## Developer info
 
-`bindingsgen.py` is the Python script that does the parsing of the LittleVGL source code and generates `lvglmodule.c`. It uses regex-based parsing that is far from standard-C compliant, but it is simple and it suffices to parse the LittleVGL source code. It uses `lvglmodule_template.c` as a template.
+`bindingsgen.py` is the Python script that does the parsing of the LittleVGL source code and generates `lvglmodule.c`. Parsing is done using `pycparser`. It uses `lvglmodule_template.c` as a template.
