@@ -43,7 +43,7 @@
 PyObject *typesdict = NULL;
 
 <<<
-static PyTypeObject py{name}_Type;
+static PyTypeObject pylv_{name}_Type;
 >>>
 
 /****************************************************************
@@ -764,25 +764,25 @@ pylv_btn_set_action(pylv_Btn *self, PyObject *args, PyObject *kwds)
 
 <<<
 static void
-py{name}_dealloc(pylv_{pyname} *self) 
+pylv_{name}_dealloc(pylv_{pyname} *self) 
 {{
     // TODO: delete lvgl object? How to manage whether it has references in LittlevGL?
 
 }}
 
 static int
-py{name}_init(pylv_{pyname} *self, PyObject *args, PyObject *kwds) 
+pylv_{name}_init(pylv_{pyname} *self, PyObject *args, PyObject *kwds) 
 {{
     static char *kwlist[] = {{"parent", "copy", NULL}};
     pylv_Obj *parent=NULL;
     pylv_{pyname} *copy=NULL;
     
-    if (!PyArg_ParseTupleAndKeywords(args, kwds, "|O!O!", kwlist, &pylv_obj_Type, &parent, &py{name}_Type, &copy)) {{
+    if (!PyArg_ParseTupleAndKeywords(args, kwds, "|O!O!", kwlist, &pylv_obj_Type, &parent, &pylv_{name}_Type, &copy)) {{
         return -1;
     }}   
     
     LVGL_LOCK
-    self->ref = {name}_create(parent ? parent->ref : NULL, copy ? copy->ref : NULL);
+    self->ref = lv_{name}_create(parent ? parent->ref : NULL, copy ? copy->ref : NULL);
     lv_obj_set_free_ptr(self->ref, self);
     LVGL_UNLOCK
 
@@ -791,9 +791,11 @@ py{name}_init(pylv_{pyname} *self, PyObject *args, PyObject *kwds)
 
 {methodscode}
 
-{methodtablecode}
+static PyMethodDef pylv_{name}_methods[] = {{
+{methodtablecode}    {{NULL}}  /* Sentinel */
+}};
 
-static PyTypeObject py{name}_Type = {{
+static PyTypeObject pylv_{name}_Type = {{
     PyVarObject_HEAD_INIT(NULL, 0)
     .tp_name = "lvgl.{pyname}",
     .tp_doc = "lvgl {pyname}",
@@ -801,9 +803,9 @@ static PyTypeObject py{name}_Type = {{
     .tp_itemsize = 0,
     .tp_flags = Py_TPFLAGS_DEFAULT | Py_TPFLAGS_BASETYPE,
     .tp_new = PyType_GenericNew,
-    .tp_init = (initproc) py{name}_init,
-    .tp_dealloc = (destructor) py{name}_dealloc,
-    .tp_methods = py{name}_methods,
+    .tp_init = (initproc) pylv_{name}_init,
+    .tp_dealloc = (destructor) pylv_{name}_dealloc,
+    .tp_methods = pylv_{name}_methods,
 }};
 >>>
 
@@ -966,16 +968,16 @@ PyInit_lvgl(void) {
     pylv_obj_Type.tp_repr = (reprfunc) Obj_repr;
     
 <<<
-    py{name}_Type.tp_base = {base};
-    if (PyType_Ready(&py{name}_Type) < 0) return NULL;
+    pylv_{name}_Type.tp_base = {base};
+    if (PyType_Ready(&pylv_{name}_Type) < 0) return NULL;
 >>>
 
     Py_INCREF(&Style_Type);
     PyModule_AddObject(module, "Style", (PyObject *) &Style_Type); 
 
 <<<
-    Py_INCREF(&py{name}_Type);
-    PyModule_AddObject(module, "{pyname}", (PyObject *) &py{name}_Type); 
+    Py_INCREF(&pylv_{name}_Type);
+    PyModule_AddObject(module, "{pyname}", (PyObject *) &pylv_{name}_Type); 
 >>>
 
     
@@ -990,7 +992,7 @@ PyInit_lvgl(void) {
     // refcount for typesdict is initally 1; it is used by pyobj_from_lv
     // refcounts to py{name}_Type objects are incremented due to "O" format
     typesdict = Py_BuildValue("{<<<sO>>>}"<<<,
-        "{name}", &py{name}_Type>>>);
+        "lv_{name}", &pylv_{name}_Type>>>);
     
     PyModule_AddObject(module, "framebuffer", PyMemoryView_FromMemory(framebuffer, LV_HOR_RES * LV_VER_RES * 2, PyBUF_READ));
     PyModule_AddObject(module, "HOR_RES", PyLong_FromLong(LV_HOR_RES));

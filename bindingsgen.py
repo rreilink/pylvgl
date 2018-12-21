@@ -2,8 +2,7 @@
 Generate the Python bindings module for LittlevGL
 
 
-This script requires Python >=3.6 for formatted string literals and order-
-preserving dictionaries
+This script requires Python >=3.6 for formatted string literals
 '''
 
 
@@ -12,217 +11,72 @@ from itertools import chain
 import re
 import glob
 import sys
+import collections
 
 assert sys.version_info > (3,6)
 
-FunctionDef = namedtuple('FunctionDef', 'name restype args contents customcode')
-Argument = namedtuple('Argument', 'name type')
-EnumItem = namedtuple('EnumItem', 'name value')
-StructItem = namedtuple('StructItem', 'name type')
+import sourceparser
+c_ast = sourceparser.c_ast
 
-def stripstart(x, start):
-    assert x.startswith(start)
-    return x[len(start):]
-
-def preprocess(filename):
+def astnode_equals(a, b):
     '''
-    Preprocess H-file given by filename, stripping comments, preprocessor 
-    directives, returning everything within the 'extern "C" {' ... '}'
-    clause
-    
+    Helper function to check if two ast nodes are equal (disrecarding their coord)
     '''
     
-    with open(filename, 'r') as file:
-        c = file.read()
-        
-    # C-code preprocessing
-    c = re.sub(r'/\*.*?\*/', '', c, flags = re.DOTALL) # strip comments
-    c = re.sub(r'^\s*#.*', '', c, flags = re.MULTILINE)                          # strip preprocessor  
+    # Must be of the same type
+    if type(a) != type(b):
+        return False
     
-    c = re.sub(r'.*extern "C" {(.*)}.*', r'\1', c, flags = re.DOTALL) # get contents of extern "C" { } if exists (otherwise keep all code)
-    cc = c
-    c = re.sub(r'"([^"\\]|(\\\\)*\\.)*"', '""', c, flags=re.DOTALL)     # strip strings (replace by empty strings)
+    # All atributes must be equal
+    if a.attr_names != b.attr_names:
+        return False
+    
+    for n in a.attr_names:
+        if getattr(a, n) != getattr(b, n):
+            return False
+    
+    # All children must be equal 
+    children_a = a.children()
+    children_b = b.children()
+    if len(children_a) != len(children_b):
+        return False
+    
+    for (name_a, child_a), (name_b, child_b) in zip(children_a, children_b):
+        if name_a != name_b:
+            return False
+        if not astnode_equals(child_a, child_b):
+            return False
+    
+    return True
+    
 
-    assert '@' not in c
-    
-    # Replace all closing braces } at top-level by @
-    
-    result = ''
-    level = 0
-    for ch in c:
-        if ch == '{':
-            level += 1
-        elif ch == '}':
-            assert level > 0
-            level -= 1
-            if level == 0:
-                ch = '@'
-        result += ch
-  
-    return result
-        
+def type_repr(x):
+    ptrs = ''
+    while isinstance(x, c_ast.PtrDecl):
+        x = x.type
+        ptrs += '*'
+    if isinstance(x, c_ast.FuncDecl):
+        return f'<function{ptrs}>'
+    assert isinstance(x, c_ast.TypeDecl)
+    return ' '.join(x.type.names) + ptrs 
 
-def parse(filename, functions, enums):
+def flatten_struct(s, prefix=''):
     '''
-    Parse H-file given by filename; add all function definitions to functions
-    dict (dict of name->FunctionDef namedtuples) and add all enum definitions to
-    enums dict (dict of name->list of EnumItem namedtuples)
+    Given a struct-of-structs c_ast.Struct object, yield pairs of
+    (datatype, "parent.child.subchild")
     '''
-
-    c = preprocess(filename)
-    
-    # Remove all enum definitions and store them (as str) into cenums list
-    cenums = []
-    c = re.sub(r'typedef\s+enum\s+{(.*?)@\s*([a-zA-Z0-9_]+);', lambda x: cenums.append(x.groups()) or '', c, flags = re.DOTALL)
-
-    
-    # Process enums
-    for enumcode, enumname in cenums:
-        value = 0
-        values = []
-        for item in enumcode.split(','):
-            item = re.sub(r'\s+', '', item) # remove all whitespace (also internal)
-            if not item:
-                break
-            name, sep, valuestr = item.partition('=')
-            if valuestr:
-                value = int(valuestr[2:],16) if valuestr.startswith('0x') else int(valuestr)
-            values.append(EnumItem(name, value))
-            value += 1
-        
-        enums[enumname] = values
+    for d in s.decls:
+        if isinstance(d.type.type, c_ast.Struct):
+            yield from flatten_struct(d.type.type, prefix+d.name+'.')
+        elif isinstance(d.type.type, c_ast.IdentifierType):
+            bitsize = ':' + d.bitsize.value if d.bitsize else ''
+            yield (' '.join(d.type.type.names)+bitsize, prefix+d.name)
 
 
-    # Find method definitions
-    for static, restype, resptr, name, argsstr, contents in re.findall(r'(static\s+inline\s+)?(bool|void|\w+_t)(\s+\*)?\s+(\w+)\(([\w\s*&,()]*?)\)\s*(?:{([^@]*)@|;)', c, re.DOTALL):
 
-        if '(' in argsstr:
-            print(f'{name} cannot be bound since it has a function pointer as argument')
-            continue
-            
-        args = []
-        if argsstr.strip() != 'void':
-            for arg in argsstr.split(','):
-                arg = arg.strip()
-                
-                const, argtype, argptr, argname = re.match(
-                        r'(const\s+)?([A-Za-z0-9_]+)\s*(\*+| )\s*([A-Za-z0-9_]+)$', arg).groups()
-                argtype += argptr.strip()
-                
-                args.append(Argument(argname, argtype))
-
-        functions[name]=(FunctionDef(name, restype + resptr.strip(), args, contents, False))
-
-# Use C-files to get class hierarchy    
-functions_c = {}
-enums_c = {}
-
-for filename in [f for f in glob.glob('lvgl/lv_objx/*.c') if not f.endswith('lv_objx_templ.c')]:
-    parse(filename, functions_c, enums_c)
-
-ancestors = {}
-for function in functions_c.values():
-    if function.name.endswith('_create'):
-        results = re.findall('(lv_[A-Za-z0-9_]+)_create\s*\(\s*par,', function.contents)
-        assert len(results) == 1
-        ancestors[function.name[:-7]] = results[0]
-
-# Sort the ancestors dictorary such that no object comes before its ancestor
-sortedancestors = {'lv_obj': None}
-while ancestors:
-    remaining = list(ancestors.items())
-    for obj, anch in remaining:
-        if anch in sortedancestors:
-            sortedancestors[obj] = anch
-            ancestors.pop(obj)
-
-ancestors = sortedancestors
-
-# Use H-files to get external function definitions    
-functions = {}
-enums = {}
-
-for filename in ['lvgl/lv_core/lv_obj.h'] + [f for f in glob.glob('lvgl/lv_objx/*.h') if not f.endswith('lv_objx_templ.h')]:
-    parse(filename, functions, enums)
-
-assert(len(functions) == 364)
-
-skipfunctions = {
-    # Not present in the C-files, only in the headers
-    'lv_ddlist_close_en',
-    'lv_ta_get_cursor_show',
-    
-    # Don't tamper with deleting objects which have Python references
-    'lv_obj_del',
-    'lv_obj_clean',
-    
-    # free_ptr is used to store reference to Python objects, don't tamper with that!
-    'lv_obj_set_free_ptr',
-    'lv_obj_get_free_ptr',
-    
-    # Just use Python attributes for custom properties of objects
-    'lv_obj_set_free_num',
-    'lv_obj_get_free_num',
-    'lv_obj_allocate_ext_attr',
-    'lv_obj_get_ext_attr',
-    
-    # Do not work since they require lv_obj_t == NULL which is not implemented
-    # lv_obj_getchildren is implemented instead which returns a list
-    'lv_obj_get_child',
-    'lv_obj_get_child_back',
-    
-    # Not compatible since it is like a 'class method' (it does not have 
-    # lv_obj_t* as first argument). Implemented as lvgl.report_style_mod
-    'lv_obj_report_style_mod',
-    
-}
-
-def objectname(functionname):
-    match =  re.match(r'(lv_[a-zA-Z0-9]+)_[a-zA-Z0-9_]+', function.name)
-    return match.group(1) if match else None
-
-#
-# Filter (static inline) functions that only call the same function, but on their
-# anchestor. This is covered by Python inheritance so no need to implement those
-# functions
-#
-
-for function in functions.values():
-    # Analyze the contents of the function declaration (this would be empty for
-    # pure declarations since we have analyzed the H-file, not the c-file)
-    contents = function.contents.strip();
-    if not contents:
-        continue
-        
-    # Ignore the 'return ' statement
-    if contents.startswith('return '): contents = contents[6:].strip()
-    
-    # Determine the object of this function, and its ancestor object
-    objname = objectname(function.name)
-    ancestor = ancestors[objname]
-    methodname = stripstart(function.name, objname)
-    while ancestor:
-        # Determine what this same function call would look like, if it was
-        # called on its ancestor
-        callcode = ancestor + methodname + '(' + ', '.join(a.name for a in function.args) + ');'
-        
-        if callcode == contents: # Same? Then no need to implement Python code for this function
-            skipfunctions.add(function.name)
-            break
-
-        # Try the ancestor's ancestor
-        ancestor = ancestors[ancestor]
-
-#
-# Mark which functions have a custom implementation (in lvglmodule_template.c)
-#
-for custom in ('lv_obj_get_children', 'lv_obj_get_signal_func', 'lv_obj_set_signal_func', 'lv_label_get_letter_pos', 'lv_label_get_letter_on', 'lv_btnm_set_map', 'lv_list_add', 'lv_btn_set_action', 'lv_btn_get_action','lv_obj_get_type', 'lv_list_focus'):
-    functions[custom] = FunctionDef(custom, None, [], None, True)
-
-
-#
-# Grouping of functions with objects and selection of functions
-#
+def stripstart(s, start):
+    assert s.startswith(start)
+    return s[len(start):]
 
 
 typeconv = {
@@ -241,87 +95,238 @@ typeconv = {
     
     }
 
-argtypes_miss = Counter()
+paramtypes_miss = Counter()
 restypes_miss = Counter()
 
 
-def functioncode(function, object):
-    startCode = f'''
+class CustomMethod(c_ast.FuncDef):
+    '''
+    For methods which have a custom implementation in the template
+    Build an empty c_ast.FuncDef
+    '''
+    def __init__(self, name):
+        super().__init__(c_ast.Decl(name, [], [], [], c_ast.FuncDecl(c_ast.ParamList([]), None, None),None,None,None), None, None)
+
+
+class Object:
+    '''
+    Representation of an Lvgl object for which to generate bindings
+    
+    To be overridden by language-specific classes
+    '''
+    def __init__(self, obj, ancestor, enums):
+        self.name = obj.name
+        self.lv_name = 'lv_' + self.name
+        self.ancestor = ancestor
+        self.methods = obj.methods.copy()
+        self.enums = enums # reference to enums found by BindingsGenerator.parse()
+        self.customstructfields = []
+        
+        self.prune_derived_methods()
+        
+        self.init()
+    
+    def init(self):
+        pass
+    
+    def reorder_methods(self, *swaps):
+        '''
+        Reorder the methods of this object. This is used purely to check that
+        a new bindings generator yields the same output as a previous one
+        '''
+        # TODO:REMOVE
+        for item, after in swaps:
+            # Could be way more efficient by not creating new list/ordereddict every time, but it's for testing only anyway
+            methods = list(self.methods.items())
+            names = list(self.methods.keys())
+            i1 = names.index(item)
+            item = methods.pop(i1)
+            self.methods = collections.OrderedDict(methods)
+            
+            methods = list(self.methods.items())
+            names = list(self.methods.keys())
+            i2 = 0 if after == 0 else names.index(after)+1
+            methods.insert(i2, item)
+            
+        
+            self.methods = collections.OrderedDict(methods)
+    
+    def prune_derived_methods(self):
+        '''
+        In lvgl source, some method are just a call to a superclass's method
+        Since this is already covered by inheritance, we can prune those methods.
+        
+        We do this by looking at the Abstract Syntax Tree (ast) of each method.
+        If it only contains a call to a method with the same name, on any of its
+        ancestors, that method can be pruned.
+        '''
+        prunelist = []
+        
+        for methodname, method in self.methods.items():
+            if not method.body.block_items or len(method.body.block_items) != 1:
+                continue
+            
+            method_contents = method.body.block_items[0]
+            
+            # params = list of parameter names (list of c_ast.ID objects)
+            params = [c_ast.ID(param.name) for param in method.decl.type.args.params]
+            
+            
+            ancestor = self.ancestor
+            while ancestor:
+                function_name = f'lv_{ancestor.name}_{methodname}'
+                
+                # Define two options which should be pruned: either with or without return
+                expect1 = c_ast.FuncCall(c_ast.ID(function_name),c_ast.ExprList(params) )
+                expect2 = c_ast.Return(expect1)
+                
+                if astnode_equals(method_contents, expect1) or astnode_equals(method_contents, expect2):
+                    prunelist.append(methodname)
+                
+                ancestor = ancestor.ancestor
+            
+        for item in prunelist:
+            del self.methods[item]
+
+    
+    
+    def __getitem__(self, name):
+        '''
+        Allow an Object instance to be used in format, giving access to the fields
+        '''
+        return getattr(self, name)
+
+    def get_std_actions(self):
+        actions = []
+        setterstart = self.lv_name + '_set_'
+
+        for method in self.methods.values():
+            params = method.decl.type.args.params
+            if len(params) == 2 and type_repr(params[1].type) == 'lv_action_t':
+                actions.append(stripstart(method.decl.name, setterstart))
+            
+        
+        return actions
+
+class PythonObject(Object):
+        
+    TYPECONV = {
+        'lv_obj_t*': ('O!', 'pylv_Obj *'),     # special case: conversion from/to Python object
+        'lv_style_t*': ('O!', 'Style_Object *'), # special case: conversion from/to Python Style object
+        'bool':      ('p', 'int'),
+        'uint8_t':   ('b', 'unsigned char'),
+        'lv_opa_t':  ('b', 'unsigned char'),
+        'lv_color_t': ('H', 'unsigned short int'),
+        'char':      ('c', 'char'),
+        'char*':     ('s', 'char *'),
+        'lv_coord_t':('h', 'short int'),
+        'uint16_t':  ('H', 'unsigned short int'), 
+        'int16_t':   ('h', 'short int'),
+        'uint32_t':  ('I', 'unsigned int'),
+        
+        }
+    
+
+    
+    def init(self):
+        
+        if self.name == 'obj':
+            self.base = 'NULL'
+        else:
+            self.base = '&pylv_' + self.ancestor.name + '_Type'
+
+    def get_structfields(self, recurse = False):
+        actionfields = [f'PyObject *{action};' for action in self.get_std_actions()]
+        myfields = actionfields + self.customstructfields
+        
+        if not myfields and not recurse:
+            return []
+        
+        return (self.ancestor.get_structfields(True) if self.ancestor else []) + myfields
+
+
+    def build_methodcode(self, method):
+        object = self
+        
+        if isinstance(method, CustomMethod):
+            return '' # Custom implementation is in lvglmodule_template.c
+    
+        
+        startCode = f'''
 static PyObject*
-py{function.name}(pylv_Obj *self, PyObject *args, PyObject *kwds)
+py{method.decl.name}(pylv_Obj *self, PyObject *args, PyObject *kwds)
 {{
 '''
 
-    notImplementedCode = startCode + '    PyErr_SetString(PyExc_NotImplementedError, "not implemented");\n    return NULL;\n}\n'
-
-    if function.customcode:
-        return '' # Custom implementation is in lvglmodule_template.c
-    
-    argnames = []
-    argctypes = []
-    argfmt = ''
-    for argname, argtype in function.args:
-        if argtype in enums:
-            fmt, ctype = 'i', 'int'
-        else:
-            try:
-                fmt, ctype = typeconv[argtype]
-            except KeyError:
-                print(f'{function.name}: Argument type not found >{argtype}< ', [','.join(arg.name for arg in function.args)])
-                argtypes_miss.update((argtype,))
-                return notImplementedCode;
-        argnames.append(argname)
-        argctypes.append(ctype)
-        argfmt += fmt
-    
-    
-    if function.restype == 'void':
-        resfmt, resctype = None, None
-    else:
-        if function.restype in enums:
-            resfmt, resctype = 'i', 'int'
-        else:
-            try:
-                resfmt, resctype = typeconv[function.restype]
-            except KeyError:
-                print(f'{function.name}: Return type not found >{function.restype}< ')
-                restypes_miss.update((function.restype,))
-                return notImplementedCode            
-
-    # First argument should always be a reference to the object itself
-    assert argctypes and argctypes[0] == 'pylv_Obj *'
-    argnames.pop(0)
-    argctypes.pop(0)
-    argfmt = argfmt[2:]
-    
-    code = startCode
-    kwlist = ''.join('"%s", ' % name for name in argnames)
-    code += f'    static char *kwlist[] = {{{kwlist}NULL}};\n';
-    
-    crefvarlist = ''
-    cvarlist = ''
-    for name, ctype in zip(argnames, argctypes):
-        code += f'    {ctype} {name};\n'
-        if ctype == 'pylv_Obj *' : # Object, convert from Python
-            crefvarlist += f', &pylv_obj_Type, &{name}'
-            cvarlist += f', {name}->ref'
+        notImplementedCode = startCode + '    PyErr_SetString(PyExc_NotImplementedError, "not implemented");\n    return NULL;\n}\n'
         
-        elif ctype == 'Style_Object *': # Style object
-            crefvarlist += f', &Style_Type, &{name}'
-            cvarlist += f', {name}->ref'
-            
+        paramnames = []
+        paramctypes = []
+        paramfmt = ''
+        for param in method.decl.type.args.params:
+            paramtype = type_repr(param.type)
+            if paramtype in self.enums:
+                fmt, ctype = 'i', 'int'
+            else:
+                try:
+                    fmt, ctype = self.TYPECONV[paramtype]
+                except KeyError:
+                    print(f'{method.decl.name}: Parameter type not found >{paramtype}< ')
+                    paramtypes_miss.update((paramtype,))
+                    return notImplementedCode;
+            paramnames.append(param.name)
+            paramctypes.append(ctype)
+            paramfmt += fmt
+        
+        restype = type_repr(method.decl.type.type)
+        
+        if restype == 'void':
+            resfmt, resctype = None, None
         else:
-            crefvarlist += f', &{name}'
-            cvarlist += f', {name}'
+            if restype in self.enums:
+                resfmt, resctype = 'i', 'int'
+            else:
+                try:
+                    resfmt, resctype = self.TYPECONV[restype]
+                except KeyError:
+                    print(f'{method.decl.name}: Return type not found >{restype}< ')
+                    restypes_miss.update((restype,))
+                    return notImplementedCode            
     
-    code += f'    if (!PyArg_ParseTupleAndKeywords(args, kwds, "{argfmt}", kwlist {crefvarlist})) return NULL;\n'
-    
-    callcode = f'{function.name}(self->ref{cvarlist})'
-    
-    if resctype == 'pylv_Obj *':
-        # Result of function is an lv_obj; find or create the corresponding Python
-        # object using pyobj_from_lv helper
-        code += f'''
+        # First argument should always be a reference to the object itself
+        assert paramctypes and paramctypes[0] == 'pylv_Obj *'
+        paramnames.pop(0)
+        paramctypes.pop(0)
+        paramfmt = paramfmt[2:]
+        
+        code = startCode
+        kwlist = ''.join('"%s", ' % name for name in paramnames)
+        code += f'    static char *kwlist[] = {{{kwlist}NULL}};\n';
+        
+        crefvarlist = ''
+        cvarlist = ''
+        for name, ctype in zip(paramnames, paramctypes):
+            code += f'    {ctype} {name};\n'
+            if ctype == 'pylv_Obj *' : # Object, convert from Python
+                crefvarlist += f', &pylv_obj_Type, &{name}'
+                cvarlist += f', {name}->ref'
+            
+            elif ctype == 'Style_Object *': # Style object
+                crefvarlist += f', &Style_Type, &{name}'
+                cvarlist += f', {name}->ref'
+                
+            else:
+                crefvarlist += f', &{name}'
+                cvarlist += f', {name}'
+        
+        code += f'    if (!PyArg_ParseTupleAndKeywords(args, kwds, "{paramfmt}", kwlist {crefvarlist})) return NULL;\n'
+        
+        callcode = f'{method.decl.name}(self->ref{cvarlist})'
+        
+        if resctype == 'pylv_Obj *':
+            # Result of function is an lv_obj; find or create the corresponding Python
+            # object using pyobj_from_lv helper
+            code += f'''
     LVGL_LOCK
     lv_obj_t *result = {callcode};
     LVGL_UNLOCK
@@ -330,44 +335,35 @@ py{function.name}(pylv_Obj *self, PyObject *args, PyObject *kwds)
     return retobj;
 '''
     
-    elif resctype == 'Style_Object *':
-        code += f'    return Style_From_lv_style({callcode});\n'
-        xcode = f'''
-    LVGL_LOCK    
-    lv_style_t *result = {callcode};
-    LVGL_UNLOCK
-    if (!result) Py_RETURN_NONE;
-    
-    Style_Object *retobj = PyObject_New(Style_Object, &Style_Type);
-    if (retobj) retobj->ref = result;
-    return (PyObject *)retobj;
-'''
-    
-    elif resctype is None:
-        code += f'''
+        elif resctype == 'Style_Object *':
+            code += f'    return Style_From_lv_style({callcode});\n'
+        
+        elif resctype is None:
+            code += f'''
     LVGL_LOCK         
     {callcode};
     LVGL_UNLOCK
     Py_RETURN_NONE;
 '''
-    else:
-        code += f'''
+        else:
+            code += f'''
     LVGL_LOCK        
     {resctype} result = {callcode};
     LVGL_UNLOCK
 '''
-        if resfmt == 'p': # Py_BuildValue does not support 'p' (which is supported by PyArg_ParseTuple..)
-            code += '    if (result) {Py_RETURN_TRUE;} else {Py_RETURN_FALSE;}\n'
-        else:
-            code += f'    return Py_BuildValue("{resfmt}", result);\n'
+            if resfmt == 'p': # Py_BuildValue does not support 'p' (which is supported by PyArg_ParseTuple..)
+                code += '    if (result) {Py_RETURN_TRUE;} else {Py_RETURN_FALSE;}\n'
+            else:
+                code += f'    return Py_BuildValue("{resfmt}", result);\n'
    
             
         
-    return code + '}\n';
+        return code + '}\n';
 
-def actioncallbackcode(obj, action, attrname):
-    return f'''
-lv_res_t py{obj.name}_{action}_callback(lv_obj_t* obj) {{
+    def build_actioncallbackcode(self, action, attrname):
+        obj = self
+        return f'''
+lv_res_t pylv_{obj.name}_{action}_callback(lv_obj_t* obj) {{
     pylv_{obj.pyname} *pyobj;
     PyObject *handler;
     PyGILState_STATE gstate;
@@ -394,51 +390,9 @@ lv_res_t py{obj.name}_{action}_callback(lv_obj_t* obj) {{
 }}
 '''
 
-class Object:
-    def __init__(self, name, ancestor):
-        assert name.startswith('lv_')
-        
-        self.name = name
-        self.ancestor = ancestor
-        self.functions = []
-        self.customstructfields = []
-        
-        if self.name == 'lv_obj':
-            self.base = 'NULL'
-        else:
-            self.base = '&py' + self.ancestor.name + '_Type'
-    
-    def __getitem__(self, name):
-        '''
-        Allow an Object instance to be used in format, giving access to the fields
-        '''
-        return getattr(self, name)
-
-    def get_std_actions(self):
-        actions = []
-        setterstart = self.name + '_set_'
-
-        for function in self.functions:
-            args = function.args
-            if len(args) == 2 and args[1].type == 'lv_action_t':
-                assert function.name.startswith(setterstart)
-                actions.append(function.name[len(setterstart):])
-                
-        
-        return actions
-
-    def get_structfields(self, recurse = False):
-        actionfields = [f'PyObject *{action};' for action in self.get_std_actions()]
-        myfields = actionfields + self.customstructfields
-        
-        if not myfields and not recurse:
-            return []
-        
-        return (self.ancestor.get_structfields(True) if self.ancestor else []) + myfields
-
     @property
     def pyname(self): # The name of the class in Python lv_obj --> Obj
-        return self.name[3:].title()   
+        return self.name.title()   
 
     @property
     def structcode(self):
@@ -454,17 +408,17 @@ class Object:
 
     @property
     def methodscode(self):
-        # Method definitions for the object methods (see also functioncode function)
+        # Method definitions for the object methods (see also _methodcode function)
         code = ''
         actiongetset = set()
         for action in self.get_std_actions():
-            actiongetset.add(self.name + '_get_' + action)
-            actiongetset.add(self.name + '_set_' + action)
-            code += actioncallbackcode(self, action, action)
+            actiongetset.add(self.lv_name + '_get_' + action)
+            actiongetset.add(self.lv_name + '_set_' + action)
+            code += self.build_actioncallbackcode(action, action)
             code += f'''
 
 static PyObject *
-py{self.name}_get_{action}(pylv_{self.pyname} *self, PyObject *args, PyObject *kwds)
+pylv_{self.name}_get_{action}(pylv_{self.pyname} *self, PyObject *args, PyObject *kwds)
 {{
     static char *kwlist[] = {{NULL}};
     if (!PyArg_ParseTupleAndKeywords(args, kwds, "", kwlist)) return NULL;   
@@ -477,7 +431,7 @@ py{self.name}_get_{action}(pylv_{self.pyname} *self, PyObject *args, PyObject *k
 }}
 
 static PyObject *
-py{self.name}_set_{action}(pylv_{self.pyname} *self, PyObject *args, PyObject *kwds)
+pylv_{self.name}_set_{action}(pylv_{self.pyname} *self, PyObject *args, PyObject *kwds)
 {{
     static char *kwlist[] = {{"action", NULL}};
     PyObject *action, *tmp;
@@ -489,7 +443,7 @@ py{self.name}_set_{action}(pylv_{self.pyname} *self, PyObject *args, PyObject *k
     }} else {{
         self->{action} = action;
         Py_INCREF(action);
-        {self.name}_set_{action}(self->ref, py{self.name}_{action}_callback);
+        lv_{self.name}_set_{action}(self->ref, pylv_{self.name}_{action}_callback);
     }}
     Py_XDECREF(tmp); // Old action (tmp) could be NULL
 
@@ -499,171 +453,238 @@ py{self.name}_set_{action}(pylv_{self.pyname} *self, PyObject *args, PyObject *k
             
 '''
             
-        for func in self.functions:
-            if func.name not in actiongetset:
-                code += functioncode(func, self)
+        for method in self.methods.values():
+            if method.decl.name not in actiongetset:
+                code += self.build_methodcode(method)
                 
         return code
     
     @property
     def methodtablecode(self):
         # Method table
-        methodtablecode = f'static PyMethodDef py{self.name}_methods[] = {{\n'
+        methodtablecode = ''
     
-        for func in self.functions:
-            methodname = func.name[len(self.name)+1:]
+        for methodname, method in self.methods.items():
             
-            methodtablecode += f'    {{"{methodname}", (PyCFunction) py{func.name}, METH_VARARGS | METH_KEYWORDS, NULL}},\n'
+            methodtablecode += f'    {{"{methodname}", (PyCFunction) py{method.decl.name}, METH_VARARGS | METH_KEYWORDS, NULL}},\n'
 
-        methodtablecode += '    {NULL}  /* Sentinel */\n};'
     
         return methodtablecode
 
 
-# Step 1: determine which objects exist based on the _create functions
-objects = {}
-for name, ancestor in sortedancestors.items():
-    objects[name] = Object(name, objects.get(ancestor))
-
-# Step 2: distribute the functions over the objects
-for function in functions.values():
-    object = objects.get(objectname(function.name))
-    if object is None:
-        print(function.name)
-    elif not function.name.endswith('_create') and function.name not in skipfunctions:
-        object.functions.append(function)
-
-# Step 3: custom options
-fields = {}
-
-objects['lv_btnm'].customstructfields.append('const char **map;')
-objects['lv_obj'].customstructfields.extend(['PyObject_HEAD', 'lv_obj_t *ref;', 'PyObject *signal_func;', 'lv_signal_func_t orig_c_signal_func;'])
-objects['lv_btn'].customstructfields.append(f'PyObject *actions[LV_BTN_ACTION_NUM];')
-
-# Button callback handlers
-btncallbacks = ''
-btncallbacknames = []
-for i, btn_action in enumerate(enums['lv_btn_action_t'][:-1]): # last is LV_BNT_ACTION_NUM
-    assert btn_action.value == i
-    actionname = 'action_' + stripstart(btn_action.name, 'LV_BTN_ACTION_').lower()
-    btncallbacks += actioncallbackcode(objects['lv_btn'], actionname, f'actions[{i}]')
-    btncallbacknames.append(f'pylv_btn_{actionname}_callback')
+class BindingsGenerator:
+    templatefile = None
+    objectclass = None
+    outputfile = None
     
-btncallbacks += f'static lv_action_t pylv_btn_action_callbacks[LV_BTN_ACTION_NUM] = {{{", ".join(btncallbacknames)}}};'
-
-fields['BTN_CALLBACKS'] = btncallbacks
-
-enumcode = ''
-# Adding of the enum constants to the module
-for name, items in enums.items():
-    for name, value in items:
-        assert name.startswith('LV_')
-        enumcode += (f'    PyModule_AddIntConstant(module, "{name[3:]}", {value});\n')
-
-fields['ENUM_ASSIGNMENTS'] = enumcode
-
-# Style
-def generate_style_getset_table(stylestruct):
-
-    # Recursively flatten struct-within-struct:
-    # `struct { int a; int b;} c;` becomes `int c.a; int c.b;`
-    # (which is invalid C-code but it is parsed appropriately later)
-    def flatten_struct_contents(match):
-        contents, name = match.groups()
-        contents = re.sub(r'([A-Za-z0-9_\.]+\s*(:\s*[0-9]+\s*)?;)', name + r'.\1', contents)
-        return contents
+    def parse(self):
+        self.parseresult = sourceparser.LvglSourceParser().parse_sources('lvgl')
     
-    while True:
-        stylestruct, replacements = re.subn(r'struct\s{([^{}]*)}\s*([a-zA-Z0-9_]*);', flatten_struct_contents, stylestruct)
-        if not replacements:
-            break
-    
-    # Generate the table of getters and setters
-    # The closure field of PyGetSetDef is used as offset into the lv_style_t struct
-    table = ''
-    t_types = {
-        'uint8_t:1': None,
-        'uint8_t': 'uint8',
-        'lv_color_t': 'uint16',
-        'lv_opa_t': 'uint8',
-        'lv_coord_t': 'int16',
-        'lv_border_part_t': None,
-        'const lv_font_t *': None,
-    
-        }
-    for statement in stylestruct.strip().split(';'):
-        if not statement:
-            continue
-        type, name, bits = re.match(r'\s*(.*)\s+([A-Za-z0-9_\.]+)\s*(:\s*[0-9]+\s*)?', statement, re.DOTALL).groups()
-
-        t_type = t_types[type+(bits or '')]
+    def generate(self):
         
-        if t_type:
-            table += f'   {{"{name.replace(".", "_")}", (getter) Style_get_{t_type}, (setter) Style_set_{t_type}, "{name}", (void*)offsetof(lv_style_t, {name})}},\n'
+        self.objects = objects = collections.OrderedDict()
+        for name, object in self.parseresult.objects.items():
+            ancestor = objects[object.ancestor.name] if object.ancestor else None
+            objects[name] = self.objectclass(object, ancestor, self.parseresult.enums)
 
-    return table
-
-style_h_code = preprocess('lvgl/lv_core/lv_style.h')
-stylestruct = re.findall(r'typedef\s+struct\s*{(.*?)@\s*lv_style_t\s*;', style_h_code, re.DOTALL)[0]
-
-fields['STYLE_GETSET'] = generate_style_getset_table(stylestruct)
-
-# Create module attributes for the existing styles defined in lv_style.h
-style_assignments = ''
-for style in re.findall(r'extern\s+lv_style_t\s+lv_([A-Za-z0-9_]+)\s*;', style_h_code):
-    style_assignments += f'    PyModule_AddObject(module, "{style}",Style_From_lv_style(&lv_{style}));\n'
-    
-
-fields['STYLE_ASSIGNMENTS'] = style_assignments
-
-# Find symbol definitions
-symbol_assignments = ''
-with open('lvgl/lv_misc/lv_fonts/lv_symbol_def.h') as file:
-    symbol_def_h_code = file.read()
-    for symbol_name, symbol_definition in re.findall(r'#define\s+(SYMBOL_\w+)\s+("\\xEF\\x80\\x[0-9A-Z]+")', symbol_def_h_code):
-        symbol_assignments += f'    PyModule_AddStringConstant(module, "{symbol_name}", {symbol_definition});\n'    
         
-fields['SYMBOL_ASSIGNMENTS'] = symbol_assignments
+        self.customize(objects)
+        
+        #
+        # Fill in the template
+        #
+        with open(self.templatefile) as templatefile:
+            template = templatefile.read()
+        
+        
+        def substitute_per_object(match):
+            '''
+            Given a template, fill it in for each object and return the concatenated result
+            '''
+            
+            template = match.group(1)
+            ret = ''
+            for obj in objects.values():
+                ret += template.format_map(obj)
+        
+            return ret
+        
+        # Substitute per-object sections
+        modulecode = re.sub(r'<<<(.*?)>>>', substitute_per_object, template, flags = re.DOTALL)
+        
+        # Substitute general fields
+        modulecode = re.sub(r'<<(.*?)>>', lambda x: getattr(self, 'get_' + x.group(1))(), modulecode)
 
-# Find font definitions
 
-font_assignments = ''
-with open('lv_conf.h') as file:
-    lv_conf_h = file.read()
+        with open(self.outputfile, 'w') as modulefile:
+            modulefile.write(modulecode)
 
-    for fontname, bpp in re.findall(r'#define USE_LV_(FONT_\w+)\s+(\d+)', lv_conf_h):
-        if int(bpp) != 0:
-            fontname = fontname.lower()
-            font_assignments += f'    PyModule_AddObject(module, "{fontname}", Font_From_lv_font(&lv_{fontname}));\n'
-
-fields['FONT_ASSIGNMENTS'] = font_assignments
-
-#
-# Fill in the template
-#
-with open('lvglmodule_template.c') as templatefile:
-    template = templatefile.read()
+    def customize(self, objects):
+        pass
 
 
-def substitute_per_object(match):
-    '''
-    Given a template, fill it in for each object and return the concatenated result
-    '''
+skipfunctions = {
+
+    # Don't tamper with deleting objects which have Python references
+    'lv_obj_del',
+    'lv_obj_clean',
     
-    template = match.group(1)
-    ret = ''
-    for obj in objects.values():
-        ret += template.format_map(obj)
+    # free_ptr is used to store reference to Python objects, don't tamper with that!
+    'lv_obj_set_free_ptr',
+    'lv_obj_get_free_ptr',
+    
+    # Just use Python attributes for custom properties of objects
+    'lv_obj_set_free_num',
+    'lv_obj_get_free_num',
+    'lv_obj_allocate_ext_attr',
+    'lv_obj_get_ext_attr',
+    
+    # Do not work since they require lv_obj_t == NULL which is not implemented
+    # lv_obj_getchildren is implemented instead which returns a list
+    'lv_obj_get_child',
+    'lv_obj_get_child_back',
+    
+    # Not compatible since it is like a 'class method' (it does not have 
+    # lv_obj_t* as first argument). Implemented as lvgl.report_style_mod
+    'lv_obj_report_style_mod',
+    
+}
 
-    return ret
 
-# Substitute per-object sections
-modulecode = re.sub(r'<<<(.*?)>>>', substitute_per_object, template, flags = re.DOTALL)
+# Remove functions that were not discovered in earlier bindings generator
+# TODO:REMOVE
+skipfunctions.update({
+    'lv_obj_animate',
+    'lv_win_get_title',
+    'lv_label_get_text',
+    'lv_btnm_get_map',
+    'lv_img_get_file_name',
+    'lv_mbox_get_text',
+    'lv_ta_get_text',
+    'lv_ddlist_get_options',
+    'lv_ddlist_close',
+    'lv_list_get_btn_text',
+    'lv_cb_get_text',
+})
+        
+        
 
-# Substitute general fields
-modulecode = re.sub(r'<<(.*?)>>', lambda x: fields[x.group(1)], modulecode)
+class PythonBindingsGenerator(BindingsGenerator):
+    templatefile = 'lvglmodule_template.c'
+    objectclass = PythonObject
+    outputfile = 'lvglmodule.c'
+
+    def customize(self, objects):
+        objects = self.objects
+        objects['btnm'].customstructfields.append('const char **map;')
+        objects['obj'].customstructfields.extend(['PyObject_HEAD', 'lv_obj_t *ref;', 'PyObject *signal_func;', 'lv_signal_func_t orig_c_signal_func;'])
+        objects['btn'].customstructfields.append(f'PyObject *actions[LV_BTN_ACTION_NUM];')
 
 
-with open('lvglmodule.c', 'w') as modulefile:
-    modulefile.write(modulecode)
+        for custom in ('lv_obj_get_children', 'lv_obj_get_signal_func', 'lv_obj_set_signal_func', 'lv_label_get_letter_pos', 'lv_label_get_letter_on', 'lv_btnm_set_map', 'lv_list_add', 'lv_btn_set_action', 'lv_btn_get_action','lv_obj_get_type', 'lv_list_focus'):
+            
+            obj, method = re.match('lv_([A-Za-z0-9]+)_(\w+)$', custom).groups()
+            objects[obj].methods[method] = CustomMethod(custom)
+
+        for function in skipfunctions:
+            obj, method = re.match('lv_([A-Za-z0-9]+)_(\w+)$', function).groups()
+            del objects[obj].methods[method]
+    
+        # Reorder methods to enable comparison of output with previous binding generator
+        # TODO:REMOVE
+        objects['lmeter'].reorder_methods(('get_style_bg', 'get_scale_angle'))
+        objects['win'].reorder_methods(('set_sb_mode', 'set_btn_size'))
+        objects['img'].reorder_methods(('set_src', 0), ('set_auto_size', 'set_file'), ('get_upscale', 'get_auto_size'))
+        objects['line'].reorder_methods(('set_upscale', 'set_y_invert'), ('get_upscale', 'get_y_inv'))
+        objects['gauge'].reorder_methods(('set_critical_value', 'set_value'), ('get_critical_value', 'get_needle_count'))
+        objects['page'].reorder_methods(('get_scrl', 0), ('set_rel_action', 'get_scrl'), ('set_pr_action', 'set_rel_action'), ('set_sb_mode', 'set_pr_action'), ('set_style', 'set_scrl_layout'), ('get_sb_mode', 'set_style'))
+    
+        objects['sw'].reorder_methods(('get_state', 'set_style'))
+        objects['cb'].reorder_methods(('set_text', 0), ('set_style', 'set_action'))
+    
+        # Inconsistency between lv_ddlist_open argument name (lvgl issue #660)
+        # TODO:REMOVE
+        objects['ddlist'].methods['open'].decl.type.args.params[1].name = 'anim'
+    
+    
+    def get_STYLE_GETSET(self):
+        
+        t_types = {
+            'uint8_t:1': None,
+            'uint8_t': 'uint8',
+            'lv_color_t': 'uint16',
+            'lv_opa_t': 'uint8',
+            'lv_coord_t': 'int16',
+            'lv_border_part_t': None,
+            'const lv_font_t *': None,
+        
+            }
+        
+        return ''.join(
+            f'   {{"{name.replace(".", "_")}", (getter) Style_get_{t_types[dtype]}, (setter) Style_set_{t_types[dtype]}, "{name}", (void*)offsetof(lv_style_t, {name})}},\n' 
+            for dtype, name in flatten_struct(self.parseresult.structs['lv_style_t'])
+            if t_types[dtype] is not None
+            )
+    def get_BTN_CALLBACKS(self):
+        # Button callback handlers
+        ret = ''
+        
+        btncallbacknames = []
+        for i, (name, value) in enumerate(list(self.parseresult.enums['lv_btn_action_t'].items())[:-1]): # last is LV_BNT_ACTION_NUM
+            assert value == i
+            actionname = 'action_' + stripstart(name, 'LV_BTN_ACTION_').lower()
+            ret += self.objects['btn'].build_actioncallbackcode(actionname, f'actions[{i}]')
+            btncallbacknames.append(f'pylv_btn_{actionname}_callback')
+            
+        ret += f'static lv_action_t pylv_btn_action_callbacks[LV_BTN_ACTION_NUM] = {{{", ".join(btncallbacknames)}}};'
+        return ret
+        
+        
+    def get_ENUM_ASSIGNMENTS(self):
+        ret = ''
+        
+        #TODO:REMOVE this reordering is not required. Check enums which are not in this list
+        order = ['lv_design_mode_t', 'lv_res_t', 'lv_signal_t', 'lv_protect_t', 
+            'lv_align_t', 'lv_anim_builtin_t', 'lv_slider_style_t', 'lv_list_style_t', 'lv_kb_mode_t',
+            'lv_kb_style_t', 'lv_bar_style_t', 'lv_tabview_style_t', 'lv_sw_style_t', 'lv_mbox_style_t',
+            'lv_label_long_mode_t','lv_label_align_t', 'lv_cb_style_t', 'lv_sb_mode_t', 'lv_page_style_t',
+            'lv_win_style_t', 'lv_btn_state_t', 'lv_btn_action_t', 'lv_btn_style_t', 'lv_cursor_type_t',
+            'lv_ta_style_t', 'lv_roller_style_t', 'lv_chart_type_t', 'lv_btnm_style_t', 'lv_ddlist_style_t',
+            'lv_layout_t']
+        
+        #print(set(self.parseresult.enums)-set(order))
+        
+        for enumname in order:
+            enum = self.parseresult.enums[enumname]
+            for name, value in enum.items():
+                pyname = stripstart(name, 'LV_')
+                ret += f'    PyModule_AddIntConstant(module, "{pyname}", {value});\n'
+        return ret
+    def get_STYLE_ASSIGNMENTS(self):
+
+        return ''.join(
+            f'    PyModule_AddObject(module, "{stripstart(decl.declname, "lv_")}",Style_From_lv_style(&{decl.declname}));\n'
+            for decl in self.parseresult.declarations.values()
+            if ' '.join(decl.type.names) == 'lv_style_t'
+            )
+
+    def get_FONT_ASSIGNMENTS(self):
+        return ''.join(
+            f'    PyModule_AddObject(module, "{stripstart(decl.declname, "lv_")}", Font_From_lv_font(&{decl.declname}));\n'
+            for decl in self.parseresult.declarations.values()
+            if ' '.join(decl.type.names) == 'lv_font_t'
+            )
+    def get_SYMBOL_ASSIGNMENTS(self):
+        return ''.join(
+            f'    PyModule_AddStringConstant(module, "{name}", {value});\n'
+            for name, value in self.parseresult.defines.items()
+            if name.startswith('SYMBOL_')
+            )
+##
+g = PythonBindingsGenerator()
+g.parse()
+##
+g.generate()
+
+
 
