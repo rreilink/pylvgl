@@ -102,7 +102,7 @@
 
 
 /*Log settings*/
-#define USE_LV_LOG      1   /*Enable/disable the log module*/
+#define USE_LV_LOG      0   /*Enable/disable the log module*/
 #if USE_LV_LOG
 /* How important log should be added:
  * LV_LOG_LEVEL_TRACE       A lot of logs to give detailed information
@@ -254,7 +254,7 @@
 #endif
 
 /*Calendar (dependencies: -)*/
-#define USE_LV_CALENDAR 1
+#define USE_LV_CALENDAR 0
 
 /*Preload (dependencies: arc)*/
 #define USE_LV_PRELOAD      1
@@ -274,7 +274,7 @@
 #endif
 
 /*Image Button (dependencies: lv_btn*/
-#define USE_LV_IMGBTN   1
+#define USE_LV_IMGBTN   0
 
 /*Button matrix (dependencies: -)*/
 #define USE_LV_BTNM     1
