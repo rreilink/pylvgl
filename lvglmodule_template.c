@@ -34,7 +34,7 @@
  * Object struct definitions                                    *
  ****************************************************************/
 
-<<<{structcode}>>>
+<<<objects:{structcode}>>>
 
 /****************************************************************
  * Forward declaration of type objects                          *
@@ -42,7 +42,7 @@
 
 PyObject *typesdict = NULL;
 
-<<<
+<<<objects:
 static PyTypeObject pylv_{name}_Type;
 >>>
 
@@ -762,7 +762,7 @@ pylv_btn_set_action(pylv_Btn *self, PyObject *args, PyObject *kwds)
  * Methods and object definitions                               *
  ****************************************************************/
 
-<<<
+<<<objects:
 static void
 pylv_{name}_dealloc(pylv_{pyname} *self) 
 {{
@@ -967,7 +967,7 @@ PyInit_lvgl(void) {
     
     pylv_obj_Type.tp_repr = (reprfunc) Obj_repr;
     
-<<<
+<<<objects:
     pylv_{name}_Type.tp_base = {base};
     if (PyType_Ready(&pylv_{name}_Type) < 0) return NULL;
 >>>
@@ -975,7 +975,7 @@ PyInit_lvgl(void) {
     Py_INCREF(&Style_Type);
     PyModule_AddObject(module, "Style", (PyObject *) &Style_Type); 
 
-<<<
+<<<objects:
     Py_INCREF(&pylv_{name}_Type);
     PyModule_AddObject(module, "{pyname}", (PyObject *) &pylv_{name}_Type); 
 >>>
@@ -991,7 +991,7 @@ PyInit_lvgl(void) {
 
     // refcount for typesdict is initally 1; it is used by pyobj_from_lv
     // refcounts to py{name}_Type objects are incremented due to "O" format
-    typesdict = Py_BuildValue("{<<<sO>>>}"<<<,
+    typesdict = Py_BuildValue("{<<<objects:sO>>>}"<<<objects:,
         "lv_{name}", &pylv_{name}_Type>>>);
     
     PyModule_AddObject(module, "framebuffer", PyMemoryView_FromMemory(framebuffer, LV_HOR_RES * LV_VER_RES * 2, PyBUF_READ));

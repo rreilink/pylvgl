@@ -3,9 +3,14 @@
 
 #import pycparser.ply.lex as lex
 #import pycparser.ply.cpp
+
+import sys
+sys.path.insert(0, '/Users/rob/Projecten/python/pycparser/')
+
 import pycparser
 import pycparser.ply.cpp
-from pycparser import c_ast
+from pycparser import c_ast, c_generator
+
 import copy
 import os
 import re
@@ -33,109 +38,12 @@ class CPP(pycparser.ply.cpp.Preprocessor):
         self.define('__ORDER_BIT_ENDIAN__ 1')
         self.define('__BYTE_ORDER__ 1')
     
-    def evalexpr(self,tokens):
-        # tokens = tokenize(line)
-        # Search for defined macros
-        i = 0
-        while i < len(tokens):
-            if tokens[i].type == self.t_ID and tokens[i].value == 'defined':
-                j = i + 1
-                needparen = False
-                result = "0L"
-                while j < len(tokens):
-                    if tokens[j].type in self.t_WS:
-                        j += 1
-                        continue
-                    elif tokens[j].type == self.t_ID:
-                        if tokens[j].value in self.macros:
-                            result = "1"
-                        else:
-                            result = "0"
-                        if not needparen: break
-                    elif tokens[j].value == '(':
-                        needparen = True
-                    elif tokens[j].value == ')':
-                        break
-                    else:
-                        self.error(self.source,tokens[i].lineno,"Malformed defined()")
-                    j += 1
-                tokens[i].type = self.t_INTEGER
-                tokens[i].value = self.t_INTEGER_TYPE(result)
-                del tokens[i+1:j+1]
-            i += 1
-        tokens = self.expand_macros(tokens)
-        for i,t in enumerate(tokens):
-            if t.type == self.t_ID:
-                tokens[i] = copy.copy(t)
-                tokens[i].type = self.t_INTEGER
-                tokens[i].value = self.t_INTEGER_TYPE("0")
-            elif t.type == self.t_INTEGER:
-                tokens[i] = copy.copy(t)
-                # Strip off any trailing suffixes
-                tokens[i].value = str(tokens[i].value)
-                while tokens[i].value[-1] not in "0123456789abcdefABCDEF":
-                    tokens[i].value = tokens[i].value[:-1]
+    def read_include_file(self, filepath):
+        if filepath in self.SKIPINCLUDES:
+            return ''
+        return super().read_include_file(filepath)
 
-        expr = "".join([str(x.value) for x in tokens])
-        expr = expr.replace("&&"," and ")
-        expr = expr.replace("||"," or ")
-        expr = expr.replace("!"," not ")
-        expr = expr.replace("not =", "!=")
-        try:
-            result = eval(expr)
-        except Exception:
-            self.error(self.source,tokens[0].lineno,"Couldn't evaluate expression " + expr)
-            result = 0
-        return result
-        
-        
-    def include(self,tokens):
-        # Try to extract the filename and then process an include file
-        if not tokens:
-            return
-        if tokens:
-            if tokens[0].value != '<' and tokens[0].type != self.t_STRING:
-                tokens = self.expand_macros(tokens)
-
-            if tokens[0].value == '<':
-                # Include <...>
-                i = 1
-                while i < len(tokens):
-                    if tokens[i].value == '>':
-                        break
-                    i += 1
-                else:
-                    print("Malformed #include <...>")
-                    return
-                filename = "".join([x.value for x in tokens[1:i]])
-                path = self.path + [""] + self.temp_path
-            elif tokens[0].type == self.t_STRING:
-                filename = tokens[0].value[1:-1]
-                path = self.temp_path + [""] + self.path
-            else:
-                print("Malformed #include statement")
-                return
-        if filename in self.SKIPINCLUDES:
-            return
-            
-        for p in path:
-            iname = os.path.join(p,filename)
-            try:
-                data = open(iname,"r", encoding='utf-8').read()
-                dname = os.path.dirname(iname)
-                if dname:
-                    self.temp_path.insert(0,dname)
-                for tok in self.parsegen(data,filename):
-                    yield tok
-                if dname:
-                    del self.temp_path[0]
-                break
-            except IOError:
-                pass
-        else:
-            print("Couldn't find '%s'" % filename)
-
-ParseResult = collections.namedtuple('ParseResult', 'enums functions declarations structs objects defines')
+ParseResult = collections.namedtuple('ParseResult', 'enums functions declarations typedefs structs objects global_functions defines')
 
 LvglObject = collections.namedtuple('LvglObject', 'name methods ancestor')
 
@@ -145,17 +53,15 @@ def flatten_ast(node):
         yield from flatten_ast(child)
 
 class LvglSourceParser:
-    SOURCE_PREPEND = \
-'''
-typedef int uint8_t;
-typedef int int8_t;
-typedef int uint16_t;
-typedef int int16_t;
-typedef int uint32_t;
-typedef int int32_t;
-typedef _Bool bool; 
-
-'''
+    TYPEDEFS = {
+        'uint8_t' : 'unsigned int',
+        'int8_t' : 'int',
+        'uint16_t' : 'unsigned int',
+        'int16_t' :'int',
+        'uint32_t' : 'unsigned int',
+        'int32_t':  'int',
+        'bool': '_Bool'
+    }
 
     def __init__(self):
         self.lexer = pycparser.ply.lex.lex(module = pycparser.ply.cpp)
@@ -169,7 +75,10 @@ typedef _Bool bool;
         cpp = CPP(self.lexer)
                 
         cpp.add_path(os.path.dirname(filename))
-        cpp.parse(self.SOURCE_PREPEND + input,filename)
+        
+        typedefs = ''.join(f'typedef {type} {name};\n' for name, type in self.TYPEDEFS.items())
+        
+        cpp.parse(typedefs + input,filename)
         
         preprocessed = ''
         
@@ -192,8 +101,23 @@ typedef _Bool bool;
             }
     
         return pycparser.CParser().parse(preprocessed, filename), defines
+    
+    @staticmethod
+    def enum_to_dict(enum_node):
+        value = 0
+        enum = collections.OrderedDict()
+        for enumitem in enum_node.values.enumerators:
+            if enumitem.value is not None:
+                v = enumitem.value.value
+                if v.lower().startswith('0x'):
+                    value = int(v[2:], 16)
+                else:
+                    value = int(v)
+            enum[enumitem.name] = value
+            value += 1
+        return enum
         
-    def parse_sources(self, path):
+    def parse_sources(self, path, extended_files = False):
         '''
         Parse all lvgl sources which are required for generating the bindings
         
@@ -209,17 +133,44 @@ typedef _Bool bool;
         defines = collections.OrderedDict()
         declarations = collections.OrderedDict()
         structs = collections.OrderedDict()
+        typedefs = collections.OrderedDict()
         
         filenames = [f for f in glob.glob(os.path.join(path, 'lv_objx/*.c')) if not f.endswith('lv_objx_templ.c')]
         
         filenames.insert(0, os.path.join(path, 'lv_core/lv_obj.c'))
         
+        if extended_files:
+            # TODO: remove these, are here for lv_mpy equivalence:
+            filenames.append(os.path.join(path, 'lv_draw/lv_draw.c')) 
+            filenames.append(os.path.join(path, 'lv_draw/lv_draw_img.c'))
+            filenames.append(os.path.join(path, 'lv_draw/lv_draw_rect.c'))
+            filenames.append(os.path.join(path, 'lv_draw/lv_draw_label.c'))
+            filenames.append(os.path.join(path, 'lv_draw/lv_draw_triangle.c'))
+            filenames.append(os.path.join(path, 'lv_draw/lv_draw_line.c'))
+            filenames.append(os.path.join(path, 'lv_misc/lv_color.c'))
+            filenames.append(os.path.join(path, 'lv_misc/lv_area.c'))
+            filenames.append(os.path.join(path, 'lv_misc/lv_anim.c'))
+            filenames.append(os.path.join(path, 'lv_misc/lv_font.c'))
+            filenames.append(os.path.join(path, 'lv_misc/lv_txt.c'))
+            filenames.append(os.path.join(path, 'lv_misc/lv_fs.c'))
+            filenames.append(os.path.join(path, 'lv_core/lv_style.c'))
+            filenames.append(os.path.join(path, 'lv_core/lv_group.c'))
+            filenames.append(os.path.join(path, 'lv_core/lv_indev.c'))
+            filenames.append(os.path.join(path, 'lv_misc/lv_mem.c'))
+            filenames.append(os.path.join(path, 'lv_misc/lv_ll.c'))
+            filenames.append(os.path.join(path, 'lv_fonts/lv_font_builtin.c'))
+            filenames.append(os.path.join(path, 'lv_hal/lv_hal_disp.c'))        
+            filenames.append(os.path.join(path, 'lv_hal/lv_hal_tick.c'))        
+            filenames.append(os.path.join(path, 'lv_hal/lv_hal_indev.c'))
+
         for filename in filenames:
             print('Parsing', filename)
             ast, filedefines = self.parse_file(filename)
             
             defines.update(filedefines)
             
+            previous_item = None
+            # TODO: this whole filtering of items could be done in the bindings generator to allow for extending bindings generator without changing the sourceparser
             for item in ast.ext:
                 if isinstance(item, c_ast.FuncDef):
                     # C function
@@ -229,30 +180,40 @@ typedef _Bool bool;
                         functions[item.decl.name] = item
 
                         
-                elif isinstance(item, c_ast.Typedef):
-                    # C enum
+                elif isinstance(item, c_ast.Typedef) and not item.name in self.TYPEDEFS:
+                    # Do not register typedefs which are defined in self.TYPEDEFS, these are
+                    # to be treated as basic types by the bindings generators
+                    typedefs[item.name] = item
+                    
                     if isinstance(item.type.type, c_ast.Enum):
-                        value = 0
-                        enum = collections.OrderedDict()
-                        for enumitem in item.type.type.values.enumerators:
-                            if enumitem.value is not None:
-                                v = enumitem.value.value
-                                if v.lower().startswith('0x'):
-                                    value = int(v[2:], 16)
-                                else:
-                                    value = int(v)
-                            enum[enumitem.name] = value
-                            value += 1
+                        # Earlier versions of lvgl use typedef enum { ... } lv_enum_name_t
                         
-                        enums[item.name] = enum    
+                        
+                        enums[item.name] = self.enum_to_dict(item.type.type)
+                        
                     elif isinstance(item.type, c_ast.TypeDecl) and isinstance(item.type.type, c_ast.Struct):
+                        # typedef struct { ... } lv_struct_name_t;
                         structs[item.type.declname] = item.type.type
+                        
+                    elif (isinstance(item.type, c_ast.TypeDecl) and isinstance(item.type.type, c_ast.IdentifierType) and 
+                            isinstance(previous_item, c_ast.Decl) and isinstance(previous_item.type, c_ast.Enum)):
+                        
+                        # typedef lv_enum_t ...; directly after an enum definition
+                        # newer lvgl uses this to define enum variables as uint8_t
+
+                        enums[item.name] = self.enum_to_dict(previous_item.type)
+                                               
+                        
                 elif isinstance(item, c_ast.Decl) and isinstance(item.type, c_ast.TypeDecl):
                     declarations[item.type.declname] = item.type
 
-        objects = self.determine_objects(functions)
+                previous_item = item
         
-        return ParseResult(enums, functions, declarations, structs, objects, defines)
+        
+        objects, global_functions = self.determine_objects(functions)
+        
+        
+        return ParseResult(enums, functions, declarations, typedefs, structs, objects, global_functions, defines)
 
     @staticmethod
     def determine_ancestor(create_function):
@@ -284,7 +245,8 @@ typedef _Bool bool;
         objects = {}
         for function_name, function in functions.items():
             match =  re.match(r'lv_([a-zA-Z0-9]+)_create$', function_name)
-            if match:
+            # TODO: the 'not in' condition may be removed if we do not use lv_anim.c / lv_group.c
+            if match and function_name not in ['lv_anim_create', 'lv_group_create']: # lv_anim and lv_group are not objects
                 name = match.group(1)
                 objects[name] = cls.determine_ancestor(function)
     
@@ -293,10 +255,15 @@ typedef _Bool bool;
         objects.pop('obj')
         while objects:
             remaining = list(objects.items())
+            reordered = False
             for obj, anch in remaining:
                 if anch in sortedobjects:
                     sortedobjects[obj] = anch
                     objects.pop(obj)
+                    reordered = True
+            
+            if not reordered:
+                raise RuntimeError('No ancestor defined for:', remaining)
         
         # Stage 3: Create LvglObject items
         objects = collections.OrderedDict()
@@ -304,17 +271,23 @@ typedef _Bool bool;
             ancestor = None if ancestorname is None else objects[ancestorname]
             objects[name] = LvglObject(name, collections.OrderedDict(), ancestor)
     
-        # Stage 4: Assign methods to objects
+        # Stage 4: Assign methods to objects; those who do not belong to an
+        #    object go into global_functions
+        global_functions = collections.OrderedDict()
         for function_name, function in functions.items():
             match =  re.match(r'lv_([a-zA-Z0-9]+)_([a-zA-Z0-9_]+)$', function_name)
-            if match:
-                name, method = match.groups()
-                if name in objects and method != 'create':
+            
+            name, method = match.groups() if match else (None, None)
+            
+            if name in objects:
+                if method != 'create':
                     objects[name].methods[method] = function
-        
-        return objects
+            else:
+                global_functions[function_name] = function
+                
+        return objects, global_functions
 
-if __name__ == '__main__':
+if __name__ == 'x__main__':
     result = LvglSourceParser().parse_sources('lvgl')
 
     def type_repr(x):
@@ -352,4 +325,4 @@ if __name__ == '__main__':
 
     for name, value in result.defines.items():
         print (name, '=', value)
-    
+
