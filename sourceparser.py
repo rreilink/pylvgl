@@ -17,6 +17,16 @@ import re
 import glob
 import collections
 
+def type_repr(x):
+    ptrs = ''
+    while isinstance(x, c_ast.PtrDecl):
+        x = x.type
+        ptrs += '*'
+    if isinstance(x, c_ast.FuncDecl):
+        return f'<function{ptrs}>'
+    assert isinstance(x, c_ast.TypeDecl)
+    return ' '.join(x.type.names) + ptrs 
+
 class CPP(pycparser.ply.cpp.Preprocessor):
     '''
     This extends the pycparser PLY-based included c preprocessor with 
@@ -135,11 +145,11 @@ class LvglSourceParser:
         structs = collections.OrderedDict()
         typedefs = collections.OrderedDict()
         
-        filenames = [f for f in glob.glob(os.path.join(path, 'lv_objx/*.c')) if not f.endswith('lv_objx_templ.c')]
+        filenames = [f for f in glob.glob(os.path.join(path, 'lv_objx/*.h')) if not f.endswith('lv_objx_templ.h')]
         
-        filenames.insert(0, os.path.join(path, 'lv_core/lv_obj.c'))
+        #filenames.insert(0, os.path.join(path, 'lv_core/lv_obj.h'))
         
-        if extended_files:
+        if extended_files and 0:
             # TODO: remove these, are here for lv_mpy equivalence:
             filenames.append(os.path.join(path, 'lv_draw/lv_draw.c')) 
             filenames.append(os.path.join(path, 'lv_draw/lv_draw_img.c'))
@@ -172,14 +182,16 @@ class LvglSourceParser:
             previous_item = None
             # TODO: this whole filtering of items could be done in the bindings generator to allow for extending bindings generator without changing the sourceparser
             for item in ast.ext:
-                if isinstance(item, c_ast.FuncDef):
+                if isinstance(item, c_ast.Decl) and isinstance(item.type, c_ast.FuncDecl):
                     # C function
-                    
-                    # Skip static functions, but not static inline functions
-                    if (not 'static' in item.decl.storage) or ('inline' in item.decl.funcspec):
-                        functions[item.decl.name] = item
+                    if item.name not in functions:
+                        # If it is already in there, it might be a FuncDef and we want to keep that one
+                        functions[item.name] = c_ast.FuncDef(item, None, None)
 
-                        
+                elif isinstance(item, c_ast.FuncDef):
+                    functions[item.decl.name] = item
+                    
+                            
                 elif isinstance(item, c_ast.Typedef) and not item.name in self.TYPEDEFS:
                     # Do not register typedefs which are defined in self.TYPEDEFS, these are
                     # to be treated as basic types by the bindings generators
@@ -210,14 +222,14 @@ class LvglSourceParser:
                 previous_item = item
         
         
-        objects, global_functions = self.determine_objects(functions)
+        objects, global_functions = self.determine_objects(functions, typedefs)
         
         
         return ParseResult(enums, functions, declarations, typedefs, structs, objects, global_functions, defines)
 
     @staticmethod
     def determine_ancestor(create_function):
-        
+        return None
         # Get the name of the first argument to the create function
         firstargument = create_function.decl.type.args.params[0].name
         
@@ -240,19 +252,36 @@ class LvglSourceParser:
         return results[0] if results else None
     
     @classmethod
-    def determine_objects(cls, functions):
+    def determine_objects(cls, functions, typedefs):
         # Stage 1: find all objects and the name of their ancestor
         objects = {}
-        for function_name, function in functions.items():
-            match =  re.match(r'lv_([a-zA-Z0-9]+)_create$', function_name)
-            # TODO: the 'not in' condition may be removed if we do not use lv_anim.c / lv_group.c
-            if match and function_name not in ['lv_anim_create', 'lv_group_create']: # lv_anim and lv_group are not objects
-                name = match.group(1)
-                objects[name] = cls.determine_ancestor(function)
+        # for function_name, function in functions.items():
+        #     match =  re.match(r'lv_([a-zA-Z0-9]+)_create$', function_name)
+        #     # TODO: the 'not in' condition may be removed if we do not use lv_anim.c / lv_group.c
+        #     if match and function_name not in ['lv_anim_create', 'lv_group_create']: # lv_anim and lv_group are not objects
+        #         name = match.group(1)
+        #         objects[name] = cls.determine_ancestor(function)
+        
+        lv_ext_pattern = re.compile('^lv_([^_]+)_ext_t')
+        
+        for typedef in typedefs.values():
+            match = lv_ext_pattern.match(typedef.name)
+            if match:
+                try:
+                    parent_ext_name = ' '.join(typedef.type.type.decls[0].type.type.names)
+                except AttributeError:
+                    parent_ext_name = ''
+
+                parentmatch = lv_ext_pattern.match(parent_ext_name)
+                if parentmatch:
+                    objects[match.group(1)] = parentmatch.group(1)
+                else:
+                    objects[match.group(1)] = 'obj'
+        
     
         # Stage 2: sort objects, such that each object comes after its ancestors
         sortedobjects = collections.OrderedDict(obj = None)
-        objects.pop('obj')
+
         while objects:
             remaining = list(objects.items())
             reordered = False
@@ -281,24 +310,21 @@ class LvglSourceParser:
             
             if name in objects:
                 if method != 'create':
-                    objects[name].methods[method] = function
+                    if type_repr(function.decl.type.args.params[0].type) == 'lv_obj_t*':
+                        objects[name].methods[method] = function
+                    else:
+                        print(function_name)
+                        global_functions[function_name] = function
+                        
             else:
                 global_functions[function_name] = function
                 
         return objects, global_functions
 
-if __name__ == 'x__main__':
+if __name__ == '__main__':
     result = LvglSourceParser().parse_sources('lvgl')
 
-    def type_repr(x):
-        ptrs = ''
-        while isinstance(x, c_ast.PtrDecl):
-            x = x.type
-            ptrs += '*'
-        if isinstance(x, c_ast.FuncDecl):
-            return f'<function{ptrs}>'
-        assert isinstance(x, c_ast.TypeDecl)
-        return ' '.join(x.type.names) + ptrs 
+
 
     print ('##################################')
     print ('#            OBJECTS             #')

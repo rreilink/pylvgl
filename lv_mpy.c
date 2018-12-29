@@ -1946,13 +1946,6 @@ MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(mp_lv_obj_refresh_style_obj, 1, 1, mp_lv_obj
  
 
 /*
- * Function NOT generated:
- * Missing conversion to lv_style_t*
- * void lv_obj_report_style_mod(lv_style_t *style)
- */
-    
-
-/*
  * lvgl extension definition for:
  * void lv_obj_set_hidden(lv_obj_t *obj, bool en)
  */
@@ -6576,75 +6569,6 @@ MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(mp_lv_img_get_upscale_obj, 1, 1, mp_lv_img_g
 /*
  * Function NOT generated:
  * Missing conversion to const void*
- * lv_img_src_t lv_img_src_get_type(const void *src)
- */
-    
-
-/*
- * Function NOT generated:
- * Missing conversion to lv_img_decoder_info_f_t
- * void lv_img_decoder_set_custom(lv_img_decoder_info_f_t info_fp, lv_img_decoder_open_f_t open_fp, lv_img_decoder_read_line_f_t read_fp, lv_img_decoder_close_f_t close_fp)
- */
-    
-
-/*
- * Function NOT generated:
- * Missing conversion to lv_img_header_t*
- * lv_res_t lv_img_dsc_get_info(const char *src, lv_img_header_t *header)
- */
-    
-
-/*
- * lvgl extension definition for:
- * uint8_t lv_img_color_format_get_px_size(lv_img_cf_t cf)
- */
- 
-STATIC mp_obj_t mp_lv_img_color_format_get_px_size(size_t n_args, const mp_obj_t *args)
-{
-    lv_img_cf_t cf = (uint8_t)mp_obj_int_get_checked(args[0]);
-    uint8_t res = lv_img_color_format_get_px_size(cf);
-    return mp_obj_new_int_from_uint(res);
-}
-
-MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(mp_lv_img_color_format_get_px_size_obj, 1, 1, mp_lv_img_color_format_get_px_size);
-
- 
-
-/*
- * lvgl extension definition for:
- * bool lv_img_color_format_is_chroma_keyed(lv_img_cf_t cf)
- */
- 
-STATIC mp_obj_t mp_lv_img_color_format_is_chroma_keyed(size_t n_args, const mp_obj_t *args)
-{
-    lv_img_cf_t cf = (uint8_t)mp_obj_int_get_checked(args[0]);
-    bool res = lv_img_color_format_is_chroma_keyed(cf);
-    return convert_to_bool(res);
-}
-
-MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(mp_lv_img_color_format_is_chroma_keyed_obj, 1, 1, mp_lv_img_color_format_is_chroma_keyed);
-
- 
-
-/*
- * lvgl extension definition for:
- * bool lv_img_color_format_has_alpha(lv_img_cf_t cf)
- */
- 
-STATIC mp_obj_t mp_lv_img_color_format_has_alpha(size_t n_args, const mp_obj_t *args)
-{
-    lv_img_cf_t cf = (uint8_t)mp_obj_int_get_checked(args[0]);
-    bool res = lv_img_color_format_has_alpha(cf);
-    return convert_to_bool(res);
-}
-
-MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(mp_lv_img_color_format_has_alpha_obj, 1, 1, mp_lv_img_color_format_has_alpha);
-
- 
-
-/*
- * Function NOT generated:
- * Missing conversion to const void*
  * void lv_img_set_src(lv_obj_t *img, const void *src_img)
  */
     
@@ -6714,9 +6638,6 @@ STATIC const mp_rom_map_elem_t img_locals_dict_table[] = {
     { MP_OBJ_NEW_QSTR(MP_QSTR_set_file), MP_ROM_PTR(&mp_lv_img_set_file_obj) },
     { MP_OBJ_NEW_QSTR(MP_QSTR_set_upscale), MP_ROM_PTR(&mp_lv_img_set_upscale_obj) },
     { MP_OBJ_NEW_QSTR(MP_QSTR_get_upscale), MP_ROM_PTR(&mp_lv_img_get_upscale_obj) },
-    { MP_OBJ_NEW_QSTR(MP_QSTR_color_format_get_px_size), MP_ROM_PTR(&mp_lv_img_color_format_get_px_size_obj) },
-    { MP_OBJ_NEW_QSTR(MP_QSTR_color_format_is_chroma_keyed), MP_ROM_PTR(&mp_lv_img_color_format_is_chroma_keyed_obj) },
-    { MP_OBJ_NEW_QSTR(MP_QSTR_color_format_has_alpha), MP_ROM_PTR(&mp_lv_img_color_format_has_alpha_obj) },
     { MP_OBJ_NEW_QSTR(MP_QSTR_set_auto_size), MP_ROM_PTR(&mp_lv_img_set_auto_size_obj) },
     { MP_OBJ_NEW_QSTR(MP_QSTR_get_file_name), MP_ROM_PTR(&mp_lv_img_get_file_name_obj) },
     { MP_OBJ_NEW_QSTR(MP_QSTR_get_auto_size), MP_ROM_PTR(&mp_lv_img_get_auto_size_obj) },
@@ -7971,13 +7892,6 @@ MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(mp_lv_preload_get_spin_time_obj, 1, 1, mp_lv
  * Function NOT generated:
  * Missing convertion from lv_style_t*
  * lv_style_t *lv_preload_get_style(const lv_obj_t *preload, lv_preload_style_t type)
- */
-    
-
-/*
- * Function NOT generated:
- * Missing conversion to void*
- * void lv_preload_spinner_animation(void *ptr, int32_t val)
  */
     
 
@@ -10225,6 +10139,89 @@ STATIC inline const mp_obj_type_t *get_BaseObj_type()
 
 /*
  * Function NOT generated:
+ * Missing conversion to lv_style_t*
+ * void lv_obj_report_style_mod(lv_style_t *style)
+ */
+    
+
+/*
+ * Function NOT generated:
+ * Missing conversion to const void*
+ * lv_img_src_t lv_img_src_get_type(const void *src)
+ */
+    
+
+/*
+ * Function NOT generated:
+ * Missing conversion to lv_img_decoder_info_f_t
+ * void lv_img_decoder_set_custom(lv_img_decoder_info_f_t info_fp, lv_img_decoder_open_f_t open_fp, lv_img_decoder_read_line_f_t read_fp, lv_img_decoder_close_f_t close_fp)
+ */
+    
+
+/*
+ * Function NOT generated:
+ * Missing conversion to lv_img_header_t*
+ * lv_res_t lv_img_dsc_get_info(const char *src, lv_img_header_t *header)
+ */
+    
+
+/*
+ * lvgl extension definition for:
+ * uint8_t lv_img_color_format_get_px_size(lv_img_cf_t cf)
+ */
+ 
+STATIC mp_obj_t mp_lv_img_color_format_get_px_size(size_t n_args, const mp_obj_t *args)
+{
+    lv_img_cf_t cf = (uint8_t)mp_obj_int_get_checked(args[0]);
+    uint8_t res = lv_img_color_format_get_px_size(cf);
+    return mp_obj_new_int_from_uint(res);
+}
+
+MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(mp_lv_img_color_format_get_px_size_obj, 1, 1, mp_lv_img_color_format_get_px_size);
+
+ 
+
+/*
+ * lvgl extension definition for:
+ * bool lv_img_color_format_is_chroma_keyed(lv_img_cf_t cf)
+ */
+ 
+STATIC mp_obj_t mp_lv_img_color_format_is_chroma_keyed(size_t n_args, const mp_obj_t *args)
+{
+    lv_img_cf_t cf = (uint8_t)mp_obj_int_get_checked(args[0]);
+    bool res = lv_img_color_format_is_chroma_keyed(cf);
+    return convert_to_bool(res);
+}
+
+MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(mp_lv_img_color_format_is_chroma_keyed_obj, 1, 1, mp_lv_img_color_format_is_chroma_keyed);
+
+ 
+
+/*
+ * lvgl extension definition for:
+ * bool lv_img_color_format_has_alpha(lv_img_cf_t cf)
+ */
+ 
+STATIC mp_obj_t mp_lv_img_color_format_has_alpha(size_t n_args, const mp_obj_t *args)
+{
+    lv_img_cf_t cf = (uint8_t)mp_obj_int_get_checked(args[0]);
+    bool res = lv_img_color_format_has_alpha(cf);
+    return convert_to_bool(res);
+}
+
+MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(mp_lv_img_color_format_has_alpha_obj, 1, 1, mp_lv_img_color_format_has_alpha);
+
+ 
+
+/*
+ * Function NOT generated:
+ * Missing conversion to void*
+ * void lv_preload_spinner_animation(void *ptr, int32_t val)
+ */
+    
+
+/*
+ * Function NOT generated:
  * Missing conversion to lv_color_t
  * inline static uint8_t lv_color_to1(lv_color_t color)
  */
@@ -11663,6 +11660,9 @@ STATIC const mp_rom_map_elem_t lvgl_globals_table[] = {
     { MP_OBJ_NEW_QSTR(MP_QSTR_win), MP_ROM_PTR(&mp_win_type) },
     { MP_OBJ_NEW_QSTR(MP_QSTR_tabview), MP_ROM_PTR(&mp_tabview_type) },
     { MP_OBJ_NEW_QSTR(MP_QSTR_ta), MP_ROM_PTR(&mp_ta_type) },
+    { MP_OBJ_NEW_QSTR(MP_QSTR_img_color_format_get_px_size), MP_ROM_PTR(&mp_lv_img_color_format_get_px_size_obj) },
+    { MP_OBJ_NEW_QSTR(MP_QSTR_img_color_format_is_chroma_keyed), MP_ROM_PTR(&mp_lv_img_color_format_is_chroma_keyed_obj) },
+    { MP_OBJ_NEW_QSTR(MP_QSTR_img_color_format_has_alpha), MP_ROM_PTR(&mp_lv_img_color_format_has_alpha_obj) },
     { MP_OBJ_NEW_QSTR(MP_QSTR_font_init), MP_ROM_PTR(&mp_lv_font_init_obj) },
     { MP_OBJ_NEW_QSTR(MP_QSTR_font_builtin_init), MP_ROM_PTR(&mp_lv_font_builtin_init_obj) },
     { MP_OBJ_NEW_QSTR(MP_QSTR_anim_init), MP_ROM_PTR(&mp_lv_anim_init_obj) },

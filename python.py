@@ -27,7 +27,7 @@ skipfunctions = {
     
     # Not compatible since it is like a 'class method' (it does not have 
     # lv_obj_t* as first argument). Implemented as lvgl.report_style_mod
-    'lv_obj_report_style_mod',
+#    'lv_obj_report_style_mod',
     
 }
 
@@ -307,6 +307,15 @@ class PythonBindingsGenerator(BindingsGenerator):
     outputfile = 'lvglmodule.c'
 
     def customize(self):
+        # TODO: remove these reordering construct (only required to show equality of the bindings generator)
+        # All this reordering code is written such, that no items can accidentally be removed or added while reordering
+        
+        # reorder objects    
+        for name in 'obj win label lmeter btnm chart cont led kb img bar arc line tabview mbox gauge page ta btn ddlist preload list slider sw cb roller'.split():
+            self.objects[name] = self.objects.pop(name)
+        
+        
+        
         objects = self.objects
         objects['btnm'].customstructfields.append('const char **map;')
         objects['obj'].customstructfields.extend(['PyObject_HEAD', 'lv_obj_t *ref;', 'PyObject *signal_func;', 'lv_signal_func_t orig_c_signal_func;'])

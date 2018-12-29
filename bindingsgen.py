@@ -15,7 +15,7 @@ import copy
 
 assert sys.version_info > (3,6)
 
-from sourceparser import c_ast, c_generator
+from sourceparser import c_ast, c_generator, type_repr
 
 
 def generate_c(node):
@@ -53,15 +53,7 @@ def astnode_equals(a, b):
     return True
     
 
-def type_repr(x):
-    ptrs = ''
-    while isinstance(x, c_ast.PtrDecl):
-        x = x.type
-        ptrs += '*'
-    if isinstance(x, c_ast.FuncDecl):
-        return f'<function{ptrs}>'
-    assert isinstance(x, c_ast.TypeDecl)
-    return ' '.join(x.type.names) + ptrs 
+
 
 def flatten_struct(s, prefix=''):
     '''
@@ -161,7 +153,7 @@ class Object:
         prunelist = []
         
         for methodname, method in self.methods.items():
-            if not method.body.block_items or len(method.body.block_items) != 1:
+            if not method.body or not method.body.block_items or len(method.body.block_items) != 1:
                 continue
             
             method_contents = method.body.block_items[0]

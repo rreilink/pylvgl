@@ -87,6 +87,21 @@ class MicroPythonObject(Object):
     def prune_derived_methods(self):
         pass # Do not prune derived methods
     
+    
+    def reorder_defs_decls(self):
+        defs = []
+        decls = []
+        for name, method in self.methods.items():
+            if method.body is None:
+                decls.append((name, method))
+            else:
+                defs.append((name, method))
+        
+        self.methods.clear()
+        self.methods.update(defs)
+        self.methods.update(decls)
+        
+    
     @property
     def ancestorname(self):
         return self.ancestor.name if self.ancestor else 'None'
@@ -322,18 +337,16 @@ MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(mp_{func}_obj, {count}, {count}, mp_{func});
         # reorder objects    
         for name in 'obj arc cont btn label bar btnm cb line chart page ddlist lmeter gauge img kb led list mbox preload roller slider sw win tabview ta'.split():
             self.objects[name] = self.objects.pop(name)
-            
-        self.objects['obj'].methods.pop('get_opa_scale_enable')
+        
         
         # reorder global functions
         self.reordered_globals = reordered_globals = self.parseresult.global_functions.copy()
-        self.reordered_globals.pop('cut_ctrl_byte')
+
         for name in 'lv_color_to1 lv_color_to8 lv_color_to16 lv_color_to32 lv_color_mix lv_color_brightness lv_area_copy lv_area_get_width lv_area_get_height lv_font_get_height lv_color_hsv_to_rgb lv_color_rgb_to_hsv lv_area_set lv_area_set_width lv_area_set_height lv_area_set_pos lv_area_get_size lv_area_intersect lv_area_join lv_area_is_point_on lv_area_is_on lv_area_is_in lv_font_init lv_font_add lv_font_is_monospace lv_font_get_bitmap lv_font_get_width lv_font_get_real_width lv_font_get_bpp lv_font_get_bitmap_continuous lv_font_get_bitmap_sparse lv_font_get_width_continuous lv_font_get_width_sparse lv_font_builtin_init lv_anim_init lv_anim_create lv_anim_del lv_anim_speed_to_time lv_anim_path_linear lv_anim_path_ease_in_out lv_anim_path_step lv_style_init lv_style_copy lv_style_mix lv_style_anim_create lv_mem_init lv_mem_alloc lv_mem_free lv_mem_realloc lv_mem_defrag lv_mem_monitor lv_mem_get_size lv_ll_init lv_ll_ins_head lv_ll_ins_prev lv_ll_ins_tail lv_ll_rem lv_ll_clear lv_ll_chg_list lv_ll_get_head lv_ll_get_tail lv_ll_get_next lv_ll_get_prev lv_ll_move_before lv_init lv_scr_load lv_scr_act lv_layer_top lv_layer_sys lv_disp_drv_init lv_disp_drv_register lv_disp_set_active lv_disp_get_active lv_disp_next lv_disp_flush lv_disp_fill lv_disp_map lv_disp_mem_blend lv_disp_mem_fill lv_disp_is_mem_blend_supported lv_disp_is_mem_fill_supported lv_tick_inc lv_tick_get lv_tick_elaps lv_indev_drv_init lv_indev_drv_register lv_indev_next lv_indev_read lv_group_create lv_group_del lv_group_add_obj lv_group_remove_obj lv_group_focus_obj lv_group_focus_next lv_group_focus_prev lv_group_focus_freeze lv_group_send_data lv_group_set_style_mod_cb lv_group_set_style_mod_edit_cb lv_group_set_focus_cb lv_group_set_editing lv_group_set_click_focus lv_group_mod_style lv_group_get_focused lv_group_get_style_mod_cb lv_group_get_style_mod_edit_cb lv_group_get_focus_cb lv_group_get_editing lv_group_get_click_focus lv_indev_init lv_indev_get_act lv_indev_get_type lv_indev_reset lv_indev_reset_lpr lv_indev_enable lv_indev_set_cursor lv_indev_set_group lv_indev_set_button_points lv_indev_get_point lv_indev_get_key lv_indev_is_dragging lv_indev_get_vect lv_indev_get_inactive_time lv_indev_wait_release lv_txt_get_size lv_txt_get_next_line lv_txt_get_width lv_txt_is_cmd lv_txt_ins lv_txt_cut lv_fs_init lv_fs_add_drv lv_fs_open lv_fs_close lv_fs_remove lv_fs_read lv_fs_write lv_fs_seek lv_fs_tell lv_fs_trunc lv_fs_size lv_fs_rename lv_fs_dir_open lv_fs_dir_read lv_fs_dir_close lv_fs_free lv_fs_get_letters lv_fs_get_ext lv_fs_up lv_fs_get_last lv_draw_aa_get_opa lv_draw_aa_ver_seg lv_draw_aa_hor_seg lv_draw_rect lv_draw_label lv_draw_img lv_draw_line lv_draw_triangle'.split():
             f = reordered_globals.pop(name, None)
             if f:
                 reordered_globals[name] = f        
-        
-        reordered_globals.pop('lv_ll_swap')
+
 
         
         # reorder enums (TODO: remove)
@@ -345,38 +358,17 @@ MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(mp_{func}_obj, {count}, {count}, mp_{func});
                     xkey = key
             reordered_enums[xkey] = reordered_enums.pop(xkey)      
         
-        reordered_enums.pop('lv_task_prio_t')
-        reordered_enums.pop('cmd_state_t')
+
         
         # reorder typedefs
         self.reordered_typedefs = reordered_typedefs = self.parseresult.typedefs.copy()
         for name in 'lv_anim_path_t lv_anim_fp_t lv_anim_cb_t lv_design_func_t lv_signal_func_t lv_action_t lv_group_style_mod_func_t lv_group_focus_cb_t lv_btnm_action_t lv_img_decoder_info_f_t lv_img_decoder_open_f_t lv_img_decoder_read_line_f_t lv_img_decoder_close_f_t lv_tabview_action_t'.split():
             reordered_typedefs[name] = reordered_typedefs.pop(name)
 
-        
-        
-        self.objects['page'].reorder_methods(('get_pr_action', 'clean'), ('get_rel_action', 'get_pr_action'), ('get_scrl', 'get_rel_action'))
-        
-        self.objects['img'].reorder_methods(('set_auto_size', 'color_format_has_alpha'), ('get_file_name', 'set_auto_size'), ('get_auto_size', 'get_file_name'), ('src_get_type', 'get_upscale'), ('decoder_set_custom', 'src_get_type'), ('set_src', 'color_format_has_alpha'), ('get_src', 'set_auto_size'))
-        
-        
-        # see lvgl issue #660
-        self.objects['ddlist'].methods['open'].decl.type.args.params[1].type.declname = 'anim'
-        self.objects['ddlist'].methods['open'].decl.type.args.params[1].name = 'anim'
-
-        self.objects['ddlist'].methods['close'].decl.type.args.params[1].type.declname = 'anim'
-        self.objects['ddlist'].methods['close'].decl.type.args.params[1].name = 'anim'
-
-        # other functions with similar issue
-        self.reordered_globals['lv_ll_init'].decl.type.args.params[1].type.declname = 'node_size'
-        self.reordered_globals['lv_ll_init'].decl.type.args.params[1].name = 'node_size'
-
-        self.reordered_globals['lv_txt_get_next_line'].decl.type.args.params[1].type.type.declname = 'font_p'
-        self.reordered_globals['lv_txt_get_next_line'].decl.type.args.params[1].name = 'font_p'
-        self.reordered_globals['lv_txt_get_next_line'].decl.type.args.params[3].type.declname = 'max_l'
-        self.reordered_globals['lv_txt_get_next_line'].decl.type.args.params[3].name = 'max_l'
-        
-        
+        # TODO: this is only necessary, remove
+        for o in self.objects.values():
+            o.reorder_defs_decls()
+                
         self.global_enums = collections.OrderedDict()
         self.enums = collections.OrderedDict()
         
