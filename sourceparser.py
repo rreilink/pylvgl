@@ -76,15 +76,17 @@ class LvglSourceParser:
     def __init__(self):
         self.lexer = pycparser.ply.lex.lex(module = pycparser.ply.cpp)
 
-    def parse_file(self, filename):
+    def parse_files(self, filenames):
         
         # Parse with Python C-preprocessor
-        with open(filename, 'r', encoding='utf-8') as file:
-            input = file.read()
+        input = ''
+        for filename in filenames:
+            with open(filename, 'r', encoding='utf-8') as file:
+                input += file.read()
     
         cpp = CPP(self.lexer)
                 
-        cpp.add_path(os.path.dirname(filename))
+        cpp.add_path(os.path.dirname(filenames[0]))
         
         typedefs = ''.join(f'typedef {type} {name};\n' for name, type in self.TYPEDEFS.items())
         
@@ -104,11 +106,11 @@ class LvglSourceParser:
             cpp.expand_macros(macro.value)
         
         # Convert the macro tokens to a string
-        defines = {
-            name: ''.join(tok.value for tok in macro.value)
+        defines = collections.OrderedDict([
+            (name, ''.join(tok.value for tok in macro.value))
             for name, macro in cpp.macros.items()
         
-            }
+            ])
     
         return pycparser.CParser().parse(preprocessed, filename), defines
     
@@ -127,7 +129,7 @@ class LvglSourceParser:
             value += 1
         return enum
         
-    def parse_sources(self, path, extended_files = False):
+    def parse_sources(self, path):
         '''
         Parse all lvgl sources which are required for generating the bindings
         
@@ -140,87 +142,57 @@ class LvglSourceParser:
         '''
         enums = collections.OrderedDict()
         functions = collections.OrderedDict()
-        defines = collections.OrderedDict()
+
         declarations = collections.OrderedDict()
         structs = collections.OrderedDict()
         typedefs = collections.OrderedDict()
         
         filenames = [f for f in glob.glob(os.path.join(path, 'lv_objx/*.h')) if not f.endswith('lv_objx_templ.h')]
-        
-        #filenames.insert(0, os.path.join(path, 'lv_core/lv_obj.h'))
-        
-        if extended_files and 0:
-            # TODO: remove these, are here for lv_mpy equivalence:
-            filenames.append(os.path.join(path, 'lv_draw/lv_draw.c')) 
-            filenames.append(os.path.join(path, 'lv_draw/lv_draw_img.c'))
-            filenames.append(os.path.join(path, 'lv_draw/lv_draw_rect.c'))
-            filenames.append(os.path.join(path, 'lv_draw/lv_draw_label.c'))
-            filenames.append(os.path.join(path, 'lv_draw/lv_draw_triangle.c'))
-            filenames.append(os.path.join(path, 'lv_draw/lv_draw_line.c'))
-            filenames.append(os.path.join(path, 'lv_misc/lv_color.c'))
-            filenames.append(os.path.join(path, 'lv_misc/lv_area.c'))
-            filenames.append(os.path.join(path, 'lv_misc/lv_anim.c'))
-            filenames.append(os.path.join(path, 'lv_misc/lv_font.c'))
-            filenames.append(os.path.join(path, 'lv_misc/lv_txt.c'))
-            filenames.append(os.path.join(path, 'lv_misc/lv_fs.c'))
-            filenames.append(os.path.join(path, 'lv_core/lv_style.c'))
-            filenames.append(os.path.join(path, 'lv_core/lv_group.c'))
-            filenames.append(os.path.join(path, 'lv_core/lv_indev.c'))
-            filenames.append(os.path.join(path, 'lv_misc/lv_mem.c'))
-            filenames.append(os.path.join(path, 'lv_misc/lv_ll.c'))
-            filenames.append(os.path.join(path, 'lv_fonts/lv_font_builtin.c'))
-            filenames.append(os.path.join(path, 'lv_hal/lv_hal_disp.c'))        
-            filenames.append(os.path.join(path, 'lv_hal/lv_hal_tick.c'))        
-            filenames.append(os.path.join(path, 'lv_hal/lv_hal_indev.c'))
 
-        for filename in filenames:
-            print('Parsing', filename)
-            ast, filedefines = self.parse_file(filename)
-            
-            defines.update(filedefines)
-            
-            previous_item = None
-            # TODO: this whole filtering of items could be done in the bindings generator to allow for extending bindings generator without changing the sourceparser
-            for item in ast.ext:
-                if isinstance(item, c_ast.Decl) and isinstance(item.type, c_ast.FuncDecl):
-                    # C function
-                    if item.name not in functions:
-                        # If it is already in there, it might be a FuncDef and we want to keep that one
-                        functions[item.name] = c_ast.FuncDef(item, None, None)
+        ast, defines = self.parse_files(filenames)
+        
+        previous_item = None
+        # TODO: this whole filtering of items could be done in the bindings generator to allow for extending bindings generator without changing the sourceparser
+        for item in ast.ext:
+            if isinstance(item, c_ast.Decl) and isinstance(item.type, c_ast.FuncDecl):
+                # C function
+                if item.name not in functions:
+                    # If it is already in there, it might be a FuncDef and we want to keep that one
+                    functions[item.name] = c_ast.FuncDef(item, None, None)
 
-                elif isinstance(item, c_ast.FuncDef):
-                    functions[item.decl.name] = item
+            elif isinstance(item, c_ast.FuncDef):
+                functions[item.decl.name] = item
+                
+                        
+            elif isinstance(item, c_ast.Typedef) and not item.name in self.TYPEDEFS:
+                # Do not register typedefs which are defined in self.TYPEDEFS, these are
+                # to be treated as basic types by the bindings generators
+                typedefs[item.name] = item
+                
+                if isinstance(item.type.type, c_ast.Enum):
+                    # Earlier versions of lvgl use typedef enum { ... } lv_enum_name_t
                     
-                            
-                elif isinstance(item, c_ast.Typedef) and not item.name in self.TYPEDEFS:
-                    # Do not register typedefs which are defined in self.TYPEDEFS, these are
-                    # to be treated as basic types by the bindings generators
-                    typedefs[item.name] = item
                     
-                    if isinstance(item.type.type, c_ast.Enum):
-                        # Earlier versions of lvgl use typedef enum { ... } lv_enum_name_t
-                        
-                        
-                        enums[item.name] = self.enum_to_dict(item.type.type)
-                        
-                    elif isinstance(item.type, c_ast.TypeDecl) and isinstance(item.type.type, c_ast.Struct):
-                        # typedef struct { ... } lv_struct_name_t;
-                        structs[item.type.declname] = item.type.type
-                        
-                    elif (isinstance(item.type, c_ast.TypeDecl) and isinstance(item.type.type, c_ast.IdentifierType) and 
-                            isinstance(previous_item, c_ast.Decl) and isinstance(previous_item.type, c_ast.Enum)):
-                        
-                        # typedef lv_enum_t ...; directly after an enum definition
-                        # newer lvgl uses this to define enum variables as uint8_t
+                    enums[item.name] = self.enum_to_dict(item.type.type)
+                    
+                elif isinstance(item.type, c_ast.TypeDecl) and isinstance(item.type.type, c_ast.Struct):
+                    # typedef struct { ... } lv_struct_name_t;
+                    structs[item.type.declname] = item.type.type
+                    
+                elif (isinstance(item.type, c_ast.TypeDecl) and isinstance(item.type.type, c_ast.IdentifierType) and 
+                        isinstance(previous_item, c_ast.Decl) and isinstance(previous_item.type, c_ast.Enum)):
+                    
+                    # typedef lv_enum_t ...; directly after an enum definition
+                    # newer lvgl uses this to define enum variables as uint8_t
 
-                        enums[item.name] = self.enum_to_dict(previous_item.type)
-                                               
-                        
-                elif isinstance(item, c_ast.Decl) and isinstance(item.type, c_ast.TypeDecl):
-                    declarations[item.type.declname] = item.type
+                    enums[item.name] = self.enum_to_dict(previous_item.type)
+                                            
+                    
+            elif isinstance(item, c_ast.Decl) and isinstance(item.type, c_ast.TypeDecl):
+                declarations[item.type.declname] = item.type
 
-                previous_item = item
-        
+            previous_item = item
+    
         
         objects, global_functions = self.determine_objects(functions, typedefs)
         
@@ -254,14 +226,9 @@ class LvglSourceParser:
     @classmethod
     def determine_objects(cls, functions, typedefs):
         # Stage 1: find all objects and the name of their ancestor
+        # use the typedefs of lv_xxx_ext_t to determine which objects exist,
+        # and to determine their ancestors
         objects = {}
-        # for function_name, function in functions.items():
-        #     match =  re.match(r'lv_([a-zA-Z0-9]+)_create$', function_name)
-        #     # TODO: the 'not in' condition may be removed if we do not use lv_anim.c / lv_group.c
-        #     if match and function_name not in ['lv_anim_create', 'lv_group_create']: # lv_anim and lv_group are not objects
-        #         name = match.group(1)
-        #         objects[name] = cls.determine_ancestor(function)
-        
         lv_ext_pattern = re.compile('^lv_([^_]+)_ext_t')
         
         for typedef in typedefs.values():
@@ -308,14 +275,9 @@ class LvglSourceParser:
             
             name, method = match.groups() if match else (None, None)
             
-            if name in objects:
+            if name in objects and type_repr(function.decl.type.args.params[0].type) == 'lv_obj_t*':
                 if method != 'create':
-                    if type_repr(function.decl.type.args.params[0].type) == 'lv_obj_t*':
-                        objects[name].methods[method] = function
-                    else:
-                        print(function_name)
-                        global_functions[function_name] = function
-                        
+                    objects[name].methods[method] = function
             else:
                 global_functions[function_name] = function
                 
