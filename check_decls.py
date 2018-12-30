@@ -54,3 +54,14 @@ for name, decl in alldecls.items():
         print (generate_c(decl))
         
 
+print('The following enum items are named inconsistently:')
+parseresult = s.parse_sources('lvgl')
+
+for enumname, enum in parseresult.enums.items():
+    assert enumname.endswith('_t')
+    inconsistent_names = [k for k in enum if not k.lower().startswith(enumname[:-1])]
+    if innconsistent_names:
+        print (enumname, ': ', ','.join(incorrect_names))
+
+
+
