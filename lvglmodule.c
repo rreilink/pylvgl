@@ -379,6 +379,57 @@ error:
 
 
 /****************************************************************
+ * Custom types: enums                                          *  
+ ****************************************************************/
+
+static PyType_Slot enum_slots[] = {
+    {0, 0},
+};
+
+/* Create a new class which represents an enumeration
+ * variadic arguments are char* name, int value, ... , NULL
+ * representing the enum values
+ */
+static PyObject* build_enum(char *name, ...) {
+
+    va_list args;
+    va_start(args, name);
+
+    PyType_Spec spec = {
+        .name = name,
+        .basicsize = sizeof(PyObject),
+        .itemsize = 0,
+        .flags = Py_TPFLAGS_DEFAULT,
+        .slots = enum_slots /* terminated by slot==0. */
+    };
+    
+    PyObject *enum_type = PyType_FromSpec(&spec);
+    if (!enum_type) return NULL;
+    
+    ((PyTypeObject*)enum_type)->tp_new = NULL; // enum objects cannot be instantiated
+    
+    while(1) {
+        char *name = va_arg(args, char*);
+        if (!name) break;
+        
+        PyObject *value;
+        value = PyLong_FromLong(va_arg(args, int));
+        if (!value) goto error;
+        
+        PyObject_SetAttrString(enum_type, name, value);
+        Py_DECREF(value);
+    }
+
+    return enum_type;
+
+error:
+    Py_DECREF(enum_type);
+    return NULL;
+
+}
+
+
+/****************************************************************
  * Font class                                                  *  
  ****************************************************************/
 
@@ -7202,166 +7253,50 @@ PyInit_lvgl(void) {
 
 
     
-    PyModule_AddIntConstant(module, "RES_INV", 0);
-    PyModule_AddIntConstant(module, "RES_OK", 1);
-    PyModule_AddIntConstant(module, "PROTECT_NONE", 0);
-    PyModule_AddIntConstant(module, "PROTECT_CHILD_CHG", 1);
-    PyModule_AddIntConstant(module, "PROTECT_PARENT", 2);
-    PyModule_AddIntConstant(module, "PROTECT_POS", 4);
-    PyModule_AddIntConstant(module, "PROTECT_FOLLOW", 8);
-    PyModule_AddIntConstant(module, "PROTECT_PRESS_LOST", 16);
-    PyModule_AddIntConstant(module, "PROTECT_CLICK_FOCUS", 32);
-    PyModule_AddIntConstant(module, "ALIGN_CENTER", 0);
-    PyModule_AddIntConstant(module, "ALIGN_IN_TOP_LEFT", 1);
-    PyModule_AddIntConstant(module, "ALIGN_IN_TOP_MID", 2);
-    PyModule_AddIntConstant(module, "ALIGN_IN_TOP_RIGHT", 3);
-    PyModule_AddIntConstant(module, "ALIGN_IN_BOTTOM_LEFT", 4);
-    PyModule_AddIntConstant(module, "ALIGN_IN_BOTTOM_MID", 5);
-    PyModule_AddIntConstant(module, "ALIGN_IN_BOTTOM_RIGHT", 6);
-    PyModule_AddIntConstant(module, "ALIGN_IN_LEFT_MID", 7);
-    PyModule_AddIntConstant(module, "ALIGN_IN_RIGHT_MID", 8);
-    PyModule_AddIntConstant(module, "ALIGN_OUT_TOP_LEFT", 9);
-    PyModule_AddIntConstant(module, "ALIGN_OUT_TOP_MID", 10);
-    PyModule_AddIntConstant(module, "ALIGN_OUT_TOP_RIGHT", 11);
-    PyModule_AddIntConstant(module, "ALIGN_OUT_BOTTOM_LEFT", 12);
-    PyModule_AddIntConstant(module, "ALIGN_OUT_BOTTOM_MID", 13);
-    PyModule_AddIntConstant(module, "ALIGN_OUT_BOTTOM_RIGHT", 14);
-    PyModule_AddIntConstant(module, "ALIGN_OUT_LEFT_TOP", 15);
-    PyModule_AddIntConstant(module, "ALIGN_OUT_LEFT_MID", 16);
-    PyModule_AddIntConstant(module, "ALIGN_OUT_LEFT_BOTTOM", 17);
-    PyModule_AddIntConstant(module, "ALIGN_OUT_RIGHT_TOP", 18);
-    PyModule_AddIntConstant(module, "ALIGN_OUT_RIGHT_MID", 19);
-    PyModule_AddIntConstant(module, "ALIGN_OUT_RIGHT_BOTTOM", 20);
-    PyModule_AddIntConstant(module, "ANIM_NONE", 0);
-    PyModule_AddIntConstant(module, "ANIM_FLOAT_TOP", 1);
-    PyModule_AddIntConstant(module, "ANIM_FLOAT_LEFT", 2);
-    PyModule_AddIntConstant(module, "ANIM_FLOAT_BOTTOM", 3);
-    PyModule_AddIntConstant(module, "ANIM_FLOAT_RIGHT", 4);
-    PyModule_AddIntConstant(module, "ANIM_GROW_H", 5);
-    PyModule_AddIntConstant(module, "ANIM_GROW_V", 6);
-    PyModule_AddIntConstant(module, "LAYOUT_OFF", 0);
-    PyModule_AddIntConstant(module, "LAYOUT_CENTER", 1);
-    PyModule_AddIntConstant(module, "LAYOUT_COL_L", 2);
-    PyModule_AddIntConstant(module, "LAYOUT_COL_M", 3);
-    PyModule_AddIntConstant(module, "LAYOUT_COL_R", 4);
-    PyModule_AddIntConstant(module, "LAYOUT_ROW_T", 5);
-    PyModule_AddIntConstant(module, "LAYOUT_ROW_M", 6);
-    PyModule_AddIntConstant(module, "LAYOUT_ROW_B", 7);
-    PyModule_AddIntConstant(module, "LAYOUT_PRETTY", 8);
-    PyModule_AddIntConstant(module, "LAYOUT_GRID", 9);
-    PyModule_AddIntConstant(module, "BTN_STATE_REL", 0);
-    PyModule_AddIntConstant(module, "BTN_STATE_PR", 1);
-    PyModule_AddIntConstant(module, "BTN_STATE_TGL_REL", 2);
-    PyModule_AddIntConstant(module, "BTN_STATE_TGL_PR", 3);
-    PyModule_AddIntConstant(module, "BTN_STATE_INA", 4);
-    PyModule_AddIntConstant(module, "BTN_STATE_NUM", 5);
-    PyModule_AddIntConstant(module, "BTN_ACTION_CLICK", 0);
-    PyModule_AddIntConstant(module, "BTN_ACTION_PR", 1);
-    PyModule_AddIntConstant(module, "BTN_ACTION_LONG_PR", 2);
-    PyModule_AddIntConstant(module, "BTN_ACTION_LONG_PR_REPEAT", 3);
-    PyModule_AddIntConstant(module, "BTN_ACTION_NUM", 4);
-    PyModule_AddIntConstant(module, "BTN_STYLE_REL", 0);
-    PyModule_AddIntConstant(module, "BTN_STYLE_PR", 1);
-    PyModule_AddIntConstant(module, "BTN_STYLE_TGL_REL", 2);
-    PyModule_AddIntConstant(module, "BTN_STYLE_TGL_PR", 3);
-    PyModule_AddIntConstant(module, "BTN_STYLE_INA", 4);
-    PyModule_AddIntConstant(module, "LABEL_LONG_EXPAND", 0);
-    PyModule_AddIntConstant(module, "LABEL_LONG_BREAK", 1);
-    PyModule_AddIntConstant(module, "LABEL_LONG_SCROLL", 2);
-    PyModule_AddIntConstant(module, "LABEL_LONG_DOT", 3);
-    PyModule_AddIntConstant(module, "LABEL_LONG_ROLL", 4);
-    PyModule_AddIntConstant(module, "LABEL_LONG_CROP", 5);
-    PyModule_AddIntConstant(module, "LABEL_ALIGN_LEFT", 0);
-    PyModule_AddIntConstant(module, "LABEL_ALIGN_CENTER", 1);
-    PyModule_AddIntConstant(module, "LABEL_ALIGN_RIGHT", 2);
-    PyModule_AddIntConstant(module, "BAR_STYLE_BG", 0);
-    PyModule_AddIntConstant(module, "BAR_STYLE_INDIC", 1);
-    PyModule_AddIntConstant(module, "SLIDER_STYLE_BG", 0);
-    PyModule_AddIntConstant(module, "SLIDER_STYLE_INDIC", 1);
-    PyModule_AddIntConstant(module, "SLIDER_STYLE_KNOB", 2);
-    PyModule_AddIntConstant(module, "SB_MODE_OFF", 0);
-    PyModule_AddIntConstant(module, "SB_MODE_ON", 1);
-    PyModule_AddIntConstant(module, "SB_MODE_DRAG", 2);
-    PyModule_AddIntConstant(module, "SB_MODE_AUTO", 3);
-    PyModule_AddIntConstant(module, "SB_MODE_HIDE", 4);
-    PyModule_AddIntConstant(module, "SB_MODE_UNHIDE", 5);
-    PyModule_AddIntConstant(module, "PAGE_STYLE_BG", 0);
-    PyModule_AddIntConstant(module, "PAGE_STYLE_SCRL", 1);
-    PyModule_AddIntConstant(module, "PAGE_STYLE_SB", 2);
-    PyModule_AddIntConstant(module, "LIST_STYLE_BG", 0);
-    PyModule_AddIntConstant(module, "LIST_STYLE_SCRL", 1);
-    PyModule_AddIntConstant(module, "LIST_STYLE_SB", 2);
-    PyModule_AddIntConstant(module, "LIST_STYLE_BTN_REL", 3);
-    PyModule_AddIntConstant(module, "LIST_STYLE_BTN_PR", 4);
-    PyModule_AddIntConstant(module, "LIST_STYLE_BTN_TGL_REL", 5);
-    PyModule_AddIntConstant(module, "LIST_STYLE_BTN_TGL_PR", 6);
-    PyModule_AddIntConstant(module, "LIST_STYLE_BTN_INA", 7);
-    PyModule_AddIntConstant(module, "ARC_STYLE_MAIN", 0);
-    PyModule_AddIntConstant(module, "PRELOAD_STYLE_MAIN", 0);
-    PyModule_AddIntConstant(module, "BTNM_STYLE_BG", 0);
-    PyModule_AddIntConstant(module, "BTNM_STYLE_BTN_REL", 1);
-    PyModule_AddIntConstant(module, "BTNM_STYLE_BTN_PR", 2);
-    PyModule_AddIntConstant(module, "BTNM_STYLE_BTN_TGL_REL", 3);
-    PyModule_AddIntConstant(module, "BTNM_STYLE_BTN_TGL_PR", 4);
-    PyModule_AddIntConstant(module, "BTNM_STYLE_BTN_INA", 5);
-    PyModule_AddIntConstant(module, "KB_MODE_TEXT", 0);
-    PyModule_AddIntConstant(module, "KB_MODE_NUM", 1);
-    PyModule_AddIntConstant(module, "KB_STYLE_BG", 0);
-    PyModule_AddIntConstant(module, "KB_STYLE_BTN_REL", 1);
-    PyModule_AddIntConstant(module, "KB_STYLE_BTN_PR", 2);
-    PyModule_AddIntConstant(module, "KB_STYLE_BTN_TGL_REL", 3);
-    PyModule_AddIntConstant(module, "KB_STYLE_BTN_TGL_PR", 4);
-    PyModule_AddIntConstant(module, "KB_STYLE_BTN_INA", 5);
-    PyModule_AddIntConstant(module, "WIN_STYLE_BG", 0);
-    PyModule_AddIntConstant(module, "WIN_STYLE_CONTENT_BG", 1);
-    PyModule_AddIntConstant(module, "WIN_STYLE_CONTENT_SCRL", 2);
-    PyModule_AddIntConstant(module, "WIN_STYLE_SB", 3);
-    PyModule_AddIntConstant(module, "WIN_STYLE_HEADER", 4);
-    PyModule_AddIntConstant(module, "WIN_STYLE_BTN_REL", 5);
-    PyModule_AddIntConstant(module, "WIN_STYLE_BTN_PR", 6);
-    PyModule_AddIntConstant(module, "TABVIEW_BTNS_POS_TOP", 0);
-    PyModule_AddIntConstant(module, "TABVIEW_BTNS_POS_BOTTOM", 1);
-    PyModule_AddIntConstant(module, "TABVIEW_STYLE_BG", 0);
-    PyModule_AddIntConstant(module, "TABVIEW_STYLE_INDIC", 1);
-    PyModule_AddIntConstant(module, "TABVIEW_STYLE_BTN_BG", 2);
-    PyModule_AddIntConstant(module, "TABVIEW_STYLE_BTN_REL", 3);
-    PyModule_AddIntConstant(module, "TABVIEW_STYLE_BTN_PR", 4);
-    PyModule_AddIntConstant(module, "TABVIEW_STYLE_BTN_TGL_REL", 5);
-    PyModule_AddIntConstant(module, "TABVIEW_STYLE_BTN_TGL_PR", 6);
-    PyModule_AddIntConstant(module, "SW_STYLE_BG", 0);
-    PyModule_AddIntConstant(module, "SW_STYLE_INDIC", 1);
-    PyModule_AddIntConstant(module, "SW_STYLE_KNOB_OFF", 2);
-    PyModule_AddIntConstant(module, "SW_STYLE_KNOB_ON", 3);
-    PyModule_AddIntConstant(module, "MBOX_STYLE_BG", 0);
-    PyModule_AddIntConstant(module, "MBOX_STYLE_BTN_BG", 1);
-    PyModule_AddIntConstant(module, "MBOX_STYLE_BTN_REL", 2);
-    PyModule_AddIntConstant(module, "MBOX_STYLE_BTN_PR", 3);
-    PyModule_AddIntConstant(module, "MBOX_STYLE_BTN_TGL_REL", 4);
-    PyModule_AddIntConstant(module, "MBOX_STYLE_BTN_TGL_PR", 5);
-    PyModule_AddIntConstant(module, "MBOX_STYLE_BTN_INA", 6);
-    PyModule_AddIntConstant(module, "CB_STYLE_BG", 0);
-    PyModule_AddIntConstant(module, "CB_STYLE_BOX_REL", 1);
-    PyModule_AddIntConstant(module, "CB_STYLE_BOX_PR", 2);
-    PyModule_AddIntConstant(module, "CB_STYLE_BOX_TGL_REL", 3);
-    PyModule_AddIntConstant(module, "CB_STYLE_BOX_TGL_PR", 4);
-    PyModule_AddIntConstant(module, "CB_STYLE_BOX_INA", 5);
-    PyModule_AddIntConstant(module, "CURSOR_NONE", 0);
-    PyModule_AddIntConstant(module, "CURSOR_LINE", 1);
-    PyModule_AddIntConstant(module, "CURSOR_BLOCK", 2);
-    PyModule_AddIntConstant(module, "CURSOR_OUTLINE", 3);
-    PyModule_AddIntConstant(module, "CURSOR_UNDERLINE", 4);
-    PyModule_AddIntConstant(module, "CURSOR_HIDDEN", 8);
-    PyModule_AddIntConstant(module, "TA_STYLE_BG", 0);
-    PyModule_AddIntConstant(module, "TA_STYLE_SB", 1);
-    PyModule_AddIntConstant(module, "TA_STYLE_CURSOR", 2);
-    PyModule_AddIntConstant(module, "DDLIST_STYLE_BG", 0);
-    PyModule_AddIntConstant(module, "DDLIST_STYLE_SEL", 1);
-    PyModule_AddIntConstant(module, "DDLIST_STYLE_SB", 2);
-    PyModule_AddIntConstant(module, "ROLLER_STYLE_BG", 0);
-    PyModule_AddIntConstant(module, "ROLLER_STYLE_SEL", 1);
-    PyModule_AddIntConstant(module, "CHART_TYPE_LINE", 1);
-    PyModule_AddIntConstant(module, "CHART_TYPE_COLUMN", 2);
-    PyModule_AddIntConstant(module, "CHART_TYPE_POINT", 4);
+    PyModule_AddObject(module, "BORDER", build_enum("BORDER", "NONE", LV_BORDER_NONE, "BOTTOM", LV_BORDER_BOTTOM, "TOP", LV_BORDER_TOP, "LEFT", LV_BORDER_LEFT, "RIGHT", LV_BORDER_RIGHT, "FULL", LV_BORDER_FULL, NULL));
+    PyModule_AddObject(module, "SHADOW", build_enum("SHADOW", "BOTTOM", LV_SHADOW_BOTTOM, "FULL", LV_SHADOW_FULL, NULL));
+    PyModule_AddObject(module, "DESIGN", build_enum("DESIGN", "DRAW_MAIN", LV_DESIGN_DRAW_MAIN, "DRAW_POST", LV_DESIGN_DRAW_POST, "COVER_CHK", LV_DESIGN_COVER_CHK, NULL));
+    PyModule_AddObject(module, "RES", build_enum("RES", "INV", LV_RES_INV, "OK", LV_RES_OK, NULL));
+    PyModule_AddObject(module, "SIGNAL", build_enum("SIGNAL", "CLEANUP", LV_SIGNAL_CLEANUP, "CHILD_CHG", LV_SIGNAL_CHILD_CHG, "CORD_CHG", LV_SIGNAL_CORD_CHG, "STYLE_CHG", LV_SIGNAL_STYLE_CHG, "REFR_EXT_SIZE", LV_SIGNAL_REFR_EXT_SIZE, "GET_TYPE", LV_SIGNAL_GET_TYPE, "PRESSED", LV_SIGNAL_PRESSED, "PRESSING", LV_SIGNAL_PRESSING, "PRESS_LOST", LV_SIGNAL_PRESS_LOST, "RELEASED", LV_SIGNAL_RELEASED, "LONG_PRESS", LV_SIGNAL_LONG_PRESS, "LONG_PRESS_REP", LV_SIGNAL_LONG_PRESS_REP, "DRAG_BEGIN", LV_SIGNAL_DRAG_BEGIN, "DRAG_END", LV_SIGNAL_DRAG_END, "FOCUS", LV_SIGNAL_FOCUS, "DEFOCUS", LV_SIGNAL_DEFOCUS, "CONTROLL", LV_SIGNAL_CONTROLL, "GET_EDITABLE", LV_SIGNAL_GET_EDITABLE, NULL));
+    PyModule_AddObject(module, "PROTECT", build_enum("PROTECT", "NONE", LV_PROTECT_NONE, "CHILD_CHG", LV_PROTECT_CHILD_CHG, "PARENT", LV_PROTECT_PARENT, "POS", LV_PROTECT_POS, "FOLLOW", LV_PROTECT_FOLLOW, "PRESS_LOST", LV_PROTECT_PRESS_LOST, "CLICK_FOCUS", LV_PROTECT_CLICK_FOCUS, NULL));
+    PyModule_AddObject(module, "ALIGN", build_enum("ALIGN", "CENTER", LV_ALIGN_CENTER, "IN_TOP_LEFT", LV_ALIGN_IN_TOP_LEFT, "IN_TOP_MID", LV_ALIGN_IN_TOP_MID, "IN_TOP_RIGHT", LV_ALIGN_IN_TOP_RIGHT, "IN_BOTTOM_LEFT", LV_ALIGN_IN_BOTTOM_LEFT, "IN_BOTTOM_MID", LV_ALIGN_IN_BOTTOM_MID, "IN_BOTTOM_RIGHT", LV_ALIGN_IN_BOTTOM_RIGHT, "IN_LEFT_MID", LV_ALIGN_IN_LEFT_MID, "IN_RIGHT_MID", LV_ALIGN_IN_RIGHT_MID, "OUT_TOP_LEFT", LV_ALIGN_OUT_TOP_LEFT, "OUT_TOP_MID", LV_ALIGN_OUT_TOP_MID, "OUT_TOP_RIGHT", LV_ALIGN_OUT_TOP_RIGHT, "OUT_BOTTOM_LEFT", LV_ALIGN_OUT_BOTTOM_LEFT, "OUT_BOTTOM_MID", LV_ALIGN_OUT_BOTTOM_MID, "OUT_BOTTOM_RIGHT", LV_ALIGN_OUT_BOTTOM_RIGHT, "OUT_LEFT_TOP", LV_ALIGN_OUT_LEFT_TOP, "OUT_LEFT_MID", LV_ALIGN_OUT_LEFT_MID, "OUT_LEFT_BOTTOM", LV_ALIGN_OUT_LEFT_BOTTOM, "OUT_RIGHT_TOP", LV_ALIGN_OUT_RIGHT_TOP, "OUT_RIGHT_MID", LV_ALIGN_OUT_RIGHT_MID, "OUT_RIGHT_BOTTOM", LV_ALIGN_OUT_RIGHT_BOTTOM, NULL));
+    PyModule_AddObject(module, "ANIM", build_enum("ANIM", "NONE", LV_ANIM_NONE, "FLOAT_TOP", LV_ANIM_FLOAT_TOP, "FLOAT_LEFT", LV_ANIM_FLOAT_LEFT, "FLOAT_BOTTOM", LV_ANIM_FLOAT_BOTTOM, "FLOAT_RIGHT", LV_ANIM_FLOAT_RIGHT, "GROW_H", LV_ANIM_GROW_H, "GROW_V", LV_ANIM_GROW_V, NULL));
+    PyModule_AddObject(module, "LAYOUT", build_enum("LAYOUT", "OFF", LV_LAYOUT_OFF, "CENTER", LV_LAYOUT_CENTER, "COL_L", LV_LAYOUT_COL_L, "COL_M", LV_LAYOUT_COL_M, "COL_R", LV_LAYOUT_COL_R, "ROW_T", LV_LAYOUT_ROW_T, "ROW_M", LV_LAYOUT_ROW_M, "ROW_B", LV_LAYOUT_ROW_B, "PRETTY", LV_LAYOUT_PRETTY, "GRID", LV_LAYOUT_GRID, NULL));
+    PyModule_AddObject(module, "INDEV_TYPE", build_enum("INDEV_TYPE", "NONE", LV_INDEV_TYPE_NONE, "POINTER", LV_INDEV_TYPE_POINTER, "KEYPAD", LV_INDEV_TYPE_KEYPAD, "BUTTON", LV_INDEV_TYPE_BUTTON, "ENCODER", LV_INDEV_TYPE_ENCODER, NULL));
+    PyModule_AddObject(module, "INDEV_STATE", build_enum("INDEV_STATE", "REL", LV_INDEV_STATE_REL, "PR", LV_INDEV_STATE_PR, NULL));
+    PyModule_AddObject(module, "BTN_STATE", build_enum("BTN_STATE", "REL", LV_BTN_STATE_REL, "PR", LV_BTN_STATE_PR, "TGL_REL", LV_BTN_STATE_TGL_REL, "TGL_PR", LV_BTN_STATE_TGL_PR, "INA", LV_BTN_STATE_INA, "NUM", LV_BTN_STATE_NUM, NULL));
+    PyModule_AddObject(module, "BTN_ACTION", build_enum("BTN_ACTION", "CLICK", LV_BTN_ACTION_CLICK, "PR", LV_BTN_ACTION_PR, "LONG_PR", LV_BTN_ACTION_LONG_PR, "LONG_PR_REPEAT", LV_BTN_ACTION_LONG_PR_REPEAT, "NUM", LV_BTN_ACTION_NUM, NULL));
+    PyModule_AddObject(module, "BTN_STYLE", build_enum("BTN_STYLE", "REL", LV_BTN_STYLE_REL, "PR", LV_BTN_STYLE_PR, "TGL_REL", LV_BTN_STYLE_TGL_REL, "TGL_PR", LV_BTN_STYLE_TGL_PR, "INA", LV_BTN_STYLE_INA, NULL));
+    PyModule_AddObject(module, "TXT_FLAG", build_enum("TXT_FLAG", "NONE", LV_TXT_FLAG_NONE, "RECOLOR", LV_TXT_FLAG_RECOLOR, "EXPAND", LV_TXT_FLAG_EXPAND, "CENTER", LV_TXT_FLAG_CENTER, "RIGHT", LV_TXT_FLAG_RIGHT, NULL));
+    PyModule_AddObject(module, "TXT_CMD_STATE", build_enum("TXT_CMD_STATE", "WAIT", LV_TXT_CMD_STATE_WAIT, "PAR", LV_TXT_CMD_STATE_PAR, "IN", LV_TXT_CMD_STATE_IN, NULL));
+    PyModule_AddObject(module, "LABEL_LONG", build_enum("LABEL_LONG", "EXPAND", LV_LABEL_LONG_EXPAND, "BREAK", LV_LABEL_LONG_BREAK, "SCROLL", LV_LABEL_LONG_SCROLL, "DOT", LV_LABEL_LONG_DOT, "ROLL", LV_LABEL_LONG_ROLL, "CROP", LV_LABEL_LONG_CROP, NULL));
+    PyModule_AddObject(module, "LABEL_ALIGN", build_enum("LABEL_ALIGN", "LEFT", LV_LABEL_ALIGN_LEFT, "CENTER", LV_LABEL_ALIGN_CENTER, "RIGHT", LV_LABEL_ALIGN_RIGHT, NULL));
+    PyModule_AddObject(module, "BAR_STYLE", build_enum("BAR_STYLE", "BG", LV_BAR_STYLE_BG, "INDIC", LV_BAR_STYLE_INDIC, NULL));
+    PyModule_AddObject(module, "SLIDER_STYLE", build_enum("SLIDER_STYLE", "BG", LV_SLIDER_STYLE_BG, "INDIC", LV_SLIDER_STYLE_INDIC, "KNOB", LV_SLIDER_STYLE_KNOB, NULL));
+    PyModule_AddObject(module, "FS_RES", build_enum("FS_RES", "OK", LV_FS_RES_OK, "HW_ERR", LV_FS_RES_HW_ERR, "FS_ERR", LV_FS_RES_FS_ERR, "NOT_EX", LV_FS_RES_NOT_EX, "FULL", LV_FS_RES_FULL, "LOCKED", LV_FS_RES_LOCKED, "DENIED", LV_FS_RES_DENIED, "BUSY", LV_FS_RES_BUSY, "TOUT", LV_FS_RES_TOUT, "NOT_IMP", LV_FS_RES_NOT_IMP, "OUT_OF_MEM", LV_FS_RES_OUT_OF_MEM, "INV_PARAM", LV_FS_RES_INV_PARAM, "UNKNOWN", LV_FS_RES_UNKNOWN, NULL));
+    PyModule_AddObject(module, "FS_MODE", build_enum("FS_MODE", "WR", LV_FS_MODE_WR, "RD", LV_FS_MODE_RD, NULL));
+    PyModule_AddObject(module, "IMG_SRC", build_enum("IMG_SRC", "VARIABLE", LV_IMG_SRC_VARIABLE, "FILE", LV_IMG_SRC_FILE, "SYMBOL", LV_IMG_SRC_SYMBOL, "UNKNOWN", LV_IMG_SRC_UNKNOWN, NULL));
+    PyModule_AddObject(module, "IMG_CF", build_enum("IMG_CF", "UNKOWN", LV_IMG_CF_UNKOWN, "RAW", LV_IMG_CF_RAW, "RAW_ALPHA", LV_IMG_CF_RAW_ALPHA, "RAW_CHROMA_KEYED", LV_IMG_CF_RAW_CHROMA_KEYED, "TRUE_COLOR", LV_IMG_CF_TRUE_COLOR, "TRUE_COLOR_ALPHA", LV_IMG_CF_TRUE_COLOR_ALPHA, "TRUE_COLOR_CHROMA_KEYED", LV_IMG_CF_TRUE_COLOR_CHROMA_KEYED, "INDEXED_1BIT", LV_IMG_CF_INDEXED_1BIT, "INDEXED_2BIT", LV_IMG_CF_INDEXED_2BIT, "INDEXED_4BIT", LV_IMG_CF_INDEXED_4BIT, "INDEXED_8BIT", LV_IMG_CF_INDEXED_8BIT, "ALPHA_1BIT", LV_IMG_CF_ALPHA_1BIT, "ALPHA_2BIT", LV_IMG_CF_ALPHA_2BIT, "ALPHA_4BIT", LV_IMG_CF_ALPHA_4BIT, "ALPHA_8BIT", LV_IMG_CF_ALPHA_8BIT, NULL));
+    PyModule_AddObject(module, "SB_MODE", build_enum("SB_MODE", "OFF", LV_SB_MODE_OFF, "ON", LV_SB_MODE_ON, "DRAG", LV_SB_MODE_DRAG, "AUTO", LV_SB_MODE_AUTO, "HIDE", LV_SB_MODE_HIDE, "UNHIDE", LV_SB_MODE_UNHIDE, NULL));
+    PyModule_AddObject(module, "PAGE_STYLE", build_enum("PAGE_STYLE", "BG", LV_PAGE_STYLE_BG, "SCRL", LV_PAGE_STYLE_SCRL, "SB", LV_PAGE_STYLE_SB, NULL));
+    PyModule_AddObject(module, "LIST_STYLE", build_enum("LIST_STYLE", "BG", LV_LIST_STYLE_BG, "SCRL", LV_LIST_STYLE_SCRL, "SB", LV_LIST_STYLE_SB, "BTN_REL", LV_LIST_STYLE_BTN_REL, "BTN_PR", LV_LIST_STYLE_BTN_PR, "BTN_TGL_REL", LV_LIST_STYLE_BTN_TGL_REL, "BTN_TGL_PR", LV_LIST_STYLE_BTN_TGL_PR, "BTN_INA", LV_LIST_STYLE_BTN_INA, NULL));
+    PyModule_AddObject(module, "ARC_STYLE", build_enum("ARC_STYLE", "MAIN", LV_ARC_STYLE_MAIN, NULL));
+    PyModule_AddObject(module, "PRELOAD_TYPE_SPINNING", build_enum("PRELOAD_TYPE_SPINNING", "ARC", LV_PRELOAD_TYPE_SPINNING_ARC, NULL));
+    PyModule_AddObject(module, "PRELOAD_STYLE", build_enum("PRELOAD_STYLE", "MAIN", LV_PRELOAD_STYLE_MAIN, NULL));
+    PyModule_AddObject(module, "BTNM_STYLE", build_enum("BTNM_STYLE", "BG", LV_BTNM_STYLE_BG, "BTN_REL", LV_BTNM_STYLE_BTN_REL, "BTN_PR", LV_BTNM_STYLE_BTN_PR, "BTN_TGL_REL", LV_BTNM_STYLE_BTN_TGL_REL, "BTN_TGL_PR", LV_BTNM_STYLE_BTN_TGL_PR, "BTN_INA", LV_BTNM_STYLE_BTN_INA, NULL));
+    PyModule_AddObject(module, "KB_MODE", build_enum("KB_MODE", "TEXT", LV_KB_MODE_TEXT, "NUM", LV_KB_MODE_NUM, NULL));
+    PyModule_AddObject(module, "KB_STYLE", build_enum("KB_STYLE", "BG", LV_KB_STYLE_BG, "BTN_REL", LV_KB_STYLE_BTN_REL, "BTN_PR", LV_KB_STYLE_BTN_PR, "BTN_TGL_REL", LV_KB_STYLE_BTN_TGL_REL, "BTN_TGL_PR", LV_KB_STYLE_BTN_TGL_PR, "BTN_INA", LV_KB_STYLE_BTN_INA, NULL));
+    PyModule_AddObject(module, "WIN_STYLE", build_enum("WIN_STYLE", "BG", LV_WIN_STYLE_BG, "CONTENT_BG", LV_WIN_STYLE_CONTENT_BG, "CONTENT_SCRL", LV_WIN_STYLE_CONTENT_SCRL, "SB", LV_WIN_STYLE_SB, "HEADER", LV_WIN_STYLE_HEADER, "BTN_REL", LV_WIN_STYLE_BTN_REL, "BTN_PR", LV_WIN_STYLE_BTN_PR, NULL));
+    PyModule_AddObject(module, "TABVIEW_BTNS_POS", build_enum("TABVIEW_BTNS_POS", "TOP", LV_TABVIEW_BTNS_POS_TOP, "BOTTOM", LV_TABVIEW_BTNS_POS_BOTTOM, NULL));
+    PyModule_AddObject(module, "TABVIEW_STYLE", build_enum("TABVIEW_STYLE", "BG", LV_TABVIEW_STYLE_BG, "INDIC", LV_TABVIEW_STYLE_INDIC, "BTN_BG", LV_TABVIEW_STYLE_BTN_BG, "BTN_REL", LV_TABVIEW_STYLE_BTN_REL, "BTN_PR", LV_TABVIEW_STYLE_BTN_PR, "BTN_TGL_REL", LV_TABVIEW_STYLE_BTN_TGL_REL, "BTN_TGL_PR", LV_TABVIEW_STYLE_BTN_TGL_PR, NULL));
+    PyModule_AddObject(module, "SW_STYLE", build_enum("SW_STYLE", "BG", LV_SW_STYLE_BG, "INDIC", LV_SW_STYLE_INDIC, "KNOB_OFF", LV_SW_STYLE_KNOB_OFF, "KNOB_ON", LV_SW_STYLE_KNOB_ON, NULL));
+    PyModule_AddObject(module, "MBOX_STYLE", build_enum("MBOX_STYLE", "BG", LV_MBOX_STYLE_BG, "BTN_BG", LV_MBOX_STYLE_BTN_BG, "BTN_REL", LV_MBOX_STYLE_BTN_REL, "BTN_PR", LV_MBOX_STYLE_BTN_PR, "BTN_TGL_REL", LV_MBOX_STYLE_BTN_TGL_REL, "BTN_TGL_PR", LV_MBOX_STYLE_BTN_TGL_PR, "BTN_INA", LV_MBOX_STYLE_BTN_INA, NULL));
+    PyModule_AddObject(module, "CB_STYLE", build_enum("CB_STYLE", "BG", LV_CB_STYLE_BG, "BOX_REL", LV_CB_STYLE_BOX_REL, "BOX_PR", LV_CB_STYLE_BOX_PR, "BOX_TGL_REL", LV_CB_STYLE_BOX_TGL_REL, "BOX_TGL_PR", LV_CB_STYLE_BOX_TGL_PR, "BOX_INA", LV_CB_STYLE_BOX_INA, NULL));
+    PyModule_AddObject(module, "CURSOR", build_enum("CURSOR", "NONE", LV_CURSOR_NONE, "LINE", LV_CURSOR_LINE, "BLOCK", LV_CURSOR_BLOCK, "OUTLINE", LV_CURSOR_OUTLINE, "UNDERLINE", LV_CURSOR_UNDERLINE, "HIDDEN", LV_CURSOR_HIDDEN, NULL));
+    PyModule_AddObject(module, "TA_STYLE", build_enum("TA_STYLE", "BG", LV_TA_STYLE_BG, "SB", LV_TA_STYLE_SB, "CURSOR", LV_TA_STYLE_CURSOR, NULL));
+    PyModule_AddObject(module, "DDLIST_STYLE", build_enum("DDLIST_STYLE", "BG", LV_DDLIST_STYLE_BG, "SEL", LV_DDLIST_STYLE_SEL, "SB", LV_DDLIST_STYLE_SB, NULL));
+    PyModule_AddObject(module, "ROLLER_STYLE", build_enum("ROLLER_STYLE", "BG", LV_ROLLER_STYLE_BG, "SEL", LV_ROLLER_STYLE_SEL, NULL));
+    PyModule_AddObject(module, "CHART_TYPE", build_enum("CHART_TYPE", "LINE", LV_CHART_TYPE_LINE, "COLUMN", LV_CHART_TYPE_COLUMN, "POINT", LV_CHART_TYPE_POINT, NULL));
 
     
     PyModule_AddObject(module, "style_scr",Style_From_lv_style(&lv_style_scr));

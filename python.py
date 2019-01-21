@@ -380,11 +380,16 @@ class PythonBindingsGenerator(BindingsGenerator):
     def get_ENUM_ASSIGNMENTS(self):
         ret = ''
     
+        from os.path import commonprefix
+    
         for enumname, enum in self.parseresult.enums.items():
-            if enumname in self.used_enums:
-                for name, value in enum.items():
-                    pyname = stripstart(name, 'LV_')
-                    ret += f'    PyModule_AddIntConstant(module, "{pyname}", {value});\n'
+            # TODO: this is shared with micropython, should be in sourceparser
+            prefix = commonprefix(list(enum.keys()))
+            prefix = "_".join(prefix.split("_")[:-1])
+            enumname = stripstart(prefix, 'LV_')
+
+            items = ''.join(f', "{name[len(prefix)+1:]}", {name}' for name in enum.keys())
+            ret += f'    PyModule_AddObject(module, "{enumname}", build_enum("{enumname}"{items}, NULL));\n'
         return ret
     def get_STYLE_ASSIGNMENTS(self):
 

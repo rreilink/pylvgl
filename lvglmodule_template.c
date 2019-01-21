@@ -216,6 +216,57 @@ error:
 
 
 /****************************************************************
+ * Custom types: enums                                          *  
+ ****************************************************************/
+
+static PyType_Slot enum_slots[] = {
+    {0, 0},
+};
+
+/* Create a new class which represents an enumeration
+ * variadic arguments are char* name, int value, ... , NULL
+ * representing the enum values
+ */
+static PyObject* build_enum(char *name, ...) {
+
+    va_list args;
+    va_start(args, name);
+
+    PyType_Spec spec = {
+        .name = name,
+        .basicsize = sizeof(PyObject),
+        .itemsize = 0,
+        .flags = Py_TPFLAGS_DEFAULT,
+        .slots = enum_slots /* terminated by slot==0. */
+    };
+    
+    PyObject *enum_type = PyType_FromSpec(&spec);
+    if (!enum_type) return NULL;
+    
+    ((PyTypeObject*)enum_type)->tp_new = NULL; // enum objects cannot be instantiated
+    
+    while(1) {
+        char *name = va_arg(args, char*);
+        if (!name) break;
+        
+        PyObject *value;
+        value = PyLong_FromLong(va_arg(args, int));
+        if (!value) goto error;
+        
+        PyObject_SetAttrString(enum_type, name, value);
+        Py_DECREF(value);
+    }
+
+    return enum_type;
+
+error:
+    Py_DECREF(enum_type);
+    return NULL;
+
+}
+
+
+/****************************************************************
  * Font class                                                  *  
  ****************************************************************/
 
