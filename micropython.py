@@ -135,8 +135,8 @@ class MicroPythonObject(Object):
         
         # TODO: use enum.name / shortname for consistency
         for enumname, enum in self.enums.items():
-            long, short = re.match('(LV_[A-Za-z0-9]+_(\w+))', enumname).groups()
-            code += f'    {{ MP_OBJ_NEW_QSTR(MP_QSTR_{short}), MP_ROM_PTR(&mp_{long}_type) }},\n'
+            long, short = re.match('([A-Za-z0-9]+_(\w+))', enumname).groups() # todo: this should be in the bindings generator
+            code += f'    {{ MP_OBJ_NEW_QSTR(MP_QSTR_{short}), MP_ROM_PTR(&mp_LV_{long}_type) }},\n'
         
         return code[:-2] # skip last ,\n
 
@@ -151,7 +151,7 @@ class MicroPythonEnum:
         code = ''
     
         for itemname, value in self.enum.items():
-            code += f'    {{ MP_OBJ_NEW_QSTR(MP_QSTR{itemname[len(self.name):]}), MP_ROM_PTR(MP_ROM_INT({itemname})) }},\n'
+            code += f'    {{ MP_OBJ_NEW_QSTR(MP_QSTR_{itemname}), MP_ROM_PTR(MP_ROM_INT({value})) }},\n'
             
         return code[:-2] # skip last ,\n
     @property
@@ -262,14 +262,19 @@ class MicroPythonBindingsGenerator(BindingsGenerator):
 
 
     def try_generate_type(self, type):
-        global mp_to_lv, lv_to_mp #TODO: not global, but class members
+        #TODO: mp_to_lv and lv_to_mp not global, but class or instance members
+        
         if type in mp_to_lv:
             return True
+
+        orig_type = type
+        while type in self.parseresult.typedefs:
+            type = get_arg_type(self.parseresult.typedefs[type].type.type)
         
-        if type in self.parseresult.enums:
-            mp_to_lv[type] = '(uint8_t)mp_obj_int_get_checked'
-            lv_to_mp[type] = 'mp_obj_new_int_from_uint'
-            return True
+        # todo: no need to add to mp_to_lv and vv
+        if type in mp_to_lv:
+            mp_to_lv[orig_type] = mp_to_lv[type]
+            lv_to_mp[orig_type] = lv_to_mp[type]
         
         return False
 
@@ -349,14 +354,13 @@ MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(mp_{func}_obj, {count}, {count}, mp_{func});
 
 
         
+        # naming issues: HAL_INDEV_TYPE and PRELOADER_TYPE enums (their members do not match the name of the type)
+        
         # reorder enums (TODO: remove)
         reordered_enums = self.parseresult.enums.copy()
-        for name in 'lv_border lv_shadow lv_design lv_res lv_signal lv_protect lv_align lv_anim lv_arc_style lv_layout lv_hal_indev_type lv_indev_state lv_btn_state lv_btn_action lv_btn_style lv_txt_flag lv_txt_cmd_state lv_label_long lv_label_align lv_bar_style lv_btnm_style lv_cb_style lv_chart_type lv_sb_mode lv_page_style lv_ddlist_style lv_fs_res lv_fs_mode lv_img_src lv_img_cf lv_kb_mode lv_kb_style lv_list_style lv_mbox_style lv_preloader_type lv_preload_style lv_roller_style lv_slider_style lv_sw_style lv_win_style lv_tabview_btns_pos lv_tabview_style lv_cursor lv_ta_style'.split():
-            xkey = ''
-            for key in reordered_enums:
-                if key.startswith(name):
-                    xkey = key
-            reordered_enums[xkey] = reordered_enums.pop(xkey)      
+        for name in 'BORDER SHADOW DESIGN RES SIGNAL PROTECT ALIGN ANIM ARC_STYLE LAYOUT INDEV_TYPE INDEV_STATE BTN_STATE BTN_ACTION BTN_STYLE TXT_FLAG TXT_CMD_STATE LABEL_LONG LABEL_ALIGN BAR_STYLE BTNM_STYLE CB_STYLE CHART_TYPE SB_MODE PAGE_STYLE DDLIST_STYLE FS_RES FS_MODE IMG_SRC IMG_CF KB_MODE KB_STYLE LIST_STYLE MBOX_STYLE PRELOAD_TYPE_SPINNING PRELOAD_STYLE ROLLER_STYLE SLIDER_STYLE SW_STYLE WIN_STYLE TABVIEW_BTNS_POS TABVIEW_STYLE CURSOR TA_STYLE'.split():
+
+            reordered_enums[name] = reordered_enums.pop(name)      
         
 
         
@@ -376,19 +380,13 @@ MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(mp_{func}_obj, {count}, {count}, mp_{func});
         enums = {}
 
         
-        for enum in reordered_enums.values():
-            # Determine enum name according to lv_mpy method
-            # (common prefix)
-            # TODO: this should be in the bindings generator (if we decide to do it for all bindings)
-            enum_name = commonprefix(list(enum.keys()))
-            enum_name = "_".join(enum_name.split("_")[:-1])
-
-            match = re.match(r'LV_([A-Za-z0-9]+)_\w+$', enum_name)
+        for enum_name, enum in reordered_enums.items():
+            match = re.match(r'([A-Za-z0-9]+)_\w+$', enum_name)  # TODO: matching of enums to objects should be done in bindings generator
             e = self.enums[enum_name] = MicroPythonEnum(enum_name, enum)
             
             object = self.objects.get(match.group(1).lower()) if match else None
             if object:
-                object.enums[enum_name] = enum # TODO: also store MicroPythonEnum object here?
+                object.enums[enum_name] = e #enum # TODO: also store MicroPythonEnum object here?
             else:
                 self.global_enums[enum_name] = e
                 
@@ -410,7 +408,7 @@ if __name__ == '__main__':
     try:
         parseresult
     except NameError:
-        parseresult = sourceparser.LvglSourceParser().parse_sources('lvgl', extended_files=True)
+        parseresult = sourceparser.LvglSourceParser().parse_sources('lvgl')
     
     g = MicroPythonBindingsGenerator(parseresult)
     g.generate()

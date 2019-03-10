@@ -137,30 +137,30 @@ STATIC inline mp_obj_t convert_to_str(const char *str)
 <<<enums:
     
 /*
- * lvgl {name} object definitions
+ * lvgl LV_{name} object definitions
  */
 
-STATIC const mp_rom_map_elem_t {name}_locals_dict_table[] = {{
+STATIC const mp_rom_map_elem_t LV_{name}_locals_dict_table[] = {{
 {locals_dict_table}
 }};
 
-STATIC MP_DEFINE_CONST_DICT({name}_locals_dict, {name}_locals_dict_table);
+STATIC MP_DEFINE_CONST_DICT(LV_{name}_locals_dict, LV_{name}_locals_dict_table);
 
-STATIC void {name}_print(const mp_print_t *print,
+STATIC void LV_{name}_print(const mp_print_t *print,
     mp_obj_t self_in,
     mp_print_kind_t kind)
 {{
-    mp_printf(print, "lvgl {name}");
+    mp_printf(print, "lvgl LV_{name}");
 }}
 
 
 
-STATIC const mp_obj_type_t mp_{name}_type = {{
+STATIC const mp_obj_type_t mp_LV_{name}_type = {{
     {{ &mp_type_type }},
-    .name = MP_QSTR_{name},
-    .print = {name}_print,
+    .name = MP_QSTR_LV_{name},
+    .print = LV_{name}_print,
     
-    .locals_dict = (mp_obj_dict_t*)&{name}_locals_dict,
+    .locals_dict = (mp_obj_dict_t*)&LV_{name}_locals_dict,
 }};
     
 >>><<<callbacks:{callback_code}>>><<<objects:{methodscode}
@@ -236,7 +236,7 @@ STATIC const mp_rom_map_elem_t lvgl_globals_table[] = {
     { MP_OBJ_NEW_QSTR(MP_QSTR___init__), MP_ROM_PTR(&lv_mp_init_obj) },
 <<<objects:    {{ MP_OBJ_NEW_QSTR(MP_QSTR_{name}), MP_ROM_PTR(&mp_{name}_type) }},
 >>><<<global_functions_with_code:    {{ MP_OBJ_NEW_QSTR(MP_QSTR_{shortname}), MP_ROM_PTR(&mp_{name}_obj) }},
->>><<<global_enums:    {{ MP_OBJ_NEW_QSTR(MP_QSTR_{shortname}), MP_ROM_PTR(&mp_{name}_type) }},
+>>><<<global_enums:    {{ MP_OBJ_NEW_QSTR(MP_QSTR_{name}), MP_ROM_PTR(&mp_LV_{name}_type) }},
 >>>};
 
 

@@ -15,7 +15,7 @@ import copy
 
 assert sys.version_info > (3,6)
 
-from sourceparser import c_ast, c_generator, type_repr
+from sourceparser import c_ast, c_generator, type_repr, stripstart
 
 
 def generate_c(node):
@@ -68,10 +68,6 @@ def flatten_struct(s, prefix=''):
             yield (' '.join(d.type.type.names)+bitsize, prefix+d.name)
 
 
-
-def stripstart(s, start):
-    assert s.startswith(start)
-    return s[len(start):]
 
 
 typeconv = {

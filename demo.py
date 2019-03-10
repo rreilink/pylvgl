@@ -40,13 +40,13 @@ win.show()
 # run this script using -i to try commands interactively
 b1 = lvgl.Btn(lvgl.scr_act())
 b1.set_size(150,50)
-b1.align(b1.get_parent(), lvgl.ALIGN_IN_TOP_MID, 0, 10)
+b1.align(b1.get_parent(), lvgl.ALIGN.IN_TOP_MID, 0, 10)
 
 l1 = lvgl.Label(b1)
 l1.set_text('Push 1')
 
 s1 = lvgl.Slider(lvgl.scr_act())
-s1.align(b1, lvgl.ALIGN_OUT_BOTTOM_MID, 0, 10)
+s1.align(b1, lvgl.ALIGN.OUT_BOTTOM_MID, 0, 10)
 
 s1 = lvgl.scr_act()
 
@@ -54,12 +54,12 @@ s2 = lvgl.Obj()
 lst = lvgl.List(s2)
 lst.set_width(320)
 lst.set_height(200)
-lst.set_sb_mode(lvgl.SB_MODE_AUTO)
+lst.set_sb_mode(lvgl.SB_MODE.AUTO)
 
 # No spacing between items
-st1 = lst.get_style(lvgl.LIST_STYLE_SCRL).copy()
+st1 = lst.get_style(lvgl.LIST_STYLE.SCRL).copy()
 st1.body_padding_inner = 0
-lst.set_style(lvgl.LIST_STYLE_SCRL, st1)
+lst.set_style(lvgl.LIST_STYLE.SCRL, st1)
 
 style = lvgl.style_plain.copy() # copy
 style.body_main_color = 0xffff
@@ -67,7 +67,7 @@ style.body_grad_color = 0xffff
 style.text_color = 0
 style.body_padding_ver = 0
 
-for st in [lvgl.LIST_STYLE_BTN_PR, lvgl.LIST_STYLE_BTN_REL, lvgl.LIST_STYLE_BTN_TGL_PR, lvgl.LIST_STYLE_BTN_TGL_REL]:
+for st in [lvgl.LIST_STYLE.BTN_PR, lvgl.LIST_STYLE.BTN_REL, lvgl.LIST_STYLE.BTN_TGL_PR, lvgl.LIST_STYLE.BTN_TGL_REL]:
     lst.set_style(st, style)
 
 
@@ -86,11 +86,11 @@ class SymbolButton(lvgl.Btn):
         self.symbol = lvgl.Label(self)
         self.symbol.set_text(symbol)
         self.symbol.set_style(symbolstyle)
-        self.symbol.align(self, lvgl.ALIGN_CENTER,0,0)
+        self.symbol.align(self, lvgl.ALIGN.CENTER,0,0)
         
         self.label = lvgl.Label(self)
         self.label.set_text(text)
-        self.label.align(self, lvgl.ALIGN_CENTER,20,0)
+        self.label.align(self, lvgl.ALIGN.CENTER,20,0)
         
         
 class MainMenu(lvgl.Obj):
@@ -118,7 +118,7 @@ class MainMenu(lvgl.Obj):
         self.btnSettings.set_height(90)
         self.lblStatus=lvgl.Label(self)
         self.lblStatus.set_text('\uf026 heating')
-        self.lblStatus.align(self, lvgl.ALIGN_IN_BOTTOM_LEFT, 5, -5)
+        self.lblStatus.align(self, lvgl.ALIGN.IN_BOTTOM_LEFT, 5, -5)
         
         
         
@@ -128,10 +128,10 @@ s4 = lvgl.Obj()
 kb = lvgl.Kb(s4)
 lvgl.scr_load(s2)
 
-s3.btnPrint.set_action(lvgl.BTN_ACTION_CLICK, lambda: print('click'))
-s3.btnPrint.set_action(lvgl.BTN_ACTION_PR, lambda: print('press'))
-s3.btnPrint.set_action(lvgl.BTN_ACTION_LONG_PR, lambda: print('long press'))
-s3.btnPrint.set_action(lvgl.BTN_ACTION_LONG_PR_REPEAT, lambda: print('long press repeat'))
+s3.btnPrint.set_action(lvgl.BTN_ACTION.CLICK, lambda: print('click'))
+s3.btnPrint.set_action(lvgl.BTN_ACTION.PR, lambda: print('press'))
+s3.btnPrint.set_action(lvgl.BTN_ACTION.LONG_PR, lambda: print('long press'))
+s3.btnPrint.set_action(lvgl.BTN_ACTION.LONG_PR_REPEAT, lambda: print('long press repeat'))
 
 print(s3.btnPrint.get_type())
 

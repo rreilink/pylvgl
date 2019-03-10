@@ -98,7 +98,7 @@ py{method.decl.name}(pylv_Obj *self, PyObject *args, PyObject *kwds)
                 fmt, ctype = 'i', 'int'
             else:
                 try:
-                    fmt, ctype = self.TYPECONV[paramtype]
+                    fmt, ctype = self.TYPECONV[self.bindingsgenerator.deref_typedef(paramtype)]
                 except KeyError:
                     # TODO: raise exception like micropython does
                     print(f'{method.decl.name}: Parameter type not found >{paramtype}< ')
@@ -117,7 +117,7 @@ py{method.decl.name}(pylv_Obj *self, PyObject *args, PyObject *kwds)
                 resfmt, resctype = 'i', 'int'
             else:
                 try:
-                    resfmt, resctype = self.TYPECONV[restype]
+                    resfmt, resctype = self.TYPECONV[self.bindingsgenerator.deref_typedef(restype)]
                 except KeyError:
                     print(f'{method.decl.name}: Return type not found >{restype}< ')
                     restypes_miss.update((restype,))
@@ -367,9 +367,9 @@ class PythonBindingsGenerator(BindingsGenerator):
         ret = ''
         
         btncallbacknames = []
-        for i, (name, value) in enumerate(list(self.parseresult.enums['lv_btn_action_t'].items())[:-1]): # last is LV_BTN_ACTION_NUM
-            assert value == i
-            actionname = 'action_' + stripstart(name, 'LV_BTN_ACTION_').lower()
+        for i, (name, value) in enumerate(list(self.parseresult.enums['BTN_ACTION'].items())[:-1]): # last is LV_BTN_ACTION_NUM
+
+            actionname = 'action_' + name.lower()
             ret += self.objects['btn'].build_actioncallbackcode(actionname, f'actions[{i}]')
             btncallbacknames.append(f'pylv_btn_{actionname}_callback')
             
@@ -378,17 +378,10 @@ class PythonBindingsGenerator(BindingsGenerator):
         
         
     def get_ENUM_ASSIGNMENTS(self):
-        ret = ''
-    
-        from os.path import commonprefix
-    
+        ret = ''    
         for enumname, enum in self.parseresult.enums.items():
-            # TODO: this is shared with micropython, should be in sourceparser
-            prefix = commonprefix(list(enum.keys()))
-            prefix = "_".join(prefix.split("_")[:-1])
-            enumname = stripstart(prefix, 'LV_')
 
-            items = ''.join(f', "{name[len(prefix)+1:]}", {name}' for name in enum.keys())
+            items = ''.join(f', "{name}", {value}' for name, value in enum.items())
             ret += f'    PyModule_AddObject(module, "{enumname}", build_enum("{enumname}"{items}, NULL));\n'
         return ret
     def get_STYLE_ASSIGNMENTS(self):

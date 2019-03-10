@@ -1,8 +1,3 @@
-#from pycparser import c_parser, c_ast, parse_file, CParser
-
-
-#import pycparser.ply.lex as lex
-#import pycparser.ply.cpp
 
 import sys
 sys.path.insert(0, '/Users/rob/Projecten/python/pycparser/')
@@ -26,6 +21,10 @@ def type_repr(x):
         return f'<function{ptrs}>'
     assert isinstance(x, c_ast.TypeDecl)
     return ' '.join(x.type.names) + ptrs 
+
+def stripstart(s, start):
+    assert s.startswith(start)
+    return s[len(start):]
 
 class CPP(pycparser.ply.cpp.Preprocessor):
     '''
@@ -116,18 +115,18 @@ class LvglSourceParser:
     
     @staticmethod
     def enum_to_dict(enum_node):
-        value = 0
-        enum = collections.OrderedDict()
-        for enumitem in enum_node.values.enumerators:
-            if enumitem.value is not None:
-                v = enumitem.value.value
-                if v.lower().startswith('0x'):
-                    value = int(v[2:], 16)
-                else:
-                    value = int(v)
-            enum[enumitem.name] = value
-            value += 1
-        return enum
+        '''
+        Given a c enum ast node, determine:
+        - the name of the enum in python, using the common prefix of all enum items
+        - a dictionary with as keys the names as they should be in Python, and as values the C enum constant names
+        '''
+        items = [enumitem.name for enumitem in enum_node.values.enumerators]
+        
+        prefix = os.path.commonprefix(items)
+        prefix = "_".join(prefix.split("_")[:-1])
+        enumname = stripstart(prefix, 'LV_')
+        
+        return enumname, {stripstart(item, prefix + '_'): item for item in items}
         
     def parse_sources(self, path):
         '''
@@ -173,7 +172,7 @@ class LvglSourceParser:
                     # Earlier versions of lvgl use typedef enum { ... } lv_enum_name_t
                     
                     
-                    enums[item.name] = self.enum_to_dict(item.type.type)
+                    enums[item.name] = self.enum_to_list(item.type.type)
                     
                 elif isinstance(item.type, c_ast.TypeDecl) and isinstance(item.type.type, c_ast.Struct):
                     # typedef struct { ... } lv_struct_name_t;
@@ -184,8 +183,9 @@ class LvglSourceParser:
                     
                     # typedef lv_enum_t ...; directly after an enum definition
                     # newer lvgl uses this to define enum variables as uint8_t
-
-                    enums[item.name] = self.enum_to_dict(previous_item.type)
+                    enumname, enum = self.enum_to_dict(previous_item.type)
+                    
+                    enums[enumname] = enum
                                             
                     
             elif isinstance(item, c_ast.Decl) and isinstance(item.type, c_ast.TypeDecl):

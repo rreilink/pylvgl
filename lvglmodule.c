@@ -1242,10 +1242,10 @@ pylv_obj_align(pylv_Obj *self, PyObject *args, PyObject *kwds)
 {
     static char *kwlist[] = {"base", "align", "x_mod", "y_mod", NULL};
     pylv_Obj * base;
-    int align;
+    unsigned char align;
     short int x_mod;
     short int y_mod;
-    if (!PyArg_ParseTupleAndKeywords(args, kwds, "O!ihh", kwlist , &pylv_obj_Type, &base, &align, &x_mod, &y_mod)) return NULL;
+    if (!PyArg_ParseTupleAndKeywords(args, kwds, "O!bhh", kwlist , &pylv_obj_Type, &base, &align, &x_mod, &y_mod)) return NULL;
 
     LVGL_LOCK         
     lv_obj_align(self->ref, base->ref, align, x_mod, y_mod);
@@ -1805,9 +1805,9 @@ pylv_win_close_action(pylv_Obj *self, PyObject *args, PyObject *kwds)
     if (!PyArg_ParseTupleAndKeywords(args, kwds, "", kwlist )) return NULL;
 
     LVGL_LOCK        
-    int result = lv_win_close_action(self->ref);
+    unsigned char result = lv_win_close_action(self->ref);
     LVGL_UNLOCK
-    return Py_BuildValue("i", result);
+    return Py_BuildValue("b", result);
 }
 
 static PyObject*
@@ -1840,8 +1840,8 @@ static PyObject*
 pylv_win_set_layout(pylv_Obj *self, PyObject *args, PyObject *kwds)
 {
     static char *kwlist[] = {"layout", NULL};
-    int layout;
-    if (!PyArg_ParseTupleAndKeywords(args, kwds, "i", kwlist , &layout)) return NULL;
+    unsigned char layout;
+    if (!PyArg_ParseTupleAndKeywords(args, kwds, "b", kwlist , &layout)) return NULL;
 
     LVGL_LOCK         
     lv_win_set_layout(self->ref, layout);
@@ -1853,8 +1853,8 @@ static PyObject*
 pylv_win_set_sb_mode(pylv_Obj *self, PyObject *args, PyObject *kwds)
 {
     static char *kwlist[] = {"sb_mode", NULL};
-    int sb_mode;
-    if (!PyArg_ParseTupleAndKeywords(args, kwds, "i", kwlist , &sb_mode)) return NULL;
+    unsigned char sb_mode;
+    if (!PyArg_ParseTupleAndKeywords(args, kwds, "b", kwlist , &sb_mode)) return NULL;
 
     LVGL_LOCK         
     lv_win_set_sb_mode(self->ref, sb_mode);
@@ -1866,9 +1866,9 @@ static PyObject*
 pylv_win_set_style(pylv_Obj *self, PyObject *args, PyObject *kwds)
 {
     static char *kwlist[] = {"type", "style", NULL};
-    int type;
+    unsigned char type;
     Style_Object * style;
-    if (!PyArg_ParseTupleAndKeywords(args, kwds, "iO!", kwlist , &type, &Style_Type, &style)) return NULL;
+    if (!PyArg_ParseTupleAndKeywords(args, kwds, "bO!", kwlist , &type, &Style_Type, &style)) return NULL;
 
     LVGL_LOCK         
     lv_win_set_style(self->ref, type, style->ref);
@@ -1935,9 +1935,9 @@ pylv_win_get_layout(pylv_Obj *self, PyObject *args, PyObject *kwds)
     if (!PyArg_ParseTupleAndKeywords(args, kwds, "", kwlist )) return NULL;
 
     LVGL_LOCK        
-    int result = lv_win_get_layout(self->ref);
+    unsigned char result = lv_win_get_layout(self->ref);
     LVGL_UNLOCK
-    return Py_BuildValue("i", result);
+    return Py_BuildValue("b", result);
 }
 
 static PyObject*
@@ -1947,9 +1947,9 @@ pylv_win_get_sb_mode(pylv_Obj *self, PyObject *args, PyObject *kwds)
     if (!PyArg_ParseTupleAndKeywords(args, kwds, "", kwlist )) return NULL;
 
     LVGL_LOCK        
-    int result = lv_win_get_sb_mode(self->ref);
+    unsigned char result = lv_win_get_sb_mode(self->ref);
     LVGL_UNLOCK
-    return Py_BuildValue("i", result);
+    return Py_BuildValue("b", result);
 }
 
 static PyObject*
@@ -1968,8 +1968,8 @@ static PyObject*
 pylv_win_get_style(pylv_Obj *self, PyObject *args, PyObject *kwds)
 {
     static char *kwlist[] = {"type", NULL};
-    int type;
-    if (!PyArg_ParseTupleAndKeywords(args, kwds, "i", kwlist , &type)) return NULL;
+    unsigned char type;
+    if (!PyArg_ParseTupleAndKeywords(args, kwds, "b", kwlist , &type)) return NULL;
     return Style_From_lv_style(lv_win_get_style(self->ref, type));
 }
 
@@ -2121,8 +2121,8 @@ static PyObject*
 pylv_label_set_long_mode(pylv_Obj *self, PyObject *args, PyObject *kwds)
 {
     static char *kwlist[] = {"long_mode", NULL};
-    int long_mode;
-    if (!PyArg_ParseTupleAndKeywords(args, kwds, "i", kwlist , &long_mode)) return NULL;
+    unsigned char long_mode;
+    if (!PyArg_ParseTupleAndKeywords(args, kwds, "b", kwlist , &long_mode)) return NULL;
 
     LVGL_LOCK         
     lv_label_set_long_mode(self->ref, long_mode);
@@ -2134,8 +2134,8 @@ static PyObject*
 pylv_label_set_align(pylv_Obj *self, PyObject *args, PyObject *kwds)
 {
     static char *kwlist[] = {"align", NULL};
-    int align;
-    if (!PyArg_ParseTupleAndKeywords(args, kwds, "i", kwlist , &align)) return NULL;
+    unsigned char align;
+    if (!PyArg_ParseTupleAndKeywords(args, kwds, "b", kwlist , &align)) return NULL;
 
     LVGL_LOCK         
     lv_label_set_align(self->ref, align);
@@ -2201,9 +2201,9 @@ pylv_label_get_long_mode(pylv_Obj *self, PyObject *args, PyObject *kwds)
     if (!PyArg_ParseTupleAndKeywords(args, kwds, "", kwlist )) return NULL;
 
     LVGL_LOCK        
-    int result = lv_label_get_long_mode(self->ref);
+    unsigned char result = lv_label_get_long_mode(self->ref);
     LVGL_UNLOCK
-    return Py_BuildValue("i", result);
+    return Py_BuildValue("b", result);
 }
 
 static PyObject*
@@ -2213,9 +2213,9 @@ pylv_label_get_align(pylv_Obj *self, PyObject *args, PyObject *kwds)
     if (!PyArg_ParseTupleAndKeywords(args, kwds, "", kwlist )) return NULL;
 
     LVGL_LOCK        
-    int result = lv_label_get_align(self->ref);
+    unsigned char result = lv_label_get_align(self->ref);
     LVGL_UNLOCK
-    return Py_BuildValue("i", result);
+    return Py_BuildValue("b", result);
 }
 
 static PyObject*
@@ -2524,9 +2524,9 @@ static PyObject*
 pylv_btnm_set_style(pylv_Obj *self, PyObject *args, PyObject *kwds)
 {
     static char *kwlist[] = {"type", "style", NULL};
-    int type;
+    unsigned char type;
     Style_Object * style;
-    if (!PyArg_ParseTupleAndKeywords(args, kwds, "iO!", kwlist , &type, &Style_Type, &style)) return NULL;
+    if (!PyArg_ParseTupleAndKeywords(args, kwds, "bO!", kwlist , &type, &Style_Type, &style)) return NULL;
 
     LVGL_LOCK         
     lv_btnm_set_style(self->ref, type, style->ref);
@@ -2564,8 +2564,8 @@ static PyObject*
 pylv_btnm_get_style(pylv_Obj *self, PyObject *args, PyObject *kwds)
 {
     static char *kwlist[] = {"type", NULL};
-    int type;
-    if (!PyArg_ParseTupleAndKeywords(args, kwds, "i", kwlist , &type)) return NULL;
+    unsigned char type;
+    if (!PyArg_ParseTupleAndKeywords(args, kwds, "b", kwlist , &type)) return NULL;
     return Style_From_lv_style(lv_btnm_get_style(self->ref, type));
 }
 
@@ -2661,8 +2661,8 @@ static PyObject*
 pylv_chart_set_type(pylv_Obj *self, PyObject *args, PyObject *kwds)
 {
     static char *kwlist[] = {"type", NULL};
-    int type;
-    if (!PyArg_ParseTupleAndKeywords(args, kwds, "i", kwlist , &type)) return NULL;
+    unsigned char type;
+    if (!PyArg_ParseTupleAndKeywords(args, kwds, "b", kwlist , &type)) return NULL;
 
     LVGL_LOCK         
     lv_chart_set_type(self->ref, type);
@@ -2750,9 +2750,9 @@ pylv_chart_get_type(pylv_Obj *self, PyObject *args, PyObject *kwds)
     if (!PyArg_ParseTupleAndKeywords(args, kwds, "", kwlist )) return NULL;
 
     LVGL_LOCK        
-    int result = lv_chart_get_type(self->ref);
+    unsigned char result = lv_chart_get_type(self->ref);
     LVGL_UNLOCK
-    return Py_BuildValue("i", result);
+    return Py_BuildValue("b", result);
 }
 
 static PyObject*
@@ -2881,8 +2881,8 @@ static PyObject*
 pylv_cont_set_layout(pylv_Obj *self, PyObject *args, PyObject *kwds)
 {
     static char *kwlist[] = {"layout", NULL};
-    int layout;
-    if (!PyArg_ParseTupleAndKeywords(args, kwds, "i", kwlist , &layout)) return NULL;
+    unsigned char layout;
+    if (!PyArg_ParseTupleAndKeywords(args, kwds, "b", kwlist , &layout)) return NULL;
 
     LVGL_LOCK         
     lv_cont_set_layout(self->ref, layout);
@@ -2911,9 +2911,9 @@ pylv_cont_get_layout(pylv_Obj *self, PyObject *args, PyObject *kwds)
     if (!PyArg_ParseTupleAndKeywords(args, kwds, "", kwlist )) return NULL;
 
     LVGL_LOCK        
-    int result = lv_cont_get_layout(self->ref);
+    unsigned char result = lv_cont_get_layout(self->ref);
     LVGL_UNLOCK
-    return Py_BuildValue("i", result);
+    return Py_BuildValue("b", result);
 }
 
 static PyObject*
@@ -3268,8 +3268,8 @@ static PyObject*
 pylv_kb_set_mode(pylv_Obj *self, PyObject *args, PyObject *kwds)
 {
     static char *kwlist[] = {"mode", NULL};
-    int mode;
-    if (!PyArg_ParseTupleAndKeywords(args, kwds, "i", kwlist , &mode)) return NULL;
+    unsigned char mode;
+    if (!PyArg_ParseTupleAndKeywords(args, kwds, "b", kwlist , &mode)) return NULL;
 
     LVGL_LOCK         
     lv_kb_set_mode(self->ref, mode);
@@ -3294,9 +3294,9 @@ static PyObject*
 pylv_kb_set_style(pylv_Obj *self, PyObject *args, PyObject *kwds)
 {
     static char *kwlist[] = {"type", "style", NULL};
-    int type;
+    unsigned char type;
     Style_Object * style;
-    if (!PyArg_ParseTupleAndKeywords(args, kwds, "iO!", kwlist , &type, &Style_Type, &style)) return NULL;
+    if (!PyArg_ParseTupleAndKeywords(args, kwds, "bO!", kwlist , &type, &Style_Type, &style)) return NULL;
 
     LVGL_LOCK         
     lv_kb_set_style(self->ref, type, style->ref);
@@ -3325,9 +3325,9 @@ pylv_kb_get_mode(pylv_Obj *self, PyObject *args, PyObject *kwds)
     if (!PyArg_ParseTupleAndKeywords(args, kwds, "", kwlist )) return NULL;
 
     LVGL_LOCK        
-    int result = lv_kb_get_mode(self->ref);
+    unsigned char result = lv_kb_get_mode(self->ref);
     LVGL_UNLOCK
-    return Py_BuildValue("i", result);
+    return Py_BuildValue("b", result);
 }
 
 static PyObject*
@@ -3346,8 +3346,8 @@ static PyObject*
 pylv_kb_get_style(pylv_Obj *self, PyObject *args, PyObject *kwds)
 {
     static char *kwlist[] = {"type", NULL};
-    int type;
-    if (!PyArg_ParseTupleAndKeywords(args, kwds, "i", kwlist , &type)) return NULL;
+    unsigned char type;
+    if (!PyArg_ParseTupleAndKeywords(args, kwds, "b", kwlist , &type)) return NULL;
     return Style_From_lv_style(lv_kb_get_style(self->ref, type));
 }
 
@@ -3595,9 +3595,9 @@ static PyObject*
 pylv_bar_set_style(pylv_Obj *self, PyObject *args, PyObject *kwds)
 {
     static char *kwlist[] = {"type", "style", NULL};
-    int type;
+    unsigned char type;
     Style_Object * style;
-    if (!PyArg_ParseTupleAndKeywords(args, kwds, "iO!", kwlist , &type, &Style_Type, &style)) return NULL;
+    if (!PyArg_ParseTupleAndKeywords(args, kwds, "bO!", kwlist , &type, &Style_Type, &style)) return NULL;
 
     LVGL_LOCK         
     lv_bar_set_style(self->ref, type, style->ref);
@@ -3645,8 +3645,8 @@ static PyObject*
 pylv_bar_get_style(pylv_Obj *self, PyObject *args, PyObject *kwds)
 {
     static char *kwlist[] = {"type", NULL};
-    int type;
-    if (!PyArg_ParseTupleAndKeywords(args, kwds, "i", kwlist , &type)) return NULL;
+    unsigned char type;
+    if (!PyArg_ParseTupleAndKeywords(args, kwds, "b", kwlist , &type)) return NULL;
     return Style_From_lv_style(lv_bar_get_style(self->ref, type));
 }
 
@@ -3721,9 +3721,9 @@ static PyObject*
 pylv_arc_set_style(pylv_Obj *self, PyObject *args, PyObject *kwds)
 {
     static char *kwlist[] = {"type", "style", NULL};
-    int type;
+    unsigned char type;
     Style_Object * style;
-    if (!PyArg_ParseTupleAndKeywords(args, kwds, "iO!", kwlist , &type, &Style_Type, &style)) return NULL;
+    if (!PyArg_ParseTupleAndKeywords(args, kwds, "bO!", kwlist , &type, &Style_Type, &style)) return NULL;
 
     LVGL_LOCK         
     lv_arc_set_style(self->ref, type, style->ref);
@@ -3759,8 +3759,8 @@ static PyObject*
 pylv_arc_get_style(pylv_Obj *self, PyObject *args, PyObject *kwds)
 {
     static char *kwlist[] = {"type", NULL};
-    int type;
-    if (!PyArg_ParseTupleAndKeywords(args, kwds, "i", kwlist , &type)) return NULL;
+    unsigned char type;
+    if (!PyArg_ParseTupleAndKeywords(args, kwds, "b", kwlist , &type)) return NULL;
     return Style_From_lv_style(lv_arc_get_style(self->ref, type));
 }
 
@@ -4026,9 +4026,9 @@ static PyObject*
 pylv_tabview_set_style(pylv_Obj *self, PyObject *args, PyObject *kwds)
 {
     static char *kwlist[] = {"type", "style", NULL};
-    int type;
+    unsigned char type;
     Style_Object * style;
-    if (!PyArg_ParseTupleAndKeywords(args, kwds, "iO!", kwlist , &type, &Style_Type, &style)) return NULL;
+    if (!PyArg_ParseTupleAndKeywords(args, kwds, "bO!", kwlist , &type, &Style_Type, &style)) return NULL;
 
     LVGL_LOCK         
     lv_tabview_set_style(self->ref, type, style->ref);
@@ -4040,8 +4040,8 @@ static PyObject*
 pylv_tabview_set_btns_pos(pylv_Obj *self, PyObject *args, PyObject *kwds)
 {
     static char *kwlist[] = {"btns_pos", NULL};
-    int btns_pos;
-    if (!PyArg_ParseTupleAndKeywords(args, kwds, "i", kwlist , &btns_pos)) return NULL;
+    unsigned char btns_pos;
+    if (!PyArg_ParseTupleAndKeywords(args, kwds, "b", kwlist , &btns_pos)) return NULL;
 
     LVGL_LOCK         
     lv_tabview_set_btns_pos(self->ref, btns_pos);
@@ -4123,8 +4123,8 @@ static PyObject*
 pylv_tabview_get_style(pylv_Obj *self, PyObject *args, PyObject *kwds)
 {
     static char *kwlist[] = {"type", NULL};
-    int type;
-    if (!PyArg_ParseTupleAndKeywords(args, kwds, "i", kwlist , &type)) return NULL;
+    unsigned char type;
+    if (!PyArg_ParseTupleAndKeywords(args, kwds, "b", kwlist , &type)) return NULL;
     return Style_From_lv_style(lv_tabview_get_style(self->ref, type));
 }
 
@@ -4135,9 +4135,9 @@ pylv_tabview_get_btns_pos(pylv_Obj *self, PyObject *args, PyObject *kwds)
     if (!PyArg_ParseTupleAndKeywords(args, kwds, "", kwlist )) return NULL;
 
     LVGL_LOCK        
-    int result = lv_tabview_get_btns_pos(self->ref);
+    unsigned char result = lv_tabview_get_btns_pos(self->ref);
     LVGL_UNLOCK
-    return Py_BuildValue("i", result);
+    return Py_BuildValue("b", result);
 }
 
 
@@ -4270,9 +4270,9 @@ static PyObject*
 pylv_mbox_set_style(pylv_Obj *self, PyObject *args, PyObject *kwds)
 {
     static char *kwlist[] = {"type", "style", NULL};
-    int type;
+    unsigned char type;
     Style_Object * style;
-    if (!PyArg_ParseTupleAndKeywords(args, kwds, "iO!", kwlist , &type, &Style_Type, &style)) return NULL;
+    if (!PyArg_ParseTupleAndKeywords(args, kwds, "bO!", kwlist , &type, &Style_Type, &style)) return NULL;
 
     LVGL_LOCK         
     lv_mbox_set_style(self->ref, type, style->ref);
@@ -4322,8 +4322,8 @@ static PyObject*
 pylv_mbox_get_style(pylv_Obj *self, PyObject *args, PyObject *kwds)
 {
     static char *kwlist[] = {"type", NULL};
-    int type;
-    if (!PyArg_ParseTupleAndKeywords(args, kwds, "i", kwlist , &type)) return NULL;
+    unsigned char type;
+    if (!PyArg_ParseTupleAndKeywords(args, kwds, "b", kwlist , &type)) return NULL;
     return Style_From_lv_style(lv_mbox_get_style(self->ref, type));
 }
 
@@ -4688,8 +4688,8 @@ static PyObject*
 pylv_page_set_sb_mode(pylv_Obj *self, PyObject *args, PyObject *kwds)
 {
     static char *kwlist[] = {"sb_mode", NULL};
-    int sb_mode;
-    if (!PyArg_ParseTupleAndKeywords(args, kwds, "i", kwlist , &sb_mode)) return NULL;
+    unsigned char sb_mode;
+    if (!PyArg_ParseTupleAndKeywords(args, kwds, "b", kwlist , &sb_mode)) return NULL;
 
     LVGL_LOCK         
     lv_page_set_sb_mode(self->ref, sb_mode);
@@ -4754,8 +4754,8 @@ static PyObject*
 pylv_page_set_scrl_layout(pylv_Obj *self, PyObject *args, PyObject *kwds)
 {
     static char *kwlist[] = {"layout", NULL};
-    int layout;
-    if (!PyArg_ParseTupleAndKeywords(args, kwds, "i", kwlist , &layout)) return NULL;
+    unsigned char layout;
+    if (!PyArg_ParseTupleAndKeywords(args, kwds, "b", kwlist , &layout)) return NULL;
 
     LVGL_LOCK         
     lv_page_set_scrl_layout(self->ref, layout);
@@ -4767,9 +4767,9 @@ static PyObject*
 pylv_page_set_style(pylv_Obj *self, PyObject *args, PyObject *kwds)
 {
     static char *kwlist[] = {"type", "style", NULL};
-    int type;
+    unsigned char type;
     Style_Object * style;
-    if (!PyArg_ParseTupleAndKeywords(args, kwds, "iO!", kwlist , &type, &Style_Type, &style)) return NULL;
+    if (!PyArg_ParseTupleAndKeywords(args, kwds, "bO!", kwlist , &type, &Style_Type, &style)) return NULL;
 
     LVGL_LOCK         
     lv_page_set_style(self->ref, type, style->ref);
@@ -4784,9 +4784,9 @@ pylv_page_get_sb_mode(pylv_Obj *self, PyObject *args, PyObject *kwds)
     if (!PyArg_ParseTupleAndKeywords(args, kwds, "", kwlist )) return NULL;
 
     LVGL_LOCK        
-    int result = lv_page_get_sb_mode(self->ref);
+    unsigned char result = lv_page_get_sb_mode(self->ref);
     LVGL_UNLOCK
-    return Py_BuildValue("i", result);
+    return Py_BuildValue("b", result);
 }
 
 static PyObject*
@@ -4856,9 +4856,9 @@ pylv_page_get_scrl_layout(pylv_Obj *self, PyObject *args, PyObject *kwds)
     if (!PyArg_ParseTupleAndKeywords(args, kwds, "", kwlist )) return NULL;
 
     LVGL_LOCK        
-    int result = lv_page_get_scrl_layout(self->ref);
+    unsigned char result = lv_page_get_scrl_layout(self->ref);
     LVGL_UNLOCK
-    return Py_BuildValue("i", result);
+    return Py_BuildValue("b", result);
 }
 
 static PyObject*
@@ -4889,8 +4889,8 @@ static PyObject*
 pylv_page_get_style(pylv_Obj *self, PyObject *args, PyObject *kwds)
 {
     static char *kwlist[] = {"type", NULL};
-    int type;
-    if (!PyArg_ParseTupleAndKeywords(args, kwds, "i", kwlist , &type)) return NULL;
+    unsigned char type;
+    if (!PyArg_ParseTupleAndKeywords(args, kwds, "b", kwlist , &type)) return NULL;
     return Style_From_lv_style(lv_page_get_style(self->ref, type));
 }
 
@@ -5149,8 +5149,8 @@ static PyObject*
 pylv_ta_set_cursor_type(pylv_Obj *self, PyObject *args, PyObject *kwds)
 {
     static char *kwlist[] = {"cur_type", NULL};
-    int cur_type;
-    if (!PyArg_ParseTupleAndKeywords(args, kwds, "i", kwlist , &cur_type)) return NULL;
+    unsigned char cur_type;
+    if (!PyArg_ParseTupleAndKeywords(args, kwds, "b", kwlist , &cur_type)) return NULL;
 
     LVGL_LOCK         
     lv_ta_set_cursor_type(self->ref, cur_type);
@@ -5188,8 +5188,8 @@ static PyObject*
 pylv_ta_set_text_align(pylv_Obj *self, PyObject *args, PyObject *kwds)
 {
     static char *kwlist[] = {"align", NULL};
-    int align;
-    if (!PyArg_ParseTupleAndKeywords(args, kwds, "i", kwlist , &align)) return NULL;
+    unsigned char align;
+    if (!PyArg_ParseTupleAndKeywords(args, kwds, "b", kwlist , &align)) return NULL;
 
     LVGL_LOCK         
     lv_ta_set_text_align(self->ref, align);
@@ -5227,9 +5227,9 @@ static PyObject*
 pylv_ta_set_style(pylv_Obj *self, PyObject *args, PyObject *kwds)
 {
     static char *kwlist[] = {"type", "style", NULL};
-    int type;
+    unsigned char type;
     Style_Object * style;
-    if (!PyArg_ParseTupleAndKeywords(args, kwds, "iO!", kwlist , &type, &Style_Type, &style)) return NULL;
+    if (!PyArg_ParseTupleAndKeywords(args, kwds, "bO!", kwlist , &type, &Style_Type, &style)) return NULL;
 
     LVGL_LOCK         
     lv_ta_set_style(self->ref, type, style->ref);
@@ -5282,9 +5282,9 @@ pylv_ta_get_cursor_type(pylv_Obj *self, PyObject *args, PyObject *kwds)
     if (!PyArg_ParseTupleAndKeywords(args, kwds, "", kwlist )) return NULL;
 
     LVGL_LOCK        
-    int result = lv_ta_get_cursor_type(self->ref);
+    unsigned char result = lv_ta_get_cursor_type(self->ref);
     LVGL_UNLOCK
-    return Py_BuildValue("i", result);
+    return Py_BuildValue("b", result);
 }
 
 static PyObject*
@@ -5339,8 +5339,8 @@ static PyObject*
 pylv_ta_get_style(pylv_Obj *self, PyObject *args, PyObject *kwds)
 {
     static char *kwlist[] = {"type", NULL};
-    int type;
-    if (!PyArg_ParseTupleAndKeywords(args, kwds, "i", kwlist , &type)) return NULL;
+    unsigned char type;
+    if (!PyArg_ParseTupleAndKeywords(args, kwds, "b", kwlist , &type)) return NULL;
     return Style_From_lv_style(lv_ta_get_style(self->ref, type));
 }
 
@@ -5481,8 +5481,8 @@ static PyObject*
 pylv_btn_set_state(pylv_Obj *self, PyObject *args, PyObject *kwds)
 {
     static char *kwlist[] = {"state", NULL};
-    int state;
-    if (!PyArg_ParseTupleAndKeywords(args, kwds, "i", kwlist , &state)) return NULL;
+    unsigned char state;
+    if (!PyArg_ParseTupleAndKeywords(args, kwds, "b", kwlist , &state)) return NULL;
 
     LVGL_LOCK         
     lv_btn_set_state(self->ref, state);
@@ -5545,9 +5545,9 @@ static PyObject*
 pylv_btn_set_style(pylv_Obj *self, PyObject *args, PyObject *kwds)
 {
     static char *kwlist[] = {"type", "style", NULL};
-    int type;
+    unsigned char type;
     Style_Object * style;
-    if (!PyArg_ParseTupleAndKeywords(args, kwds, "iO!", kwlist , &type, &Style_Type, &style)) return NULL;
+    if (!PyArg_ParseTupleAndKeywords(args, kwds, "bO!", kwlist , &type, &Style_Type, &style)) return NULL;
 
     LVGL_LOCK         
     lv_btn_set_style(self->ref, type, style->ref);
@@ -5562,9 +5562,9 @@ pylv_btn_get_state(pylv_Obj *self, PyObject *args, PyObject *kwds)
     if (!PyArg_ParseTupleAndKeywords(args, kwds, "", kwlist )) return NULL;
 
     LVGL_LOCK        
-    int result = lv_btn_get_state(self->ref);
+    unsigned char result = lv_btn_get_state(self->ref);
     LVGL_UNLOCK
-    return Py_BuildValue("i", result);
+    return Py_BuildValue("b", result);
 }
 
 static PyObject*
@@ -5619,8 +5619,8 @@ static PyObject*
 pylv_btn_get_style(pylv_Obj *self, PyObject *args, PyObject *kwds)
 {
     static char *kwlist[] = {"type", NULL};
-    int type;
-    if (!PyArg_ParseTupleAndKeywords(args, kwds, "i", kwlist , &type)) return NULL;
+    unsigned char type;
+    if (!PyArg_ParseTupleAndKeywords(args, kwds, "b", kwlist , &type)) return NULL;
     return Style_From_lv_style(lv_btn_get_style(self->ref, type));
 }
 
@@ -5815,9 +5815,9 @@ static PyObject*
 pylv_ddlist_set_style(pylv_Obj *self, PyObject *args, PyObject *kwds)
 {
     static char *kwlist[] = {"type", "style", NULL};
-    int type;
+    unsigned char type;
     Style_Object * style;
-    if (!PyArg_ParseTupleAndKeywords(args, kwds, "iO!", kwlist , &type, &Style_Type, &style)) return NULL;
+    if (!PyArg_ParseTupleAndKeywords(args, kwds, "bO!", kwlist , &type, &Style_Type, &style)) return NULL;
 
     LVGL_LOCK         
     lv_ddlist_set_style(self->ref, type, style->ref);
@@ -5890,8 +5890,8 @@ static PyObject*
 pylv_ddlist_get_style(pylv_Obj *self, PyObject *args, PyObject *kwds)
 {
     static char *kwlist[] = {"type", NULL};
-    int type;
-    if (!PyArg_ParseTupleAndKeywords(args, kwds, "i", kwlist , &type)) return NULL;
+    unsigned char type;
+    if (!PyArg_ParseTupleAndKeywords(args, kwds, "b", kwlist , &type)) return NULL;
     return Style_From_lv_style(lv_ddlist_get_style(self->ref, type));
 }
 
@@ -6012,9 +6012,9 @@ static PyObject*
 pylv_preload_set_style(pylv_Obj *self, PyObject *args, PyObject *kwds)
 {
     static char *kwlist[] = {"type", "style", NULL};
-    int type;
+    unsigned char type;
     Style_Object * style;
-    if (!PyArg_ParseTupleAndKeywords(args, kwds, "iO!", kwlist , &type, &Style_Type, &style)) return NULL;
+    if (!PyArg_ParseTupleAndKeywords(args, kwds, "bO!", kwlist , &type, &Style_Type, &style)) return NULL;
 
     LVGL_LOCK         
     lv_preload_set_style(self->ref, type, style->ref);
@@ -6050,8 +6050,8 @@ static PyObject*
 pylv_preload_get_style(pylv_Obj *self, PyObject *args, PyObject *kwds)
 {
     static char *kwlist[] = {"type", NULL};
-    int type;
-    if (!PyArg_ParseTupleAndKeywords(args, kwds, "i", kwlist , &type)) return NULL;
+    unsigned char type;
+    if (!PyArg_ParseTupleAndKeywords(args, kwds, "b", kwlist , &type)) return NULL;
     return Style_From_lv_style(lv_preload_get_style(self->ref, type));
 }
 
@@ -6148,9 +6148,9 @@ static PyObject*
 pylv_list_set_style(pylv_Obj *self, PyObject *args, PyObject *kwds)
 {
     static char *kwlist[] = {"type", "style", NULL};
-    int type;
+    unsigned char type;
     Style_Object * style;
-    if (!PyArg_ParseTupleAndKeywords(args, kwds, "iO!", kwlist , &type, &Style_Type, &style)) return NULL;
+    if (!PyArg_ParseTupleAndKeywords(args, kwds, "bO!", kwlist , &type, &Style_Type, &style)) return NULL;
 
     LVGL_LOCK         
     lv_list_set_style(self->ref, type, style->ref);
@@ -6258,8 +6258,8 @@ static PyObject*
 pylv_list_get_style(pylv_Obj *self, PyObject *args, PyObject *kwds)
 {
     static char *kwlist[] = {"type", NULL};
-    int type;
-    if (!PyArg_ParseTupleAndKeywords(args, kwds, "i", kwlist , &type)) return NULL;
+    unsigned char type;
+    if (!PyArg_ParseTupleAndKeywords(args, kwds, "b", kwlist , &type)) return NULL;
     return Style_From_lv_style(lv_list_get_style(self->ref, type));
 }
 
@@ -6427,9 +6427,9 @@ static PyObject*
 pylv_slider_set_style(pylv_Obj *self, PyObject *args, PyObject *kwds)
 {
     static char *kwlist[] = {"type", "style", NULL};
-    int type;
+    unsigned char type;
     Style_Object * style;
-    if (!PyArg_ParseTupleAndKeywords(args, kwds, "iO!", kwlist , &type, &Style_Type, &style)) return NULL;
+    if (!PyArg_ParseTupleAndKeywords(args, kwds, "bO!", kwlist , &type, &Style_Type, &style)) return NULL;
 
     LVGL_LOCK         
     lv_slider_set_style(self->ref, type, style->ref);
@@ -6477,8 +6477,8 @@ static PyObject*
 pylv_slider_get_style(pylv_Obj *self, PyObject *args, PyObject *kwds)
 {
     static char *kwlist[] = {"type", NULL};
-    int type;
-    if (!PyArg_ParseTupleAndKeywords(args, kwds, "i", kwlist , &type)) return NULL;
+    unsigned char type;
+    if (!PyArg_ParseTupleAndKeywords(args, kwds, "b", kwlist , &type)) return NULL;
     return Style_From_lv_style(lv_slider_get_style(self->ref, type));
 }
 
@@ -6563,9 +6563,9 @@ static PyObject*
 pylv_sw_set_style(pylv_Obj *self, PyObject *args, PyObject *kwds)
 {
     static char *kwlist[] = {"type", "style", NULL};
-    int type;
+    unsigned char type;
     Style_Object * style;
-    if (!PyArg_ParseTupleAndKeywords(args, kwds, "iO!", kwlist , &type, &Style_Type, &style)) return NULL;
+    if (!PyArg_ParseTupleAndKeywords(args, kwds, "bO!", kwlist , &type, &Style_Type, &style)) return NULL;
 
     LVGL_LOCK         
     lv_sw_set_style(self->ref, type, style->ref);
@@ -6589,8 +6589,8 @@ static PyObject*
 pylv_sw_get_style(pylv_Obj *self, PyObject *args, PyObject *kwds)
 {
     static char *kwlist[] = {"type", NULL};
-    int type;
-    if (!PyArg_ParseTupleAndKeywords(args, kwds, "i", kwlist , &type)) return NULL;
+    unsigned char type;
+    if (!PyArg_ParseTupleAndKeywords(args, kwds, "b", kwlist , &type)) return NULL;
     return Style_From_lv_style(lv_sw_get_style(self->ref, type));
 }
 
@@ -6748,9 +6748,9 @@ static PyObject*
 pylv_cb_set_style(pylv_Obj *self, PyObject *args, PyObject *kwds)
 {
     static char *kwlist[] = {"type", "style", NULL};
-    int type;
+    unsigned char type;
     Style_Object * style;
-    if (!PyArg_ParseTupleAndKeywords(args, kwds, "iO!", kwlist , &type, &Style_Type, &style)) return NULL;
+    if (!PyArg_ParseTupleAndKeywords(args, kwds, "bO!", kwlist , &type, &Style_Type, &style)) return NULL;
 
     LVGL_LOCK         
     lv_cb_set_style(self->ref, type, style->ref);
@@ -6786,8 +6786,8 @@ static PyObject*
 pylv_cb_get_style(pylv_Obj *self, PyObject *args, PyObject *kwds)
 {
     static char *kwlist[] = {"type", NULL};
-    int type;
-    if (!PyArg_ParseTupleAndKeywords(args, kwds, "i", kwlist , &type)) return NULL;
+    unsigned char type;
+    if (!PyArg_ParseTupleAndKeywords(args, kwds, "b", kwlist , &type)) return NULL;
     return Style_From_lv_style(lv_cb_get_style(self->ref, type));
 }
 
@@ -6876,9 +6876,9 @@ static PyObject*
 pylv_roller_set_style(pylv_Obj *self, PyObject *args, PyObject *kwds)
 {
     static char *kwlist[] = {"type", "style", NULL};
-    int type;
+    unsigned char type;
     Style_Object * style;
-    if (!PyArg_ParseTupleAndKeywords(args, kwds, "iO!", kwlist , &type, &Style_Type, &style)) return NULL;
+    if (!PyArg_ParseTupleAndKeywords(args, kwds, "bO!", kwlist , &type, &Style_Type, &style)) return NULL;
 
     LVGL_LOCK         
     lv_roller_set_style(self->ref, type, style->ref);
@@ -6902,8 +6902,8 @@ static PyObject*
 pylv_roller_get_style(pylv_Obj *self, PyObject *args, PyObject *kwds)
 {
     static char *kwlist[] = {"type", NULL};
-    int type;
-    if (!PyArg_ParseTupleAndKeywords(args, kwds, "i", kwlist , &type)) return NULL;
+    unsigned char type;
+    if (!PyArg_ParseTupleAndKeywords(args, kwds, "b", kwlist , &type)) return NULL;
     return Style_From_lv_style(lv_roller_get_style(self->ref, type));
 }
 
