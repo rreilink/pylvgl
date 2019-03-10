@@ -46,7 +46,7 @@ class PythonObject(Object):
         'lv_opa_t':  ('b', 'unsigned char'),
         'lv_color_t': ('H', 'unsigned short int'),
         'char':      ('c', 'char'),
-        'char*':     ('s', 'char *'),
+        'char*':     ('s', 'const char *'),
         'lv_coord_t':('h', 'short int'),
         'uint16_t':  ('H', 'unsigned short int'), 
         'int16_t':   ('h', 'short int'),
@@ -296,7 +296,7 @@ pylv_{self.name}_set_{action}(pylv_{self.pyname} *self, PyObject *args, PyObject
     
         for methodname, method in self.methods.items():
             
-            methodtablecode += f'    {{"{methodname}", (PyCFunction) py{method.decl.name}, METH_VARARGS | METH_KEYWORDS, NULL}},\n'
+            methodtablecode += f'    {{"{methodname}", (PyCFunction) py{method.decl.name}, METH_VARARGS | METH_KEYWORDS, "{generate_c(method.decl)}"}},\n'
 
     
         return methodtablecode

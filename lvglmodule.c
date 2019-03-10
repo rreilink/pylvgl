@@ -1686,56 +1686,56 @@ pylv_obj_is_focused(pylv_Obj *self, PyObject *args, PyObject *kwds)
 
 
 static PyMethodDef pylv_obj_methods[] = {
-    {"invalidate", (PyCFunction) pylv_obj_invalidate, METH_VARARGS | METH_KEYWORDS, NULL},
-    {"set_parent", (PyCFunction) pylv_obj_set_parent, METH_VARARGS | METH_KEYWORDS, NULL},
-    {"set_pos", (PyCFunction) pylv_obj_set_pos, METH_VARARGS | METH_KEYWORDS, NULL},
-    {"set_x", (PyCFunction) pylv_obj_set_x, METH_VARARGS | METH_KEYWORDS, NULL},
-    {"set_y", (PyCFunction) pylv_obj_set_y, METH_VARARGS | METH_KEYWORDS, NULL},
-    {"set_size", (PyCFunction) pylv_obj_set_size, METH_VARARGS | METH_KEYWORDS, NULL},
-    {"set_width", (PyCFunction) pylv_obj_set_width, METH_VARARGS | METH_KEYWORDS, NULL},
-    {"set_height", (PyCFunction) pylv_obj_set_height, METH_VARARGS | METH_KEYWORDS, NULL},
-    {"align", (PyCFunction) pylv_obj_align, METH_VARARGS | METH_KEYWORDS, NULL},
-    {"set_style", (PyCFunction) pylv_obj_set_style, METH_VARARGS | METH_KEYWORDS, NULL},
-    {"refresh_style", (PyCFunction) pylv_obj_refresh_style, METH_VARARGS | METH_KEYWORDS, NULL},
-    {"set_hidden", (PyCFunction) pylv_obj_set_hidden, METH_VARARGS | METH_KEYWORDS, NULL},
-    {"set_click", (PyCFunction) pylv_obj_set_click, METH_VARARGS | METH_KEYWORDS, NULL},
-    {"set_top", (PyCFunction) pylv_obj_set_top, METH_VARARGS | METH_KEYWORDS, NULL},
-    {"set_drag", (PyCFunction) pylv_obj_set_drag, METH_VARARGS | METH_KEYWORDS, NULL},
-    {"set_drag_throw", (PyCFunction) pylv_obj_set_drag_throw, METH_VARARGS | METH_KEYWORDS, NULL},
-    {"set_drag_parent", (PyCFunction) pylv_obj_set_drag_parent, METH_VARARGS | METH_KEYWORDS, NULL},
-    {"set_opa_scale_enable", (PyCFunction) pylv_obj_set_opa_scale_enable, METH_VARARGS | METH_KEYWORDS, NULL},
-    {"set_opa_scale", (PyCFunction) pylv_obj_set_opa_scale, METH_VARARGS | METH_KEYWORDS, NULL},
-    {"set_protect", (PyCFunction) pylv_obj_set_protect, METH_VARARGS | METH_KEYWORDS, NULL},
-    {"clear_protect", (PyCFunction) pylv_obj_clear_protect, METH_VARARGS | METH_KEYWORDS, NULL},
-    {"set_signal_func", (PyCFunction) pylv_obj_set_signal_func, METH_VARARGS | METH_KEYWORDS, NULL},
-    {"set_design_func", (PyCFunction) pylv_obj_set_design_func, METH_VARARGS | METH_KEYWORDS, NULL},
-    {"refresh_ext_size", (PyCFunction) pylv_obj_refresh_ext_size, METH_VARARGS | METH_KEYWORDS, NULL},
-    {"animate", (PyCFunction) pylv_obj_animate, METH_VARARGS | METH_KEYWORDS, NULL},
-    {"get_screen", (PyCFunction) pylv_obj_get_screen, METH_VARARGS | METH_KEYWORDS, NULL},
-    {"get_parent", (PyCFunction) pylv_obj_get_parent, METH_VARARGS | METH_KEYWORDS, NULL},
-    {"count_children", (PyCFunction) pylv_obj_count_children, METH_VARARGS | METH_KEYWORDS, NULL},
-    {"get_coords", (PyCFunction) pylv_obj_get_coords, METH_VARARGS | METH_KEYWORDS, NULL},
-    {"get_x", (PyCFunction) pylv_obj_get_x, METH_VARARGS | METH_KEYWORDS, NULL},
-    {"get_y", (PyCFunction) pylv_obj_get_y, METH_VARARGS | METH_KEYWORDS, NULL},
-    {"get_width", (PyCFunction) pylv_obj_get_width, METH_VARARGS | METH_KEYWORDS, NULL},
-    {"get_height", (PyCFunction) pylv_obj_get_height, METH_VARARGS | METH_KEYWORDS, NULL},
-    {"get_ext_size", (PyCFunction) pylv_obj_get_ext_size, METH_VARARGS | METH_KEYWORDS, NULL},
-    {"get_style", (PyCFunction) pylv_obj_get_style, METH_VARARGS | METH_KEYWORDS, NULL},
-    {"get_hidden", (PyCFunction) pylv_obj_get_hidden, METH_VARARGS | METH_KEYWORDS, NULL},
-    {"get_click", (PyCFunction) pylv_obj_get_click, METH_VARARGS | METH_KEYWORDS, NULL},
-    {"get_top", (PyCFunction) pylv_obj_get_top, METH_VARARGS | METH_KEYWORDS, NULL},
-    {"get_drag", (PyCFunction) pylv_obj_get_drag, METH_VARARGS | METH_KEYWORDS, NULL},
-    {"get_drag_throw", (PyCFunction) pylv_obj_get_drag_throw, METH_VARARGS | METH_KEYWORDS, NULL},
-    {"get_drag_parent", (PyCFunction) pylv_obj_get_drag_parent, METH_VARARGS | METH_KEYWORDS, NULL},
-    {"get_opa_scale", (PyCFunction) pylv_obj_get_opa_scale, METH_VARARGS | METH_KEYWORDS, NULL},
-    {"get_protect", (PyCFunction) pylv_obj_get_protect, METH_VARARGS | METH_KEYWORDS, NULL},
-    {"is_protected", (PyCFunction) pylv_obj_is_protected, METH_VARARGS | METH_KEYWORDS, NULL},
-    {"get_signal_func", (PyCFunction) pylv_obj_get_signal_func, METH_VARARGS | METH_KEYWORDS, NULL},
-    {"get_design_func", (PyCFunction) pylv_obj_get_design_func, METH_VARARGS | METH_KEYWORDS, NULL},
-    {"get_type", (PyCFunction) pylv_obj_get_type, METH_VARARGS | METH_KEYWORDS, NULL},
-    {"get_group", (PyCFunction) pylv_obj_get_group, METH_VARARGS | METH_KEYWORDS, NULL},
-    {"is_focused", (PyCFunction) pylv_obj_is_focused, METH_VARARGS | METH_KEYWORDS, NULL},
-    {"get_children", (PyCFunction) pylv_obj_get_children, METH_VARARGS | METH_KEYWORDS, NULL},
+    {"invalidate", (PyCFunction) pylv_obj_invalidate, METH_VARARGS | METH_KEYWORDS, "void lv_obj_invalidate(const lv_obj_t *obj)"},
+    {"set_parent", (PyCFunction) pylv_obj_set_parent, METH_VARARGS | METH_KEYWORDS, "void lv_obj_set_parent(lv_obj_t *obj, lv_obj_t *parent)"},
+    {"set_pos", (PyCFunction) pylv_obj_set_pos, METH_VARARGS | METH_KEYWORDS, "void lv_obj_set_pos(lv_obj_t *obj, lv_coord_t x, lv_coord_t y)"},
+    {"set_x", (PyCFunction) pylv_obj_set_x, METH_VARARGS | METH_KEYWORDS, "void lv_obj_set_x(lv_obj_t *obj, lv_coord_t x)"},
+    {"set_y", (PyCFunction) pylv_obj_set_y, METH_VARARGS | METH_KEYWORDS, "void lv_obj_set_y(lv_obj_t *obj, lv_coord_t y)"},
+    {"set_size", (PyCFunction) pylv_obj_set_size, METH_VARARGS | METH_KEYWORDS, "void lv_obj_set_size(lv_obj_t *obj, lv_coord_t w, lv_coord_t h)"},
+    {"set_width", (PyCFunction) pylv_obj_set_width, METH_VARARGS | METH_KEYWORDS, "void lv_obj_set_width(lv_obj_t *obj, lv_coord_t w)"},
+    {"set_height", (PyCFunction) pylv_obj_set_height, METH_VARARGS | METH_KEYWORDS, "void lv_obj_set_height(lv_obj_t *obj, lv_coord_t h)"},
+    {"align", (PyCFunction) pylv_obj_align, METH_VARARGS | METH_KEYWORDS, "void lv_obj_align(lv_obj_t *obj, const lv_obj_t *base, lv_align_t align, lv_coord_t x_mod, lv_coord_t y_mod)"},
+    {"set_style", (PyCFunction) pylv_obj_set_style, METH_VARARGS | METH_KEYWORDS, "void lv_obj_set_style(lv_obj_t *obj, lv_style_t *style)"},
+    {"refresh_style", (PyCFunction) pylv_obj_refresh_style, METH_VARARGS | METH_KEYWORDS, "void lv_obj_refresh_style(lv_obj_t *obj)"},
+    {"set_hidden", (PyCFunction) pylv_obj_set_hidden, METH_VARARGS | METH_KEYWORDS, "void lv_obj_set_hidden(lv_obj_t *obj, bool en)"},
+    {"set_click", (PyCFunction) pylv_obj_set_click, METH_VARARGS | METH_KEYWORDS, "void lv_obj_set_click(lv_obj_t *obj, bool en)"},
+    {"set_top", (PyCFunction) pylv_obj_set_top, METH_VARARGS | METH_KEYWORDS, "void lv_obj_set_top(lv_obj_t *obj, bool en)"},
+    {"set_drag", (PyCFunction) pylv_obj_set_drag, METH_VARARGS | METH_KEYWORDS, "void lv_obj_set_drag(lv_obj_t *obj, bool en)"},
+    {"set_drag_throw", (PyCFunction) pylv_obj_set_drag_throw, METH_VARARGS | METH_KEYWORDS, "void lv_obj_set_drag_throw(lv_obj_t *obj, bool en)"},
+    {"set_drag_parent", (PyCFunction) pylv_obj_set_drag_parent, METH_VARARGS | METH_KEYWORDS, "void lv_obj_set_drag_parent(lv_obj_t *obj, bool en)"},
+    {"set_opa_scale_enable", (PyCFunction) pylv_obj_set_opa_scale_enable, METH_VARARGS | METH_KEYWORDS, "void lv_obj_set_opa_scale_enable(lv_obj_t *obj, bool en)"},
+    {"set_opa_scale", (PyCFunction) pylv_obj_set_opa_scale, METH_VARARGS | METH_KEYWORDS, "void lv_obj_set_opa_scale(lv_obj_t *obj, lv_opa_t opa_scale)"},
+    {"set_protect", (PyCFunction) pylv_obj_set_protect, METH_VARARGS | METH_KEYWORDS, "void lv_obj_set_protect(lv_obj_t *obj, uint8_t prot)"},
+    {"clear_protect", (PyCFunction) pylv_obj_clear_protect, METH_VARARGS | METH_KEYWORDS, "void lv_obj_clear_protect(lv_obj_t *obj, uint8_t prot)"},
+    {"set_signal_func", (PyCFunction) pylv_obj_set_signal_func, METH_VARARGS | METH_KEYWORDS, ""},
+    {"set_design_func", (PyCFunction) pylv_obj_set_design_func, METH_VARARGS | METH_KEYWORDS, "void lv_obj_set_design_func(lv_obj_t *obj, lv_design_func_t fp)"},
+    {"refresh_ext_size", (PyCFunction) pylv_obj_refresh_ext_size, METH_VARARGS | METH_KEYWORDS, "void lv_obj_refresh_ext_size(lv_obj_t *obj)"},
+    {"animate", (PyCFunction) pylv_obj_animate, METH_VARARGS | METH_KEYWORDS, "void lv_obj_animate(lv_obj_t *obj, lv_anim_builtin_t type, uint16_t time, uint16_t delay, void (*cb)(lv_obj_t *))"},
+    {"get_screen", (PyCFunction) pylv_obj_get_screen, METH_VARARGS | METH_KEYWORDS, "lv_obj_t *lv_obj_get_screen(const lv_obj_t *obj)"},
+    {"get_parent", (PyCFunction) pylv_obj_get_parent, METH_VARARGS | METH_KEYWORDS, "lv_obj_t *lv_obj_get_parent(const lv_obj_t *obj)"},
+    {"count_children", (PyCFunction) pylv_obj_count_children, METH_VARARGS | METH_KEYWORDS, "uint16_t lv_obj_count_children(const lv_obj_t *obj)"},
+    {"get_coords", (PyCFunction) pylv_obj_get_coords, METH_VARARGS | METH_KEYWORDS, "void lv_obj_get_coords(const lv_obj_t *obj, lv_area_t *cords_p)"},
+    {"get_x", (PyCFunction) pylv_obj_get_x, METH_VARARGS | METH_KEYWORDS, "lv_coord_t lv_obj_get_x(const lv_obj_t *obj)"},
+    {"get_y", (PyCFunction) pylv_obj_get_y, METH_VARARGS | METH_KEYWORDS, "lv_coord_t lv_obj_get_y(const lv_obj_t *obj)"},
+    {"get_width", (PyCFunction) pylv_obj_get_width, METH_VARARGS | METH_KEYWORDS, "lv_coord_t lv_obj_get_width(const lv_obj_t *obj)"},
+    {"get_height", (PyCFunction) pylv_obj_get_height, METH_VARARGS | METH_KEYWORDS, "lv_coord_t lv_obj_get_height(const lv_obj_t *obj)"},
+    {"get_ext_size", (PyCFunction) pylv_obj_get_ext_size, METH_VARARGS | METH_KEYWORDS, "lv_coord_t lv_obj_get_ext_size(const lv_obj_t *obj)"},
+    {"get_style", (PyCFunction) pylv_obj_get_style, METH_VARARGS | METH_KEYWORDS, "lv_style_t *lv_obj_get_style(const lv_obj_t *obj)"},
+    {"get_hidden", (PyCFunction) pylv_obj_get_hidden, METH_VARARGS | METH_KEYWORDS, "bool lv_obj_get_hidden(const lv_obj_t *obj)"},
+    {"get_click", (PyCFunction) pylv_obj_get_click, METH_VARARGS | METH_KEYWORDS, "bool lv_obj_get_click(const lv_obj_t *obj)"},
+    {"get_top", (PyCFunction) pylv_obj_get_top, METH_VARARGS | METH_KEYWORDS, "bool lv_obj_get_top(const lv_obj_t *obj)"},
+    {"get_drag", (PyCFunction) pylv_obj_get_drag, METH_VARARGS | METH_KEYWORDS, "bool lv_obj_get_drag(const lv_obj_t *obj)"},
+    {"get_drag_throw", (PyCFunction) pylv_obj_get_drag_throw, METH_VARARGS | METH_KEYWORDS, "bool lv_obj_get_drag_throw(const lv_obj_t *obj)"},
+    {"get_drag_parent", (PyCFunction) pylv_obj_get_drag_parent, METH_VARARGS | METH_KEYWORDS, "bool lv_obj_get_drag_parent(const lv_obj_t *obj)"},
+    {"get_opa_scale", (PyCFunction) pylv_obj_get_opa_scale, METH_VARARGS | METH_KEYWORDS, "lv_opa_t lv_obj_get_opa_scale(const lv_obj_t *obj)"},
+    {"get_protect", (PyCFunction) pylv_obj_get_protect, METH_VARARGS | METH_KEYWORDS, "uint8_t lv_obj_get_protect(const lv_obj_t *obj)"},
+    {"is_protected", (PyCFunction) pylv_obj_is_protected, METH_VARARGS | METH_KEYWORDS, "bool lv_obj_is_protected(const lv_obj_t *obj, uint8_t prot)"},
+    {"get_signal_func", (PyCFunction) pylv_obj_get_signal_func, METH_VARARGS | METH_KEYWORDS, ""},
+    {"get_design_func", (PyCFunction) pylv_obj_get_design_func, METH_VARARGS | METH_KEYWORDS, "lv_design_func_t lv_obj_get_design_func(const lv_obj_t *obj)"},
+    {"get_type", (PyCFunction) pylv_obj_get_type, METH_VARARGS | METH_KEYWORDS, ""},
+    {"get_group", (PyCFunction) pylv_obj_get_group, METH_VARARGS | METH_KEYWORDS, "void *lv_obj_get_group(const lv_obj_t *obj)"},
+    {"is_focused", (PyCFunction) pylv_obj_is_focused, METH_VARARGS | METH_KEYWORDS, "bool lv_obj_is_focused(const lv_obj_t *obj)"},
+    {"get_children", (PyCFunction) pylv_obj_get_children, METH_VARARGS | METH_KEYWORDS, ""},
     {NULL}  /* Sentinel */
 };
 
@@ -1814,7 +1814,7 @@ static PyObject*
 pylv_win_set_title(pylv_Obj *self, PyObject *args, PyObject *kwds)
 {
     static char *kwlist[] = {"title", NULL};
-    char * title;
+    const char * title;
     if (!PyArg_ParseTupleAndKeywords(args, kwds, "s", kwlist , &title)) return NULL;
 
     LVGL_LOCK         
@@ -1883,7 +1883,7 @@ pylv_win_get_title(pylv_Obj *self, PyObject *args, PyObject *kwds)
     if (!PyArg_ParseTupleAndKeywords(args, kwds, "", kwlist )) return NULL;
 
     LVGL_LOCK        
-    char * result = lv_win_get_title(self->ref);
+    const char * result = lv_win_get_title(self->ref);
     LVGL_UNLOCK
     return Py_BuildValue("s", result);
 }
@@ -2015,25 +2015,25 @@ pylv_win_scroll_ver(pylv_Obj *self, PyObject *args, PyObject *kwds)
 
 
 static PyMethodDef pylv_win_methods[] = {
-    {"clean", (PyCFunction) pylv_win_clean, METH_VARARGS | METH_KEYWORDS, NULL},
-    {"add_btn", (PyCFunction) pylv_win_add_btn, METH_VARARGS | METH_KEYWORDS, NULL},
-    {"close_action", (PyCFunction) pylv_win_close_action, METH_VARARGS | METH_KEYWORDS, NULL},
-    {"set_title", (PyCFunction) pylv_win_set_title, METH_VARARGS | METH_KEYWORDS, NULL},
-    {"set_btn_size", (PyCFunction) pylv_win_set_btn_size, METH_VARARGS | METH_KEYWORDS, NULL},
-    {"set_layout", (PyCFunction) pylv_win_set_layout, METH_VARARGS | METH_KEYWORDS, NULL},
-    {"set_sb_mode", (PyCFunction) pylv_win_set_sb_mode, METH_VARARGS | METH_KEYWORDS, NULL},
-    {"set_style", (PyCFunction) pylv_win_set_style, METH_VARARGS | METH_KEYWORDS, NULL},
-    {"get_title", (PyCFunction) pylv_win_get_title, METH_VARARGS | METH_KEYWORDS, NULL},
-    {"get_content", (PyCFunction) pylv_win_get_content, METH_VARARGS | METH_KEYWORDS, NULL},
-    {"get_btn_size", (PyCFunction) pylv_win_get_btn_size, METH_VARARGS | METH_KEYWORDS, NULL},
-    {"get_from_btn", (PyCFunction) pylv_win_get_from_btn, METH_VARARGS | METH_KEYWORDS, NULL},
-    {"get_layout", (PyCFunction) pylv_win_get_layout, METH_VARARGS | METH_KEYWORDS, NULL},
-    {"get_sb_mode", (PyCFunction) pylv_win_get_sb_mode, METH_VARARGS | METH_KEYWORDS, NULL},
-    {"get_width", (PyCFunction) pylv_win_get_width, METH_VARARGS | METH_KEYWORDS, NULL},
-    {"get_style", (PyCFunction) pylv_win_get_style, METH_VARARGS | METH_KEYWORDS, NULL},
-    {"focus", (PyCFunction) pylv_win_focus, METH_VARARGS | METH_KEYWORDS, NULL},
-    {"scroll_hor", (PyCFunction) pylv_win_scroll_hor, METH_VARARGS | METH_KEYWORDS, NULL},
-    {"scroll_ver", (PyCFunction) pylv_win_scroll_ver, METH_VARARGS | METH_KEYWORDS, NULL},
+    {"clean", (PyCFunction) pylv_win_clean, METH_VARARGS | METH_KEYWORDS, "void lv_win_clean(lv_obj_t *obj)"},
+    {"add_btn", (PyCFunction) pylv_win_add_btn, METH_VARARGS | METH_KEYWORDS, "lv_obj_t *lv_win_add_btn(lv_obj_t *win, const void *img_src, lv_action_t rel_action)"},
+    {"close_action", (PyCFunction) pylv_win_close_action, METH_VARARGS | METH_KEYWORDS, "lv_res_t lv_win_close_action(lv_obj_t *btn)"},
+    {"set_title", (PyCFunction) pylv_win_set_title, METH_VARARGS | METH_KEYWORDS, "void lv_win_set_title(lv_obj_t *win, const char *title)"},
+    {"set_btn_size", (PyCFunction) pylv_win_set_btn_size, METH_VARARGS | METH_KEYWORDS, "void lv_win_set_btn_size(lv_obj_t *win, lv_coord_t size)"},
+    {"set_layout", (PyCFunction) pylv_win_set_layout, METH_VARARGS | METH_KEYWORDS, "void lv_win_set_layout(lv_obj_t *win, lv_layout_t layout)"},
+    {"set_sb_mode", (PyCFunction) pylv_win_set_sb_mode, METH_VARARGS | METH_KEYWORDS, "void lv_win_set_sb_mode(lv_obj_t *win, lv_sb_mode_t sb_mode)"},
+    {"set_style", (PyCFunction) pylv_win_set_style, METH_VARARGS | METH_KEYWORDS, "void lv_win_set_style(lv_obj_t *win, lv_win_style_t type, lv_style_t *style)"},
+    {"get_title", (PyCFunction) pylv_win_get_title, METH_VARARGS | METH_KEYWORDS, "const char *lv_win_get_title(const lv_obj_t *win)"},
+    {"get_content", (PyCFunction) pylv_win_get_content, METH_VARARGS | METH_KEYWORDS, "lv_obj_t *lv_win_get_content(const lv_obj_t *win)"},
+    {"get_btn_size", (PyCFunction) pylv_win_get_btn_size, METH_VARARGS | METH_KEYWORDS, "lv_coord_t lv_win_get_btn_size(const lv_obj_t *win)"},
+    {"get_from_btn", (PyCFunction) pylv_win_get_from_btn, METH_VARARGS | METH_KEYWORDS, "lv_obj_t *lv_win_get_from_btn(const lv_obj_t *ctrl_btn)"},
+    {"get_layout", (PyCFunction) pylv_win_get_layout, METH_VARARGS | METH_KEYWORDS, "lv_layout_t lv_win_get_layout(lv_obj_t *win)"},
+    {"get_sb_mode", (PyCFunction) pylv_win_get_sb_mode, METH_VARARGS | METH_KEYWORDS, "lv_sb_mode_t lv_win_get_sb_mode(lv_obj_t *win)"},
+    {"get_width", (PyCFunction) pylv_win_get_width, METH_VARARGS | METH_KEYWORDS, "lv_coord_t lv_win_get_width(lv_obj_t *win)"},
+    {"get_style", (PyCFunction) pylv_win_get_style, METH_VARARGS | METH_KEYWORDS, "lv_style_t *lv_win_get_style(const lv_obj_t *win, lv_win_style_t type)"},
+    {"focus", (PyCFunction) pylv_win_focus, METH_VARARGS | METH_KEYWORDS, "void lv_win_focus(lv_obj_t *win, lv_obj_t *obj, uint16_t anim_time)"},
+    {"scroll_hor", (PyCFunction) pylv_win_scroll_hor, METH_VARARGS | METH_KEYWORDS, "inline static void lv_win_scroll_hor(lv_obj_t *win, lv_coord_t dist)"},
+    {"scroll_ver", (PyCFunction) pylv_win_scroll_ver, METH_VARARGS | METH_KEYWORDS, "inline static void lv_win_scroll_ver(lv_obj_t *win, lv_coord_t dist)"},
     {NULL}  /* Sentinel */
 };
 
@@ -2081,7 +2081,7 @@ static PyObject*
 pylv_label_set_text(pylv_Obj *self, PyObject *args, PyObject *kwds)
 {
     static char *kwlist[] = {"text", NULL};
-    char * text;
+    const char * text;
     if (!PyArg_ParseTupleAndKeywords(args, kwds, "s", kwlist , &text)) return NULL;
 
     LVGL_LOCK         
@@ -2094,7 +2094,7 @@ static PyObject*
 pylv_label_set_array_text(pylv_Obj *self, PyObject *args, PyObject *kwds)
 {
     static char *kwlist[] = {"array", "size", NULL};
-    char * array;
+    const char * array;
     unsigned short int size;
     if (!PyArg_ParseTupleAndKeywords(args, kwds, "sH", kwlist , &array, &size)) return NULL;
 
@@ -2108,7 +2108,7 @@ static PyObject*
 pylv_label_set_static_text(pylv_Obj *self, PyObject *args, PyObject *kwds)
 {
     static char *kwlist[] = {"text", NULL};
-    char * text;
+    const char * text;
     if (!PyArg_ParseTupleAndKeywords(args, kwds, "s", kwlist , &text)) return NULL;
 
     LVGL_LOCK         
@@ -2189,7 +2189,7 @@ pylv_label_get_text(pylv_Obj *self, PyObject *args, PyObject *kwds)
     if (!PyArg_ParseTupleAndKeywords(args, kwds, "", kwlist )) return NULL;
 
     LVGL_LOCK        
-    char * result = lv_label_get_text(self->ref);
+    const char * result = lv_label_get_text(self->ref);
     LVGL_UNLOCK
     return Py_BuildValue("s", result);
 }
@@ -2259,7 +2259,7 @@ pylv_label_ins_text(pylv_Obj *self, PyObject *args, PyObject *kwds)
 {
     static char *kwlist[] = {"pos", "txt", NULL};
     unsigned int pos;
-    char * txt;
+    const char * txt;
     if (!PyArg_ParseTupleAndKeywords(args, kwds, "Is", kwlist , &pos, &txt)) return NULL;
 
     LVGL_LOCK         
@@ -2284,24 +2284,24 @@ pylv_label_cut_text(pylv_Obj *self, PyObject *args, PyObject *kwds)
 
 
 static PyMethodDef pylv_label_methods[] = {
-    {"set_text", (PyCFunction) pylv_label_set_text, METH_VARARGS | METH_KEYWORDS, NULL},
-    {"set_array_text", (PyCFunction) pylv_label_set_array_text, METH_VARARGS | METH_KEYWORDS, NULL},
-    {"set_static_text", (PyCFunction) pylv_label_set_static_text, METH_VARARGS | METH_KEYWORDS, NULL},
-    {"set_long_mode", (PyCFunction) pylv_label_set_long_mode, METH_VARARGS | METH_KEYWORDS, NULL},
-    {"set_align", (PyCFunction) pylv_label_set_align, METH_VARARGS | METH_KEYWORDS, NULL},
-    {"set_recolor", (PyCFunction) pylv_label_set_recolor, METH_VARARGS | METH_KEYWORDS, NULL},
-    {"set_body_draw", (PyCFunction) pylv_label_set_body_draw, METH_VARARGS | METH_KEYWORDS, NULL},
-    {"set_anim_speed", (PyCFunction) pylv_label_set_anim_speed, METH_VARARGS | METH_KEYWORDS, NULL},
-    {"get_text", (PyCFunction) pylv_label_get_text, METH_VARARGS | METH_KEYWORDS, NULL},
-    {"get_long_mode", (PyCFunction) pylv_label_get_long_mode, METH_VARARGS | METH_KEYWORDS, NULL},
-    {"get_align", (PyCFunction) pylv_label_get_align, METH_VARARGS | METH_KEYWORDS, NULL},
-    {"get_recolor", (PyCFunction) pylv_label_get_recolor, METH_VARARGS | METH_KEYWORDS, NULL},
-    {"get_body_draw", (PyCFunction) pylv_label_get_body_draw, METH_VARARGS | METH_KEYWORDS, NULL},
-    {"get_anim_speed", (PyCFunction) pylv_label_get_anim_speed, METH_VARARGS | METH_KEYWORDS, NULL},
-    {"get_letter_pos", (PyCFunction) pylv_label_get_letter_pos, METH_VARARGS | METH_KEYWORDS, NULL},
-    {"get_letter_on", (PyCFunction) pylv_label_get_letter_on, METH_VARARGS | METH_KEYWORDS, NULL},
-    {"ins_text", (PyCFunction) pylv_label_ins_text, METH_VARARGS | METH_KEYWORDS, NULL},
-    {"cut_text", (PyCFunction) pylv_label_cut_text, METH_VARARGS | METH_KEYWORDS, NULL},
+    {"set_text", (PyCFunction) pylv_label_set_text, METH_VARARGS | METH_KEYWORDS, "void lv_label_set_text(lv_obj_t *label, const char *text)"},
+    {"set_array_text", (PyCFunction) pylv_label_set_array_text, METH_VARARGS | METH_KEYWORDS, "void lv_label_set_array_text(lv_obj_t *label, const char *array, uint16_t size)"},
+    {"set_static_text", (PyCFunction) pylv_label_set_static_text, METH_VARARGS | METH_KEYWORDS, "void lv_label_set_static_text(lv_obj_t *label, const char *text)"},
+    {"set_long_mode", (PyCFunction) pylv_label_set_long_mode, METH_VARARGS | METH_KEYWORDS, "void lv_label_set_long_mode(lv_obj_t *label, lv_label_long_mode_t long_mode)"},
+    {"set_align", (PyCFunction) pylv_label_set_align, METH_VARARGS | METH_KEYWORDS, "void lv_label_set_align(lv_obj_t *label, lv_label_align_t align)"},
+    {"set_recolor", (PyCFunction) pylv_label_set_recolor, METH_VARARGS | METH_KEYWORDS, "void lv_label_set_recolor(lv_obj_t *label, bool recolor_en)"},
+    {"set_body_draw", (PyCFunction) pylv_label_set_body_draw, METH_VARARGS | METH_KEYWORDS, "void lv_label_set_body_draw(lv_obj_t *label, bool body_en)"},
+    {"set_anim_speed", (PyCFunction) pylv_label_set_anim_speed, METH_VARARGS | METH_KEYWORDS, "void lv_label_set_anim_speed(lv_obj_t *label, uint16_t anim_speed)"},
+    {"get_text", (PyCFunction) pylv_label_get_text, METH_VARARGS | METH_KEYWORDS, "char *lv_label_get_text(const lv_obj_t *label)"},
+    {"get_long_mode", (PyCFunction) pylv_label_get_long_mode, METH_VARARGS | METH_KEYWORDS, "lv_label_long_mode_t lv_label_get_long_mode(const lv_obj_t *label)"},
+    {"get_align", (PyCFunction) pylv_label_get_align, METH_VARARGS | METH_KEYWORDS, "lv_label_align_t lv_label_get_align(const lv_obj_t *label)"},
+    {"get_recolor", (PyCFunction) pylv_label_get_recolor, METH_VARARGS | METH_KEYWORDS, "bool lv_label_get_recolor(const lv_obj_t *label)"},
+    {"get_body_draw", (PyCFunction) pylv_label_get_body_draw, METH_VARARGS | METH_KEYWORDS, "bool lv_label_get_body_draw(const lv_obj_t *label)"},
+    {"get_anim_speed", (PyCFunction) pylv_label_get_anim_speed, METH_VARARGS | METH_KEYWORDS, "uint16_t lv_label_get_anim_speed(const lv_obj_t *label)"},
+    {"get_letter_pos", (PyCFunction) pylv_label_get_letter_pos, METH_VARARGS | METH_KEYWORDS, ""},
+    {"get_letter_on", (PyCFunction) pylv_label_get_letter_on, METH_VARARGS | METH_KEYWORDS, ""},
+    {"ins_text", (PyCFunction) pylv_label_ins_text, METH_VARARGS | METH_KEYWORDS, "void lv_label_ins_text(lv_obj_t *label, uint32_t pos, const char *txt)"},
+    {"cut_text", (PyCFunction) pylv_label_cut_text, METH_VARARGS | METH_KEYWORDS, "void lv_label_cut_text(lv_obj_t *label, uint32_t pos, uint32_t cnt)"},
     {NULL}  /* Sentinel */
 };
 
@@ -2448,14 +2448,14 @@ pylv_lmeter_get_scale_angle(pylv_Obj *self, PyObject *args, PyObject *kwds)
 
 
 static PyMethodDef pylv_lmeter_methods[] = {
-    {"set_value", (PyCFunction) pylv_lmeter_set_value, METH_VARARGS | METH_KEYWORDS, NULL},
-    {"set_range", (PyCFunction) pylv_lmeter_set_range, METH_VARARGS | METH_KEYWORDS, NULL},
-    {"set_scale", (PyCFunction) pylv_lmeter_set_scale, METH_VARARGS | METH_KEYWORDS, NULL},
-    {"get_value", (PyCFunction) pylv_lmeter_get_value, METH_VARARGS | METH_KEYWORDS, NULL},
-    {"get_min_value", (PyCFunction) pylv_lmeter_get_min_value, METH_VARARGS | METH_KEYWORDS, NULL},
-    {"get_max_value", (PyCFunction) pylv_lmeter_get_max_value, METH_VARARGS | METH_KEYWORDS, NULL},
-    {"get_line_count", (PyCFunction) pylv_lmeter_get_line_count, METH_VARARGS | METH_KEYWORDS, NULL},
-    {"get_scale_angle", (PyCFunction) pylv_lmeter_get_scale_angle, METH_VARARGS | METH_KEYWORDS, NULL},
+    {"set_value", (PyCFunction) pylv_lmeter_set_value, METH_VARARGS | METH_KEYWORDS, "void lv_lmeter_set_value(lv_obj_t *lmeter, int16_t value)"},
+    {"set_range", (PyCFunction) pylv_lmeter_set_range, METH_VARARGS | METH_KEYWORDS, "void lv_lmeter_set_range(lv_obj_t *lmeter, int16_t min, int16_t max)"},
+    {"set_scale", (PyCFunction) pylv_lmeter_set_scale, METH_VARARGS | METH_KEYWORDS, "void lv_lmeter_set_scale(lv_obj_t *lmeter, uint16_t angle, uint8_t line_cnt)"},
+    {"get_value", (PyCFunction) pylv_lmeter_get_value, METH_VARARGS | METH_KEYWORDS, "int16_t lv_lmeter_get_value(const lv_obj_t *lmeter)"},
+    {"get_min_value", (PyCFunction) pylv_lmeter_get_min_value, METH_VARARGS | METH_KEYWORDS, "int16_t lv_lmeter_get_min_value(const lv_obj_t *lmeter)"},
+    {"get_max_value", (PyCFunction) pylv_lmeter_get_max_value, METH_VARARGS | METH_KEYWORDS, "int16_t lv_lmeter_get_max_value(const lv_obj_t *lmeter)"},
+    {"get_line_count", (PyCFunction) pylv_lmeter_get_line_count, METH_VARARGS | METH_KEYWORDS, "uint8_t lv_lmeter_get_line_count(const lv_obj_t *lmeter)"},
+    {"get_scale_angle", (PyCFunction) pylv_lmeter_get_scale_angle, METH_VARARGS | METH_KEYWORDS, "uint16_t lv_lmeter_get_scale_angle(const lv_obj_t *lmeter)"},
     {NULL}  /* Sentinel */
 };
 
@@ -2571,14 +2571,14 @@ pylv_btnm_get_style(pylv_Obj *self, PyObject *args, PyObject *kwds)
 
 
 static PyMethodDef pylv_btnm_methods[] = {
-    {"set_map", (PyCFunction) pylv_btnm_set_map, METH_VARARGS | METH_KEYWORDS, NULL},
-    {"set_action", (PyCFunction) pylv_btnm_set_action, METH_VARARGS | METH_KEYWORDS, NULL},
-    {"set_toggle", (PyCFunction) pylv_btnm_set_toggle, METH_VARARGS | METH_KEYWORDS, NULL},
-    {"set_style", (PyCFunction) pylv_btnm_set_style, METH_VARARGS | METH_KEYWORDS, NULL},
-    {"get_map", (PyCFunction) pylv_btnm_get_map, METH_VARARGS | METH_KEYWORDS, NULL},
-    {"get_action", (PyCFunction) pylv_btnm_get_action, METH_VARARGS | METH_KEYWORDS, NULL},
-    {"get_toggled", (PyCFunction) pylv_btnm_get_toggled, METH_VARARGS | METH_KEYWORDS, NULL},
-    {"get_style", (PyCFunction) pylv_btnm_get_style, METH_VARARGS | METH_KEYWORDS, NULL},
+    {"set_map", (PyCFunction) pylv_btnm_set_map, METH_VARARGS | METH_KEYWORDS, ""},
+    {"set_action", (PyCFunction) pylv_btnm_set_action, METH_VARARGS | METH_KEYWORDS, "void lv_btnm_set_action(lv_obj_t *btnm, lv_btnm_action_t action)"},
+    {"set_toggle", (PyCFunction) pylv_btnm_set_toggle, METH_VARARGS | METH_KEYWORDS, "void lv_btnm_set_toggle(lv_obj_t *btnm, bool en, uint16_t id)"},
+    {"set_style", (PyCFunction) pylv_btnm_set_style, METH_VARARGS | METH_KEYWORDS, "void lv_btnm_set_style(lv_obj_t *btnm, lv_btnm_style_t type, lv_style_t *style)"},
+    {"get_map", (PyCFunction) pylv_btnm_get_map, METH_VARARGS | METH_KEYWORDS, "const char **lv_btnm_get_map(const lv_obj_t *btnm)"},
+    {"get_action", (PyCFunction) pylv_btnm_get_action, METH_VARARGS | METH_KEYWORDS, "lv_btnm_action_t lv_btnm_get_action(const lv_obj_t *btnm)"},
+    {"get_toggled", (PyCFunction) pylv_btnm_get_toggled, METH_VARARGS | METH_KEYWORDS, "uint16_t lv_btnm_get_toggled(const lv_obj_t *btnm)"},
+    {"get_style", (PyCFunction) pylv_btnm_get_style, METH_VARARGS | METH_KEYWORDS, "lv_style_t *lv_btnm_get_style(const lv_obj_t *btnm, lv_btnm_style_t type)"},
     {NULL}  /* Sentinel */
 };
 
@@ -2817,23 +2817,23 @@ pylv_chart_refresh(pylv_Obj *self, PyObject *args, PyObject *kwds)
 
 
 static PyMethodDef pylv_chart_methods[] = {
-    {"add_series", (PyCFunction) pylv_chart_add_series, METH_VARARGS | METH_KEYWORDS, NULL},
-    {"set_div_line_count", (PyCFunction) pylv_chart_set_div_line_count, METH_VARARGS | METH_KEYWORDS, NULL},
-    {"set_range", (PyCFunction) pylv_chart_set_range, METH_VARARGS | METH_KEYWORDS, NULL},
-    {"set_type", (PyCFunction) pylv_chart_set_type, METH_VARARGS | METH_KEYWORDS, NULL},
-    {"set_point_count", (PyCFunction) pylv_chart_set_point_count, METH_VARARGS | METH_KEYWORDS, NULL},
-    {"set_series_opa", (PyCFunction) pylv_chart_set_series_opa, METH_VARARGS | METH_KEYWORDS, NULL},
-    {"set_series_width", (PyCFunction) pylv_chart_set_series_width, METH_VARARGS | METH_KEYWORDS, NULL},
-    {"set_series_darking", (PyCFunction) pylv_chart_set_series_darking, METH_VARARGS | METH_KEYWORDS, NULL},
-    {"init_points", (PyCFunction) pylv_chart_init_points, METH_VARARGS | METH_KEYWORDS, NULL},
-    {"set_points", (PyCFunction) pylv_chart_set_points, METH_VARARGS | METH_KEYWORDS, NULL},
-    {"set_next", (PyCFunction) pylv_chart_set_next, METH_VARARGS | METH_KEYWORDS, NULL},
-    {"get_type", (PyCFunction) pylv_chart_get_type, METH_VARARGS | METH_KEYWORDS, NULL},
-    {"get_point_cnt", (PyCFunction) pylv_chart_get_point_cnt, METH_VARARGS | METH_KEYWORDS, NULL},
-    {"get_series_opa", (PyCFunction) pylv_chart_get_series_opa, METH_VARARGS | METH_KEYWORDS, NULL},
-    {"get_series_width", (PyCFunction) pylv_chart_get_series_width, METH_VARARGS | METH_KEYWORDS, NULL},
-    {"get_series_darking", (PyCFunction) pylv_chart_get_series_darking, METH_VARARGS | METH_KEYWORDS, NULL},
-    {"refresh", (PyCFunction) pylv_chart_refresh, METH_VARARGS | METH_KEYWORDS, NULL},
+    {"add_series", (PyCFunction) pylv_chart_add_series, METH_VARARGS | METH_KEYWORDS, "lv_chart_series_t *lv_chart_add_series(lv_obj_t *chart, lv_color_t color)"},
+    {"set_div_line_count", (PyCFunction) pylv_chart_set_div_line_count, METH_VARARGS | METH_KEYWORDS, "void lv_chart_set_div_line_count(lv_obj_t *chart, uint8_t hdiv, uint8_t vdiv)"},
+    {"set_range", (PyCFunction) pylv_chart_set_range, METH_VARARGS | METH_KEYWORDS, "void lv_chart_set_range(lv_obj_t *chart, lv_coord_t ymin, lv_coord_t ymax)"},
+    {"set_type", (PyCFunction) pylv_chart_set_type, METH_VARARGS | METH_KEYWORDS, "void lv_chart_set_type(lv_obj_t *chart, lv_chart_type_t type)"},
+    {"set_point_count", (PyCFunction) pylv_chart_set_point_count, METH_VARARGS | METH_KEYWORDS, "void lv_chart_set_point_count(lv_obj_t *chart, uint16_t point_cnt)"},
+    {"set_series_opa", (PyCFunction) pylv_chart_set_series_opa, METH_VARARGS | METH_KEYWORDS, "void lv_chart_set_series_opa(lv_obj_t *chart, lv_opa_t opa)"},
+    {"set_series_width", (PyCFunction) pylv_chart_set_series_width, METH_VARARGS | METH_KEYWORDS, "void lv_chart_set_series_width(lv_obj_t *chart, lv_coord_t width)"},
+    {"set_series_darking", (PyCFunction) pylv_chart_set_series_darking, METH_VARARGS | METH_KEYWORDS, "void lv_chart_set_series_darking(lv_obj_t *chart, lv_opa_t dark_eff)"},
+    {"init_points", (PyCFunction) pylv_chart_init_points, METH_VARARGS | METH_KEYWORDS, "void lv_chart_init_points(lv_obj_t *chart, lv_chart_series_t *ser, lv_coord_t y)"},
+    {"set_points", (PyCFunction) pylv_chart_set_points, METH_VARARGS | METH_KEYWORDS, "void lv_chart_set_points(lv_obj_t *chart, lv_chart_series_t *ser, lv_coord_t *y_array)"},
+    {"set_next", (PyCFunction) pylv_chart_set_next, METH_VARARGS | METH_KEYWORDS, "void lv_chart_set_next(lv_obj_t *chart, lv_chart_series_t *ser, lv_coord_t y)"},
+    {"get_type", (PyCFunction) pylv_chart_get_type, METH_VARARGS | METH_KEYWORDS, "lv_chart_type_t lv_chart_get_type(const lv_obj_t *chart)"},
+    {"get_point_cnt", (PyCFunction) pylv_chart_get_point_cnt, METH_VARARGS | METH_KEYWORDS, "uint16_t lv_chart_get_point_cnt(const lv_obj_t *chart)"},
+    {"get_series_opa", (PyCFunction) pylv_chart_get_series_opa, METH_VARARGS | METH_KEYWORDS, "lv_opa_t lv_chart_get_series_opa(const lv_obj_t *chart)"},
+    {"get_series_width", (PyCFunction) pylv_chart_get_series_width, METH_VARARGS | METH_KEYWORDS, "lv_coord_t lv_chart_get_series_width(const lv_obj_t *chart)"},
+    {"get_series_darking", (PyCFunction) pylv_chart_get_series_darking, METH_VARARGS | METH_KEYWORDS, "lv_opa_t lv_chart_get_series_darking(const lv_obj_t *chart)"},
+    {"refresh", (PyCFunction) pylv_chart_refresh, METH_VARARGS | METH_KEYWORDS, "void lv_chart_refresh(lv_obj_t *chart)"},
     {NULL}  /* Sentinel */
 };
 
@@ -2966,13 +2966,13 @@ pylv_cont_get_fit_height(pylv_Obj *self, PyObject *args, PyObject *kwds)
 
 
 static PyMethodDef pylv_cont_methods[] = {
-    {"set_layout", (PyCFunction) pylv_cont_set_layout, METH_VARARGS | METH_KEYWORDS, NULL},
-    {"set_fit", (PyCFunction) pylv_cont_set_fit, METH_VARARGS | METH_KEYWORDS, NULL},
-    {"get_layout", (PyCFunction) pylv_cont_get_layout, METH_VARARGS | METH_KEYWORDS, NULL},
-    {"get_hor_fit", (PyCFunction) pylv_cont_get_hor_fit, METH_VARARGS | METH_KEYWORDS, NULL},
-    {"get_ver_fit", (PyCFunction) pylv_cont_get_ver_fit, METH_VARARGS | METH_KEYWORDS, NULL},
-    {"get_fit_width", (PyCFunction) pylv_cont_get_fit_width, METH_VARARGS | METH_KEYWORDS, NULL},
-    {"get_fit_height", (PyCFunction) pylv_cont_get_fit_height, METH_VARARGS | METH_KEYWORDS, NULL},
+    {"set_layout", (PyCFunction) pylv_cont_set_layout, METH_VARARGS | METH_KEYWORDS, "void lv_cont_set_layout(lv_obj_t *cont, lv_layout_t layout)"},
+    {"set_fit", (PyCFunction) pylv_cont_set_fit, METH_VARARGS | METH_KEYWORDS, "void lv_cont_set_fit(lv_obj_t *cont, bool hor_en, bool ver_en)"},
+    {"get_layout", (PyCFunction) pylv_cont_get_layout, METH_VARARGS | METH_KEYWORDS, "lv_layout_t lv_cont_get_layout(const lv_obj_t *cont)"},
+    {"get_hor_fit", (PyCFunction) pylv_cont_get_hor_fit, METH_VARARGS | METH_KEYWORDS, "bool lv_cont_get_hor_fit(const lv_obj_t *cont)"},
+    {"get_ver_fit", (PyCFunction) pylv_cont_get_ver_fit, METH_VARARGS | METH_KEYWORDS, "bool lv_cont_get_ver_fit(const lv_obj_t *cont)"},
+    {"get_fit_width", (PyCFunction) pylv_cont_get_fit_width, METH_VARARGS | METH_KEYWORDS, "lv_coord_t lv_cont_get_fit_width(lv_obj_t *cont)"},
+    {"get_fit_height", (PyCFunction) pylv_cont_get_fit_height, METH_VARARGS | METH_KEYWORDS, "lv_coord_t lv_cont_get_fit_height(lv_obj_t *cont)"},
     {NULL}  /* Sentinel */
 };
 
@@ -3079,11 +3079,11 @@ pylv_led_get_bright(pylv_Obj *self, PyObject *args, PyObject *kwds)
 
 
 static PyMethodDef pylv_led_methods[] = {
-    {"set_bright", (PyCFunction) pylv_led_set_bright, METH_VARARGS | METH_KEYWORDS, NULL},
-    {"on", (PyCFunction) pylv_led_on, METH_VARARGS | METH_KEYWORDS, NULL},
-    {"off", (PyCFunction) pylv_led_off, METH_VARARGS | METH_KEYWORDS, NULL},
-    {"toggle", (PyCFunction) pylv_led_toggle, METH_VARARGS | METH_KEYWORDS, NULL},
-    {"get_bright", (PyCFunction) pylv_led_get_bright, METH_VARARGS | METH_KEYWORDS, NULL},
+    {"set_bright", (PyCFunction) pylv_led_set_bright, METH_VARARGS | METH_KEYWORDS, "void lv_led_set_bright(lv_obj_t *led, uint8_t bright)"},
+    {"on", (PyCFunction) pylv_led_on, METH_VARARGS | METH_KEYWORDS, "void lv_led_on(lv_obj_t *led)"},
+    {"off", (PyCFunction) pylv_led_off, METH_VARARGS | METH_KEYWORDS, "void lv_led_off(lv_obj_t *led)"},
+    {"toggle", (PyCFunction) pylv_led_toggle, METH_VARARGS | METH_KEYWORDS, "void lv_led_toggle(lv_obj_t *led)"},
+    {"get_bright", (PyCFunction) pylv_led_get_bright, METH_VARARGS | METH_KEYWORDS, "uint8_t lv_led_get_bright(const lv_obj_t *led)"},
     {NULL}  /* Sentinel */
 };
 
@@ -3353,18 +3353,18 @@ pylv_kb_get_style(pylv_Obj *self, PyObject *args, PyObject *kwds)
 
 
 static PyMethodDef pylv_kb_methods[] = {
-    {"set_ta", (PyCFunction) pylv_kb_set_ta, METH_VARARGS | METH_KEYWORDS, NULL},
-    {"set_mode", (PyCFunction) pylv_kb_set_mode, METH_VARARGS | METH_KEYWORDS, NULL},
-    {"set_cursor_manage", (PyCFunction) pylv_kb_set_cursor_manage, METH_VARARGS | METH_KEYWORDS, NULL},
-    {"set_ok_action", (PyCFunction) pylv_kb_set_ok_action, METH_VARARGS | METH_KEYWORDS, NULL},
-    {"set_hide_action", (PyCFunction) pylv_kb_set_hide_action, METH_VARARGS | METH_KEYWORDS, NULL},
-    {"set_style", (PyCFunction) pylv_kb_set_style, METH_VARARGS | METH_KEYWORDS, NULL},
-    {"get_ta", (PyCFunction) pylv_kb_get_ta, METH_VARARGS | METH_KEYWORDS, NULL},
-    {"get_mode", (PyCFunction) pylv_kb_get_mode, METH_VARARGS | METH_KEYWORDS, NULL},
-    {"get_cursor_manage", (PyCFunction) pylv_kb_get_cursor_manage, METH_VARARGS | METH_KEYWORDS, NULL},
-    {"get_ok_action", (PyCFunction) pylv_kb_get_ok_action, METH_VARARGS | METH_KEYWORDS, NULL},
-    {"get_hide_action", (PyCFunction) pylv_kb_get_hide_action, METH_VARARGS | METH_KEYWORDS, NULL},
-    {"get_style", (PyCFunction) pylv_kb_get_style, METH_VARARGS | METH_KEYWORDS, NULL},
+    {"set_ta", (PyCFunction) pylv_kb_set_ta, METH_VARARGS | METH_KEYWORDS, "void lv_kb_set_ta(lv_obj_t *kb, lv_obj_t *ta)"},
+    {"set_mode", (PyCFunction) pylv_kb_set_mode, METH_VARARGS | METH_KEYWORDS, "void lv_kb_set_mode(lv_obj_t *kb, lv_kb_mode_t mode)"},
+    {"set_cursor_manage", (PyCFunction) pylv_kb_set_cursor_manage, METH_VARARGS | METH_KEYWORDS, "void lv_kb_set_cursor_manage(lv_obj_t *kb, bool en)"},
+    {"set_ok_action", (PyCFunction) pylv_kb_set_ok_action, METH_VARARGS | METH_KEYWORDS, "void lv_kb_set_ok_action(lv_obj_t *kb, lv_action_t action)"},
+    {"set_hide_action", (PyCFunction) pylv_kb_set_hide_action, METH_VARARGS | METH_KEYWORDS, "void lv_kb_set_hide_action(lv_obj_t *kb, lv_action_t action)"},
+    {"set_style", (PyCFunction) pylv_kb_set_style, METH_VARARGS | METH_KEYWORDS, "void lv_kb_set_style(lv_obj_t *kb, lv_kb_style_t type, lv_style_t *style)"},
+    {"get_ta", (PyCFunction) pylv_kb_get_ta, METH_VARARGS | METH_KEYWORDS, "lv_obj_t *lv_kb_get_ta(const lv_obj_t *kb)"},
+    {"get_mode", (PyCFunction) pylv_kb_get_mode, METH_VARARGS | METH_KEYWORDS, "lv_kb_mode_t lv_kb_get_mode(const lv_obj_t *kb)"},
+    {"get_cursor_manage", (PyCFunction) pylv_kb_get_cursor_manage, METH_VARARGS | METH_KEYWORDS, "bool lv_kb_get_cursor_manage(const lv_obj_t *kb)"},
+    {"get_ok_action", (PyCFunction) pylv_kb_get_ok_action, METH_VARARGS | METH_KEYWORDS, "lv_action_t lv_kb_get_ok_action(const lv_obj_t *kb)"},
+    {"get_hide_action", (PyCFunction) pylv_kb_get_hide_action, METH_VARARGS | METH_KEYWORDS, "lv_action_t lv_kb_get_hide_action(const lv_obj_t *kb)"},
+    {"get_style", (PyCFunction) pylv_kb_get_style, METH_VARARGS | METH_KEYWORDS, "lv_style_t *lv_kb_get_style(const lv_obj_t *kb, lv_kb_style_t type)"},
     {NULL}  /* Sentinel */
 };
 
@@ -3419,7 +3419,7 @@ static PyObject*
 pylv_img_set_file(pylv_Obj *self, PyObject *args, PyObject *kwds)
 {
     static char *kwlist[] = {"fn", NULL};
-    char * fn;
+    const char * fn;
     if (!PyArg_ParseTupleAndKeywords(args, kwds, "s", kwlist , &fn)) return NULL;
 
     LVGL_LOCK         
@@ -3468,7 +3468,7 @@ pylv_img_get_file_name(pylv_Obj *self, PyObject *args, PyObject *kwds)
     if (!PyArg_ParseTupleAndKeywords(args, kwds, "", kwlist )) return NULL;
 
     LVGL_LOCK        
-    char * result = lv_img_get_file_name(self->ref);
+    const char * result = lv_img_get_file_name(self->ref);
     LVGL_UNLOCK
     return Py_BuildValue("s", result);
 }
@@ -3499,14 +3499,14 @@ pylv_img_get_upscale(pylv_Obj *self, PyObject *args, PyObject *kwds)
 
 
 static PyMethodDef pylv_img_methods[] = {
-    {"set_src", (PyCFunction) pylv_img_set_src, METH_VARARGS | METH_KEYWORDS, NULL},
-    {"set_file", (PyCFunction) pylv_img_set_file, METH_VARARGS | METH_KEYWORDS, NULL},
-    {"set_auto_size", (PyCFunction) pylv_img_set_auto_size, METH_VARARGS | METH_KEYWORDS, NULL},
-    {"set_upscale", (PyCFunction) pylv_img_set_upscale, METH_VARARGS | METH_KEYWORDS, NULL},
-    {"get_src", (PyCFunction) pylv_img_get_src, METH_VARARGS | METH_KEYWORDS, NULL},
-    {"get_file_name", (PyCFunction) pylv_img_get_file_name, METH_VARARGS | METH_KEYWORDS, NULL},
-    {"get_auto_size", (PyCFunction) pylv_img_get_auto_size, METH_VARARGS | METH_KEYWORDS, NULL},
-    {"get_upscale", (PyCFunction) pylv_img_get_upscale, METH_VARARGS | METH_KEYWORDS, NULL},
+    {"set_src", (PyCFunction) pylv_img_set_src, METH_VARARGS | METH_KEYWORDS, "void lv_img_set_src(lv_obj_t *img, const void *src_img)"},
+    {"set_file", (PyCFunction) pylv_img_set_file, METH_VARARGS | METH_KEYWORDS, "inline static void lv_img_set_file(lv_obj_t *img, const char *fn)"},
+    {"set_auto_size", (PyCFunction) pylv_img_set_auto_size, METH_VARARGS | METH_KEYWORDS, "void lv_img_set_auto_size(lv_obj_t *img, bool autosize_en)"},
+    {"set_upscale", (PyCFunction) pylv_img_set_upscale, METH_VARARGS | METH_KEYWORDS, "inline static void lv_img_set_upscale(lv_obj_t *img, bool upcale)"},
+    {"get_src", (PyCFunction) pylv_img_get_src, METH_VARARGS | METH_KEYWORDS, "const void *lv_img_get_src(lv_obj_t *img)"},
+    {"get_file_name", (PyCFunction) pylv_img_get_file_name, METH_VARARGS | METH_KEYWORDS, "const char *lv_img_get_file_name(const lv_obj_t *img)"},
+    {"get_auto_size", (PyCFunction) pylv_img_get_auto_size, METH_VARARGS | METH_KEYWORDS, "bool lv_img_get_auto_size(const lv_obj_t *img)"},
+    {"get_upscale", (PyCFunction) pylv_img_get_upscale, METH_VARARGS | METH_KEYWORDS, "inline static bool lv_img_get_upscale(const lv_obj_t *img)"},
     {NULL}  /* Sentinel */
 };
 
@@ -3652,14 +3652,14 @@ pylv_bar_get_style(pylv_Obj *self, PyObject *args, PyObject *kwds)
 
 
 static PyMethodDef pylv_bar_methods[] = {
-    {"set_value", (PyCFunction) pylv_bar_set_value, METH_VARARGS | METH_KEYWORDS, NULL},
-    {"set_value_anim", (PyCFunction) pylv_bar_set_value_anim, METH_VARARGS | METH_KEYWORDS, NULL},
-    {"set_range", (PyCFunction) pylv_bar_set_range, METH_VARARGS | METH_KEYWORDS, NULL},
-    {"set_style", (PyCFunction) pylv_bar_set_style, METH_VARARGS | METH_KEYWORDS, NULL},
-    {"get_value", (PyCFunction) pylv_bar_get_value, METH_VARARGS | METH_KEYWORDS, NULL},
-    {"get_min_value", (PyCFunction) pylv_bar_get_min_value, METH_VARARGS | METH_KEYWORDS, NULL},
-    {"get_max_value", (PyCFunction) pylv_bar_get_max_value, METH_VARARGS | METH_KEYWORDS, NULL},
-    {"get_style", (PyCFunction) pylv_bar_get_style, METH_VARARGS | METH_KEYWORDS, NULL},
+    {"set_value", (PyCFunction) pylv_bar_set_value, METH_VARARGS | METH_KEYWORDS, "void lv_bar_set_value(lv_obj_t *bar, int16_t value)"},
+    {"set_value_anim", (PyCFunction) pylv_bar_set_value_anim, METH_VARARGS | METH_KEYWORDS, "void lv_bar_set_value_anim(lv_obj_t *bar, int16_t value, uint16_t anim_time)"},
+    {"set_range", (PyCFunction) pylv_bar_set_range, METH_VARARGS | METH_KEYWORDS, "void lv_bar_set_range(lv_obj_t *bar, int16_t min, int16_t max)"},
+    {"set_style", (PyCFunction) pylv_bar_set_style, METH_VARARGS | METH_KEYWORDS, "void lv_bar_set_style(lv_obj_t *bar, lv_bar_style_t type, lv_style_t *style)"},
+    {"get_value", (PyCFunction) pylv_bar_get_value, METH_VARARGS | METH_KEYWORDS, "int16_t lv_bar_get_value(const lv_obj_t *bar)"},
+    {"get_min_value", (PyCFunction) pylv_bar_get_min_value, METH_VARARGS | METH_KEYWORDS, "int16_t lv_bar_get_min_value(const lv_obj_t *bar)"},
+    {"get_max_value", (PyCFunction) pylv_bar_get_max_value, METH_VARARGS | METH_KEYWORDS, "int16_t lv_bar_get_max_value(const lv_obj_t *bar)"},
+    {"get_style", (PyCFunction) pylv_bar_get_style, METH_VARARGS | METH_KEYWORDS, "lv_style_t *lv_bar_get_style(const lv_obj_t *bar, lv_bar_style_t type)"},
     {NULL}  /* Sentinel */
 };
 
@@ -3766,11 +3766,11 @@ pylv_arc_get_style(pylv_Obj *self, PyObject *args, PyObject *kwds)
 
 
 static PyMethodDef pylv_arc_methods[] = {
-    {"set_angles", (PyCFunction) pylv_arc_set_angles, METH_VARARGS | METH_KEYWORDS, NULL},
-    {"set_style", (PyCFunction) pylv_arc_set_style, METH_VARARGS | METH_KEYWORDS, NULL},
-    {"get_angle_start", (PyCFunction) pylv_arc_get_angle_start, METH_VARARGS | METH_KEYWORDS, NULL},
-    {"get_angle_end", (PyCFunction) pylv_arc_get_angle_end, METH_VARARGS | METH_KEYWORDS, NULL},
-    {"get_style", (PyCFunction) pylv_arc_get_style, METH_VARARGS | METH_KEYWORDS, NULL},
+    {"set_angles", (PyCFunction) pylv_arc_set_angles, METH_VARARGS | METH_KEYWORDS, "void lv_arc_set_angles(lv_obj_t *arc, uint16_t start, uint16_t end)"},
+    {"set_style", (PyCFunction) pylv_arc_set_style, METH_VARARGS | METH_KEYWORDS, "void lv_arc_set_style(lv_obj_t *arc, lv_arc_style_t type, lv_style_t *style)"},
+    {"get_angle_start", (PyCFunction) pylv_arc_get_angle_start, METH_VARARGS | METH_KEYWORDS, "uint16_t lv_arc_get_angle_start(lv_obj_t *arc)"},
+    {"get_angle_end", (PyCFunction) pylv_arc_get_angle_end, METH_VARARGS | METH_KEYWORDS, "uint16_t lv_arc_get_angle_end(lv_obj_t *arc)"},
+    {"get_style", (PyCFunction) pylv_arc_get_style, METH_VARARGS | METH_KEYWORDS, "lv_style_t *lv_arc_get_style(const lv_obj_t *arc, lv_arc_style_t type)"},
     {NULL}  /* Sentinel */
 };
 
@@ -3898,13 +3898,13 @@ pylv_line_get_upscale(pylv_Obj *self, PyObject *args, PyObject *kwds)
 
 
 static PyMethodDef pylv_line_methods[] = {
-    {"set_points", (PyCFunction) pylv_line_set_points, METH_VARARGS | METH_KEYWORDS, NULL},
-    {"set_auto_size", (PyCFunction) pylv_line_set_auto_size, METH_VARARGS | METH_KEYWORDS, NULL},
-    {"set_y_invert", (PyCFunction) pylv_line_set_y_invert, METH_VARARGS | METH_KEYWORDS, NULL},
-    {"set_upscale", (PyCFunction) pylv_line_set_upscale, METH_VARARGS | METH_KEYWORDS, NULL},
-    {"get_auto_size", (PyCFunction) pylv_line_get_auto_size, METH_VARARGS | METH_KEYWORDS, NULL},
-    {"get_y_inv", (PyCFunction) pylv_line_get_y_inv, METH_VARARGS | METH_KEYWORDS, NULL},
-    {"get_upscale", (PyCFunction) pylv_line_get_upscale, METH_VARARGS | METH_KEYWORDS, NULL},
+    {"set_points", (PyCFunction) pylv_line_set_points, METH_VARARGS | METH_KEYWORDS, "void lv_line_set_points(lv_obj_t *line, const lv_point_t *point_a, uint16_t point_num)"},
+    {"set_auto_size", (PyCFunction) pylv_line_set_auto_size, METH_VARARGS | METH_KEYWORDS, "void lv_line_set_auto_size(lv_obj_t *line, bool autosize_en)"},
+    {"set_y_invert", (PyCFunction) pylv_line_set_y_invert, METH_VARARGS | METH_KEYWORDS, "void lv_line_set_y_invert(lv_obj_t *line, bool yinv_en)"},
+    {"set_upscale", (PyCFunction) pylv_line_set_upscale, METH_VARARGS | METH_KEYWORDS, "inline static void lv_line_set_upscale(lv_obj_t *line, bool upcale)"},
+    {"get_auto_size", (PyCFunction) pylv_line_get_auto_size, METH_VARARGS | METH_KEYWORDS, "bool lv_line_get_auto_size(const lv_obj_t *line)"},
+    {"get_y_inv", (PyCFunction) pylv_line_get_y_inv, METH_VARARGS | METH_KEYWORDS, "bool lv_line_get_y_inv(const lv_obj_t *line)"},
+    {"get_upscale", (PyCFunction) pylv_line_get_upscale, METH_VARARGS | METH_KEYWORDS, "inline static bool lv_line_get_upscale(const lv_obj_t *line)"},
     {NULL}  /* Sentinel */
 };
 
@@ -3964,7 +3964,7 @@ static PyObject*
 pylv_tabview_add_tab(pylv_Obj *self, PyObject *args, PyObject *kwds)
 {
     static char *kwlist[] = {"name", NULL};
-    char * name;
+    const char * name;
     if (!PyArg_ParseTupleAndKeywords(args, kwds, "s", kwlist , &name)) return NULL;
 
     LVGL_LOCK
@@ -4142,22 +4142,22 @@ pylv_tabview_get_btns_pos(pylv_Obj *self, PyObject *args, PyObject *kwds)
 
 
 static PyMethodDef pylv_tabview_methods[] = {
-    {"clean", (PyCFunction) pylv_tabview_clean, METH_VARARGS | METH_KEYWORDS, NULL},
-    {"add_tab", (PyCFunction) pylv_tabview_add_tab, METH_VARARGS | METH_KEYWORDS, NULL},
-    {"set_tab_act", (PyCFunction) pylv_tabview_set_tab_act, METH_VARARGS | METH_KEYWORDS, NULL},
-    {"set_tab_load_action", (PyCFunction) pylv_tabview_set_tab_load_action, METH_VARARGS | METH_KEYWORDS, NULL},
-    {"set_sliding", (PyCFunction) pylv_tabview_set_sliding, METH_VARARGS | METH_KEYWORDS, NULL},
-    {"set_anim_time", (PyCFunction) pylv_tabview_set_anim_time, METH_VARARGS | METH_KEYWORDS, NULL},
-    {"set_style", (PyCFunction) pylv_tabview_set_style, METH_VARARGS | METH_KEYWORDS, NULL},
-    {"set_btns_pos", (PyCFunction) pylv_tabview_set_btns_pos, METH_VARARGS | METH_KEYWORDS, NULL},
-    {"get_tab_act", (PyCFunction) pylv_tabview_get_tab_act, METH_VARARGS | METH_KEYWORDS, NULL},
-    {"get_tab_count", (PyCFunction) pylv_tabview_get_tab_count, METH_VARARGS | METH_KEYWORDS, NULL},
-    {"get_tab", (PyCFunction) pylv_tabview_get_tab, METH_VARARGS | METH_KEYWORDS, NULL},
-    {"get_tab_load_action", (PyCFunction) pylv_tabview_get_tab_load_action, METH_VARARGS | METH_KEYWORDS, NULL},
-    {"get_sliding", (PyCFunction) pylv_tabview_get_sliding, METH_VARARGS | METH_KEYWORDS, NULL},
-    {"get_anim_time", (PyCFunction) pylv_tabview_get_anim_time, METH_VARARGS | METH_KEYWORDS, NULL},
-    {"get_style", (PyCFunction) pylv_tabview_get_style, METH_VARARGS | METH_KEYWORDS, NULL},
-    {"get_btns_pos", (PyCFunction) pylv_tabview_get_btns_pos, METH_VARARGS | METH_KEYWORDS, NULL},
+    {"clean", (PyCFunction) pylv_tabview_clean, METH_VARARGS | METH_KEYWORDS, "void lv_tabview_clean(lv_obj_t *obj)"},
+    {"add_tab", (PyCFunction) pylv_tabview_add_tab, METH_VARARGS | METH_KEYWORDS, "lv_obj_t *lv_tabview_add_tab(lv_obj_t *tabview, const char *name)"},
+    {"set_tab_act", (PyCFunction) pylv_tabview_set_tab_act, METH_VARARGS | METH_KEYWORDS, "void lv_tabview_set_tab_act(lv_obj_t *tabview, uint16_t id, bool anim_en)"},
+    {"set_tab_load_action", (PyCFunction) pylv_tabview_set_tab_load_action, METH_VARARGS | METH_KEYWORDS, "void lv_tabview_set_tab_load_action(lv_obj_t *tabview, lv_tabview_action_t action)"},
+    {"set_sliding", (PyCFunction) pylv_tabview_set_sliding, METH_VARARGS | METH_KEYWORDS, "void lv_tabview_set_sliding(lv_obj_t *tabview, bool en)"},
+    {"set_anim_time", (PyCFunction) pylv_tabview_set_anim_time, METH_VARARGS | METH_KEYWORDS, "void lv_tabview_set_anim_time(lv_obj_t *tabview, uint16_t anim_time)"},
+    {"set_style", (PyCFunction) pylv_tabview_set_style, METH_VARARGS | METH_KEYWORDS, "void lv_tabview_set_style(lv_obj_t *tabview, lv_tabview_style_t type, lv_style_t *style)"},
+    {"set_btns_pos", (PyCFunction) pylv_tabview_set_btns_pos, METH_VARARGS | METH_KEYWORDS, "void lv_tabview_set_btns_pos(lv_obj_t *tabview, lv_tabview_btns_pos_t btns_pos)"},
+    {"get_tab_act", (PyCFunction) pylv_tabview_get_tab_act, METH_VARARGS | METH_KEYWORDS, "uint16_t lv_tabview_get_tab_act(const lv_obj_t *tabview)"},
+    {"get_tab_count", (PyCFunction) pylv_tabview_get_tab_count, METH_VARARGS | METH_KEYWORDS, "uint16_t lv_tabview_get_tab_count(const lv_obj_t *tabview)"},
+    {"get_tab", (PyCFunction) pylv_tabview_get_tab, METH_VARARGS | METH_KEYWORDS, "lv_obj_t *lv_tabview_get_tab(const lv_obj_t *tabview, uint16_t id)"},
+    {"get_tab_load_action", (PyCFunction) pylv_tabview_get_tab_load_action, METH_VARARGS | METH_KEYWORDS, "lv_tabview_action_t lv_tabview_get_tab_load_action(const lv_obj_t *tabview)"},
+    {"get_sliding", (PyCFunction) pylv_tabview_get_sliding, METH_VARARGS | METH_KEYWORDS, "bool lv_tabview_get_sliding(const lv_obj_t *tabview)"},
+    {"get_anim_time", (PyCFunction) pylv_tabview_get_anim_time, METH_VARARGS | METH_KEYWORDS, "uint16_t lv_tabview_get_anim_time(const lv_obj_t *tabview)"},
+    {"get_style", (PyCFunction) pylv_tabview_get_style, METH_VARARGS | METH_KEYWORDS, "lv_style_t *lv_tabview_get_style(const lv_obj_t *tabview, lv_tabview_style_t type)"},
+    {"get_btns_pos", (PyCFunction) pylv_tabview_get_btns_pos, METH_VARARGS | METH_KEYWORDS, "lv_tabview_btns_pos_t lv_tabview_get_btns_pos(const lv_obj_t *tabview)"},
     {NULL}  /* Sentinel */
 };
 
@@ -4212,7 +4212,7 @@ static PyObject*
 pylv_mbox_set_text(pylv_Obj *self, PyObject *args, PyObject *kwds)
 {
     static char *kwlist[] = {"txt", NULL};
-    char * txt;
+    const char * txt;
     if (!PyArg_ParseTupleAndKeywords(args, kwds, "s", kwlist , &txt)) return NULL;
 
     LVGL_LOCK         
@@ -4287,7 +4287,7 @@ pylv_mbox_get_text(pylv_Obj *self, PyObject *args, PyObject *kwds)
     if (!PyArg_ParseTupleAndKeywords(args, kwds, "", kwlist )) return NULL;
 
     LVGL_LOCK        
-    char * result = lv_mbox_get_text(self->ref);
+    const char * result = lv_mbox_get_text(self->ref);
     LVGL_UNLOCK
     return Py_BuildValue("s", result);
 }
@@ -4329,17 +4329,17 @@ pylv_mbox_get_style(pylv_Obj *self, PyObject *args, PyObject *kwds)
 
 
 static PyMethodDef pylv_mbox_methods[] = {
-    {"add_btns", (PyCFunction) pylv_mbox_add_btns, METH_VARARGS | METH_KEYWORDS, NULL},
-    {"set_text", (PyCFunction) pylv_mbox_set_text, METH_VARARGS | METH_KEYWORDS, NULL},
-    {"set_action", (PyCFunction) pylv_mbox_set_action, METH_VARARGS | METH_KEYWORDS, NULL},
-    {"set_anim_time", (PyCFunction) pylv_mbox_set_anim_time, METH_VARARGS | METH_KEYWORDS, NULL},
-    {"start_auto_close", (PyCFunction) pylv_mbox_start_auto_close, METH_VARARGS | METH_KEYWORDS, NULL},
-    {"stop_auto_close", (PyCFunction) pylv_mbox_stop_auto_close, METH_VARARGS | METH_KEYWORDS, NULL},
-    {"set_style", (PyCFunction) pylv_mbox_set_style, METH_VARARGS | METH_KEYWORDS, NULL},
-    {"get_text", (PyCFunction) pylv_mbox_get_text, METH_VARARGS | METH_KEYWORDS, NULL},
-    {"get_from_btn", (PyCFunction) pylv_mbox_get_from_btn, METH_VARARGS | METH_KEYWORDS, NULL},
-    {"get_anim_time", (PyCFunction) pylv_mbox_get_anim_time, METH_VARARGS | METH_KEYWORDS, NULL},
-    {"get_style", (PyCFunction) pylv_mbox_get_style, METH_VARARGS | METH_KEYWORDS, NULL},
+    {"add_btns", (PyCFunction) pylv_mbox_add_btns, METH_VARARGS | METH_KEYWORDS, "void lv_mbox_add_btns(lv_obj_t *mbox, const char **btn_map, lv_btnm_action_t action)"},
+    {"set_text", (PyCFunction) pylv_mbox_set_text, METH_VARARGS | METH_KEYWORDS, "void lv_mbox_set_text(lv_obj_t *mbox, const char *txt)"},
+    {"set_action", (PyCFunction) pylv_mbox_set_action, METH_VARARGS | METH_KEYWORDS, "void lv_mbox_set_action(lv_obj_t *mbox, lv_btnm_action_t action)"},
+    {"set_anim_time", (PyCFunction) pylv_mbox_set_anim_time, METH_VARARGS | METH_KEYWORDS, "void lv_mbox_set_anim_time(lv_obj_t *mbox, uint16_t anim_time)"},
+    {"start_auto_close", (PyCFunction) pylv_mbox_start_auto_close, METH_VARARGS | METH_KEYWORDS, "void lv_mbox_start_auto_close(lv_obj_t *mbox, uint16_t delay)"},
+    {"stop_auto_close", (PyCFunction) pylv_mbox_stop_auto_close, METH_VARARGS | METH_KEYWORDS, "void lv_mbox_stop_auto_close(lv_obj_t *mbox)"},
+    {"set_style", (PyCFunction) pylv_mbox_set_style, METH_VARARGS | METH_KEYWORDS, "void lv_mbox_set_style(lv_obj_t *mbox, lv_mbox_style_t type, lv_style_t *style)"},
+    {"get_text", (PyCFunction) pylv_mbox_get_text, METH_VARARGS | METH_KEYWORDS, "const char *lv_mbox_get_text(const lv_obj_t *mbox)"},
+    {"get_from_btn", (PyCFunction) pylv_mbox_get_from_btn, METH_VARARGS | METH_KEYWORDS, "lv_obj_t *lv_mbox_get_from_btn(const lv_obj_t *btn)"},
+    {"get_anim_time", (PyCFunction) pylv_mbox_get_anim_time, METH_VARARGS | METH_KEYWORDS, "uint16_t lv_mbox_get_anim_time(const lv_obj_t *mbox)"},
+    {"get_style", (PyCFunction) pylv_mbox_get_style, METH_VARARGS | METH_KEYWORDS, "lv_style_t *lv_mbox_get_style(const lv_obj_t *mbox, lv_mbox_style_t type)"},
     {NULL}  /* Sentinel */
 };
 
@@ -4483,14 +4483,14 @@ pylv_gauge_get_label_count(pylv_Obj *self, PyObject *args, PyObject *kwds)
 
 
 static PyMethodDef pylv_gauge_methods[] = {
-    {"set_needle_count", (PyCFunction) pylv_gauge_set_needle_count, METH_VARARGS | METH_KEYWORDS, NULL},
-    {"set_value", (PyCFunction) pylv_gauge_set_value, METH_VARARGS | METH_KEYWORDS, NULL},
-    {"set_critical_value", (PyCFunction) pylv_gauge_set_critical_value, METH_VARARGS | METH_KEYWORDS, NULL},
-    {"set_scale", (PyCFunction) pylv_gauge_set_scale, METH_VARARGS | METH_KEYWORDS, NULL},
-    {"get_value", (PyCFunction) pylv_gauge_get_value, METH_VARARGS | METH_KEYWORDS, NULL},
-    {"get_needle_count", (PyCFunction) pylv_gauge_get_needle_count, METH_VARARGS | METH_KEYWORDS, NULL},
-    {"get_critical_value", (PyCFunction) pylv_gauge_get_critical_value, METH_VARARGS | METH_KEYWORDS, NULL},
-    {"get_label_count", (PyCFunction) pylv_gauge_get_label_count, METH_VARARGS | METH_KEYWORDS, NULL},
+    {"set_needle_count", (PyCFunction) pylv_gauge_set_needle_count, METH_VARARGS | METH_KEYWORDS, "void lv_gauge_set_needle_count(lv_obj_t *gauge, uint8_t needle_cnt, const lv_color_t *colors)"},
+    {"set_value", (PyCFunction) pylv_gauge_set_value, METH_VARARGS | METH_KEYWORDS, "void lv_gauge_set_value(lv_obj_t *gauge, uint8_t needle_id, int16_t value)"},
+    {"set_critical_value", (PyCFunction) pylv_gauge_set_critical_value, METH_VARARGS | METH_KEYWORDS, "inline static void lv_gauge_set_critical_value(lv_obj_t *gauge, int16_t value)"},
+    {"set_scale", (PyCFunction) pylv_gauge_set_scale, METH_VARARGS | METH_KEYWORDS, "void lv_gauge_set_scale(lv_obj_t *gauge, uint16_t angle, uint8_t line_cnt, uint8_t label_cnt)"},
+    {"get_value", (PyCFunction) pylv_gauge_get_value, METH_VARARGS | METH_KEYWORDS, "int16_t lv_gauge_get_value(const lv_obj_t *gauge, uint8_t needle)"},
+    {"get_needle_count", (PyCFunction) pylv_gauge_get_needle_count, METH_VARARGS | METH_KEYWORDS, "uint8_t lv_gauge_get_needle_count(const lv_obj_t *gauge)"},
+    {"get_critical_value", (PyCFunction) pylv_gauge_get_critical_value, METH_VARARGS | METH_KEYWORDS, "inline static int16_t lv_gauge_get_critical_value(const lv_obj_t *gauge)"},
+    {"get_label_count", (PyCFunction) pylv_gauge_get_label_count, METH_VARARGS | METH_KEYWORDS, "uint8_t lv_gauge_get_label_count(const lv_obj_t *gauge)"},
     {NULL}  /* Sentinel */
 };
 
@@ -4949,33 +4949,33 @@ pylv_page_scroll_ver(pylv_Obj *self, PyObject *args, PyObject *kwds)
 
 
 static PyMethodDef pylv_page_methods[] = {
-    {"clean", (PyCFunction) pylv_page_clean, METH_VARARGS | METH_KEYWORDS, NULL},
-    {"get_pr_action", (PyCFunction) pylv_page_get_pr_action, METH_VARARGS | METH_KEYWORDS, NULL},
-    {"get_rel_action", (PyCFunction) pylv_page_get_rel_action, METH_VARARGS | METH_KEYWORDS, NULL},
-    {"get_scrl", (PyCFunction) pylv_page_get_scrl, METH_VARARGS | METH_KEYWORDS, NULL},
-    {"set_rel_action", (PyCFunction) pylv_page_set_rel_action, METH_VARARGS | METH_KEYWORDS, NULL},
-    {"set_pr_action", (PyCFunction) pylv_page_set_pr_action, METH_VARARGS | METH_KEYWORDS, NULL},
-    {"set_sb_mode", (PyCFunction) pylv_page_set_sb_mode, METH_VARARGS | METH_KEYWORDS, NULL},
-    {"set_arrow_scroll", (PyCFunction) pylv_page_set_arrow_scroll, METH_VARARGS | METH_KEYWORDS, NULL},
-    {"set_scrl_fit", (PyCFunction) pylv_page_set_scrl_fit, METH_VARARGS | METH_KEYWORDS, NULL},
-    {"set_scrl_width", (PyCFunction) pylv_page_set_scrl_width, METH_VARARGS | METH_KEYWORDS, NULL},
-    {"set_scrl_height", (PyCFunction) pylv_page_set_scrl_height, METH_VARARGS | METH_KEYWORDS, NULL},
-    {"set_scrl_layout", (PyCFunction) pylv_page_set_scrl_layout, METH_VARARGS | METH_KEYWORDS, NULL},
-    {"set_style", (PyCFunction) pylv_page_set_style, METH_VARARGS | METH_KEYWORDS, NULL},
-    {"get_sb_mode", (PyCFunction) pylv_page_get_sb_mode, METH_VARARGS | METH_KEYWORDS, NULL},
-    {"get_arrow_scroll", (PyCFunction) pylv_page_get_arrow_scroll, METH_VARARGS | METH_KEYWORDS, NULL},
-    {"get_fit_width", (PyCFunction) pylv_page_get_fit_width, METH_VARARGS | METH_KEYWORDS, NULL},
-    {"get_fit_height", (PyCFunction) pylv_page_get_fit_height, METH_VARARGS | METH_KEYWORDS, NULL},
-    {"get_scrl_width", (PyCFunction) pylv_page_get_scrl_width, METH_VARARGS | METH_KEYWORDS, NULL},
-    {"get_scrl_height", (PyCFunction) pylv_page_get_scrl_height, METH_VARARGS | METH_KEYWORDS, NULL},
-    {"get_scrl_layout", (PyCFunction) pylv_page_get_scrl_layout, METH_VARARGS | METH_KEYWORDS, NULL},
-    {"get_scrl_hor_fit", (PyCFunction) pylv_page_get_scrl_hor_fit, METH_VARARGS | METH_KEYWORDS, NULL},
-    {"get_scrl_fit_ver", (PyCFunction) pylv_page_get_scrl_fit_ver, METH_VARARGS | METH_KEYWORDS, NULL},
-    {"get_style", (PyCFunction) pylv_page_get_style, METH_VARARGS | METH_KEYWORDS, NULL},
-    {"glue_obj", (PyCFunction) pylv_page_glue_obj, METH_VARARGS | METH_KEYWORDS, NULL},
-    {"focus", (PyCFunction) pylv_page_focus, METH_VARARGS | METH_KEYWORDS, NULL},
-    {"scroll_hor", (PyCFunction) pylv_page_scroll_hor, METH_VARARGS | METH_KEYWORDS, NULL},
-    {"scroll_ver", (PyCFunction) pylv_page_scroll_ver, METH_VARARGS | METH_KEYWORDS, NULL},
+    {"clean", (PyCFunction) pylv_page_clean, METH_VARARGS | METH_KEYWORDS, "void lv_page_clean(lv_obj_t *obj)"},
+    {"get_pr_action", (PyCFunction) pylv_page_get_pr_action, METH_VARARGS | METH_KEYWORDS, "lv_action_t lv_page_get_pr_action(lv_obj_t *page)"},
+    {"get_rel_action", (PyCFunction) pylv_page_get_rel_action, METH_VARARGS | METH_KEYWORDS, "lv_action_t lv_page_get_rel_action(lv_obj_t *page)"},
+    {"get_scrl", (PyCFunction) pylv_page_get_scrl, METH_VARARGS | METH_KEYWORDS, "lv_obj_t *lv_page_get_scrl(const lv_obj_t *page)"},
+    {"set_rel_action", (PyCFunction) pylv_page_set_rel_action, METH_VARARGS | METH_KEYWORDS, "void lv_page_set_rel_action(lv_obj_t *page, lv_action_t rel_action)"},
+    {"set_pr_action", (PyCFunction) pylv_page_set_pr_action, METH_VARARGS | METH_KEYWORDS, "void lv_page_set_pr_action(lv_obj_t *page, lv_action_t pr_action)"},
+    {"set_sb_mode", (PyCFunction) pylv_page_set_sb_mode, METH_VARARGS | METH_KEYWORDS, "void lv_page_set_sb_mode(lv_obj_t *page, lv_sb_mode_t sb_mode)"},
+    {"set_arrow_scroll", (PyCFunction) pylv_page_set_arrow_scroll, METH_VARARGS | METH_KEYWORDS, "void lv_page_set_arrow_scroll(lv_obj_t *page, bool en)"},
+    {"set_scrl_fit", (PyCFunction) pylv_page_set_scrl_fit, METH_VARARGS | METH_KEYWORDS, "inline static void lv_page_set_scrl_fit(lv_obj_t *page, bool hor_en, bool ver_en)"},
+    {"set_scrl_width", (PyCFunction) pylv_page_set_scrl_width, METH_VARARGS | METH_KEYWORDS, "inline static void lv_page_set_scrl_width(lv_obj_t *page, lv_coord_t w)"},
+    {"set_scrl_height", (PyCFunction) pylv_page_set_scrl_height, METH_VARARGS | METH_KEYWORDS, "inline static void lv_page_set_scrl_height(lv_obj_t *page, lv_coord_t h)"},
+    {"set_scrl_layout", (PyCFunction) pylv_page_set_scrl_layout, METH_VARARGS | METH_KEYWORDS, "inline static void lv_page_set_scrl_layout(lv_obj_t *page, lv_layout_t layout)"},
+    {"set_style", (PyCFunction) pylv_page_set_style, METH_VARARGS | METH_KEYWORDS, "void lv_page_set_style(lv_obj_t *page, lv_page_style_t type, lv_style_t *style)"},
+    {"get_sb_mode", (PyCFunction) pylv_page_get_sb_mode, METH_VARARGS | METH_KEYWORDS, "lv_sb_mode_t lv_page_get_sb_mode(const lv_obj_t *page)"},
+    {"get_arrow_scroll", (PyCFunction) pylv_page_get_arrow_scroll, METH_VARARGS | METH_KEYWORDS, "bool lv_page_get_arrow_scroll(const lv_obj_t *page)"},
+    {"get_fit_width", (PyCFunction) pylv_page_get_fit_width, METH_VARARGS | METH_KEYWORDS, "lv_coord_t lv_page_get_fit_width(lv_obj_t *page)"},
+    {"get_fit_height", (PyCFunction) pylv_page_get_fit_height, METH_VARARGS | METH_KEYWORDS, "lv_coord_t lv_page_get_fit_height(lv_obj_t *page)"},
+    {"get_scrl_width", (PyCFunction) pylv_page_get_scrl_width, METH_VARARGS | METH_KEYWORDS, "inline static lv_coord_t lv_page_get_scrl_width(const lv_obj_t *page)"},
+    {"get_scrl_height", (PyCFunction) pylv_page_get_scrl_height, METH_VARARGS | METH_KEYWORDS, "inline static lv_coord_t lv_page_get_scrl_height(const lv_obj_t *page)"},
+    {"get_scrl_layout", (PyCFunction) pylv_page_get_scrl_layout, METH_VARARGS | METH_KEYWORDS, "inline static lv_layout_t lv_page_get_scrl_layout(const lv_obj_t *page)"},
+    {"get_scrl_hor_fit", (PyCFunction) pylv_page_get_scrl_hor_fit, METH_VARARGS | METH_KEYWORDS, "inline static bool lv_page_get_scrl_hor_fit(const lv_obj_t *page)"},
+    {"get_scrl_fit_ver", (PyCFunction) pylv_page_get_scrl_fit_ver, METH_VARARGS | METH_KEYWORDS, "inline static bool lv_page_get_scrl_fit_ver(const lv_obj_t *page)"},
+    {"get_style", (PyCFunction) pylv_page_get_style, METH_VARARGS | METH_KEYWORDS, "lv_style_t *lv_page_get_style(const lv_obj_t *page, lv_page_style_t type)"},
+    {"glue_obj", (PyCFunction) pylv_page_glue_obj, METH_VARARGS | METH_KEYWORDS, "void lv_page_glue_obj(lv_obj_t *obj, bool glue)"},
+    {"focus", (PyCFunction) pylv_page_focus, METH_VARARGS | METH_KEYWORDS, "void lv_page_focus(lv_obj_t *page, const lv_obj_t *obj, uint16_t anim_time)"},
+    {"scroll_hor", (PyCFunction) pylv_page_scroll_hor, METH_VARARGS | METH_KEYWORDS, "void lv_page_scroll_hor(lv_obj_t *page, lv_coord_t dist)"},
+    {"scroll_ver", (PyCFunction) pylv_page_scroll_ver, METH_VARARGS | METH_KEYWORDS, "void lv_page_scroll_ver(lv_obj_t *page, lv_coord_t dist)"},
     {NULL}  /* Sentinel */
 };
 
@@ -5098,7 +5098,7 @@ static PyObject*
 pylv_ta_add_text(pylv_Obj *self, PyObject *args, PyObject *kwds)
 {
     static char *kwlist[] = {"txt", NULL};
-    char * txt;
+    const char * txt;
     if (!PyArg_ParseTupleAndKeywords(args, kwds, "s", kwlist , &txt)) return NULL;
 
     LVGL_LOCK         
@@ -5123,7 +5123,7 @@ static PyObject*
 pylv_ta_set_text(pylv_Obj *self, PyObject *args, PyObject *kwds)
 {
     static char *kwlist[] = {"txt", NULL};
-    char * txt;
+    const char * txt;
     if (!PyArg_ParseTupleAndKeywords(args, kwds, "s", kwlist , &txt)) return NULL;
 
     LVGL_LOCK         
@@ -5201,7 +5201,7 @@ static PyObject*
 pylv_ta_set_accepted_chars(pylv_Obj *self, PyObject *args, PyObject *kwds)
 {
     static char *kwlist[] = {"list", NULL};
-    char * list;
+    const char * list;
     if (!PyArg_ParseTupleAndKeywords(args, kwds, "s", kwlist , &list)) return NULL;
 
     LVGL_LOCK         
@@ -5244,7 +5244,7 @@ pylv_ta_get_text(pylv_Obj *self, PyObject *args, PyObject *kwds)
     if (!PyArg_ParseTupleAndKeywords(args, kwds, "", kwlist )) return NULL;
 
     LVGL_LOCK        
-    char * result = lv_ta_get_text(self->ref);
+    const char * result = lv_ta_get_text(self->ref);
     LVGL_UNLOCK
     return Py_BuildValue("s", result);
 }
@@ -5318,7 +5318,7 @@ pylv_ta_get_accepted_chars(pylv_Obj *self, PyObject *args, PyObject *kwds)
     if (!PyArg_ParseTupleAndKeywords(args, kwds, "", kwlist )) return NULL;
 
     LVGL_LOCK        
-    char * result = lv_ta_get_accepted_chars(self->ref);
+    const char * result = lv_ta_get_accepted_chars(self->ref);
     LVGL_UNLOCK
     return Py_BuildValue("s", result);
 }
@@ -5394,33 +5394,33 @@ pylv_ta_cursor_up(pylv_Obj *self, PyObject *args, PyObject *kwds)
 
 
 static PyMethodDef pylv_ta_methods[] = {
-    {"add_char", (PyCFunction) pylv_ta_add_char, METH_VARARGS | METH_KEYWORDS, NULL},
-    {"add_text", (PyCFunction) pylv_ta_add_text, METH_VARARGS | METH_KEYWORDS, NULL},
-    {"del_char", (PyCFunction) pylv_ta_del_char, METH_VARARGS | METH_KEYWORDS, NULL},
-    {"set_text", (PyCFunction) pylv_ta_set_text, METH_VARARGS | METH_KEYWORDS, NULL},
-    {"set_cursor_pos", (PyCFunction) pylv_ta_set_cursor_pos, METH_VARARGS | METH_KEYWORDS, NULL},
-    {"set_cursor_type", (PyCFunction) pylv_ta_set_cursor_type, METH_VARARGS | METH_KEYWORDS, NULL},
-    {"set_pwd_mode", (PyCFunction) pylv_ta_set_pwd_mode, METH_VARARGS | METH_KEYWORDS, NULL},
-    {"set_one_line", (PyCFunction) pylv_ta_set_one_line, METH_VARARGS | METH_KEYWORDS, NULL},
-    {"set_text_align", (PyCFunction) pylv_ta_set_text_align, METH_VARARGS | METH_KEYWORDS, NULL},
-    {"set_accepted_chars", (PyCFunction) pylv_ta_set_accepted_chars, METH_VARARGS | METH_KEYWORDS, NULL},
-    {"set_max_length", (PyCFunction) pylv_ta_set_max_length, METH_VARARGS | METH_KEYWORDS, NULL},
-    {"set_action", (PyCFunction) pylv_ta_set_action, METH_VARARGS | METH_KEYWORDS, NULL},
-    {"set_style", (PyCFunction) pylv_ta_set_style, METH_VARARGS | METH_KEYWORDS, NULL},
-    {"get_text", (PyCFunction) pylv_ta_get_text, METH_VARARGS | METH_KEYWORDS, NULL},
-    {"get_label", (PyCFunction) pylv_ta_get_label, METH_VARARGS | METH_KEYWORDS, NULL},
-    {"get_cursor_pos", (PyCFunction) pylv_ta_get_cursor_pos, METH_VARARGS | METH_KEYWORDS, NULL},
-    {"get_cursor_type", (PyCFunction) pylv_ta_get_cursor_type, METH_VARARGS | METH_KEYWORDS, NULL},
-    {"get_pwd_mode", (PyCFunction) pylv_ta_get_pwd_mode, METH_VARARGS | METH_KEYWORDS, NULL},
-    {"get_one_line", (PyCFunction) pylv_ta_get_one_line, METH_VARARGS | METH_KEYWORDS, NULL},
-    {"get_accepted_chars", (PyCFunction) pylv_ta_get_accepted_chars, METH_VARARGS | METH_KEYWORDS, NULL},
-    {"get_max_length", (PyCFunction) pylv_ta_get_max_length, METH_VARARGS | METH_KEYWORDS, NULL},
-    {"get_action", (PyCFunction) pylv_ta_get_action, METH_VARARGS | METH_KEYWORDS, NULL},
-    {"get_style", (PyCFunction) pylv_ta_get_style, METH_VARARGS | METH_KEYWORDS, NULL},
-    {"cursor_right", (PyCFunction) pylv_ta_cursor_right, METH_VARARGS | METH_KEYWORDS, NULL},
-    {"cursor_left", (PyCFunction) pylv_ta_cursor_left, METH_VARARGS | METH_KEYWORDS, NULL},
-    {"cursor_down", (PyCFunction) pylv_ta_cursor_down, METH_VARARGS | METH_KEYWORDS, NULL},
-    {"cursor_up", (PyCFunction) pylv_ta_cursor_up, METH_VARARGS | METH_KEYWORDS, NULL},
+    {"add_char", (PyCFunction) pylv_ta_add_char, METH_VARARGS | METH_KEYWORDS, "void lv_ta_add_char(lv_obj_t *ta, uint32_t c)"},
+    {"add_text", (PyCFunction) pylv_ta_add_text, METH_VARARGS | METH_KEYWORDS, "void lv_ta_add_text(lv_obj_t *ta, const char *txt)"},
+    {"del_char", (PyCFunction) pylv_ta_del_char, METH_VARARGS | METH_KEYWORDS, "void lv_ta_del_char(lv_obj_t *ta)"},
+    {"set_text", (PyCFunction) pylv_ta_set_text, METH_VARARGS | METH_KEYWORDS, "void lv_ta_set_text(lv_obj_t *ta, const char *txt)"},
+    {"set_cursor_pos", (PyCFunction) pylv_ta_set_cursor_pos, METH_VARARGS | METH_KEYWORDS, "void lv_ta_set_cursor_pos(lv_obj_t *ta, int16_t pos)"},
+    {"set_cursor_type", (PyCFunction) pylv_ta_set_cursor_type, METH_VARARGS | METH_KEYWORDS, "void lv_ta_set_cursor_type(lv_obj_t *ta, lv_cursor_type_t cur_type)"},
+    {"set_pwd_mode", (PyCFunction) pylv_ta_set_pwd_mode, METH_VARARGS | METH_KEYWORDS, "void lv_ta_set_pwd_mode(lv_obj_t *ta, bool pwd_en)"},
+    {"set_one_line", (PyCFunction) pylv_ta_set_one_line, METH_VARARGS | METH_KEYWORDS, "void lv_ta_set_one_line(lv_obj_t *ta, bool en)"},
+    {"set_text_align", (PyCFunction) pylv_ta_set_text_align, METH_VARARGS | METH_KEYWORDS, "void lv_ta_set_text_align(lv_obj_t *ta, lv_label_align_t align)"},
+    {"set_accepted_chars", (PyCFunction) pylv_ta_set_accepted_chars, METH_VARARGS | METH_KEYWORDS, "void lv_ta_set_accepted_chars(lv_obj_t *ta, const char *list)"},
+    {"set_max_length", (PyCFunction) pylv_ta_set_max_length, METH_VARARGS | METH_KEYWORDS, "void lv_ta_set_max_length(lv_obj_t *ta, uint16_t num)"},
+    {"set_action", (PyCFunction) pylv_ta_set_action, METH_VARARGS | METH_KEYWORDS, "inline static void lv_ta_set_action(lv_obj_t *ta, lv_action_t action)"},
+    {"set_style", (PyCFunction) pylv_ta_set_style, METH_VARARGS | METH_KEYWORDS, "void lv_ta_set_style(lv_obj_t *ta, lv_ta_style_t type, lv_style_t *style)"},
+    {"get_text", (PyCFunction) pylv_ta_get_text, METH_VARARGS | METH_KEYWORDS, "const char *lv_ta_get_text(const lv_obj_t *ta)"},
+    {"get_label", (PyCFunction) pylv_ta_get_label, METH_VARARGS | METH_KEYWORDS, "lv_obj_t *lv_ta_get_label(const lv_obj_t *ta)"},
+    {"get_cursor_pos", (PyCFunction) pylv_ta_get_cursor_pos, METH_VARARGS | METH_KEYWORDS, "uint16_t lv_ta_get_cursor_pos(const lv_obj_t *ta)"},
+    {"get_cursor_type", (PyCFunction) pylv_ta_get_cursor_type, METH_VARARGS | METH_KEYWORDS, "lv_cursor_type_t lv_ta_get_cursor_type(const lv_obj_t *ta)"},
+    {"get_pwd_mode", (PyCFunction) pylv_ta_get_pwd_mode, METH_VARARGS | METH_KEYWORDS, "bool lv_ta_get_pwd_mode(const lv_obj_t *ta)"},
+    {"get_one_line", (PyCFunction) pylv_ta_get_one_line, METH_VARARGS | METH_KEYWORDS, "bool lv_ta_get_one_line(const lv_obj_t *ta)"},
+    {"get_accepted_chars", (PyCFunction) pylv_ta_get_accepted_chars, METH_VARARGS | METH_KEYWORDS, "const char *lv_ta_get_accepted_chars(lv_obj_t *ta)"},
+    {"get_max_length", (PyCFunction) pylv_ta_get_max_length, METH_VARARGS | METH_KEYWORDS, "uint16_t lv_ta_get_max_length(lv_obj_t *ta)"},
+    {"get_action", (PyCFunction) pylv_ta_get_action, METH_VARARGS | METH_KEYWORDS, "inline static lv_action_t lv_ta_get_action(lv_obj_t *ta)"},
+    {"get_style", (PyCFunction) pylv_ta_get_style, METH_VARARGS | METH_KEYWORDS, "lv_style_t *lv_ta_get_style(const lv_obj_t *ta, lv_ta_style_t type)"},
+    {"cursor_right", (PyCFunction) pylv_ta_cursor_right, METH_VARARGS | METH_KEYWORDS, "void lv_ta_cursor_right(lv_obj_t *ta)"},
+    {"cursor_left", (PyCFunction) pylv_ta_cursor_left, METH_VARARGS | METH_KEYWORDS, "void lv_ta_cursor_left(lv_obj_t *ta)"},
+    {"cursor_down", (PyCFunction) pylv_ta_cursor_down, METH_VARARGS | METH_KEYWORDS, "void lv_ta_cursor_down(lv_obj_t *ta)"},
+    {"cursor_up", (PyCFunction) pylv_ta_cursor_up, METH_VARARGS | METH_KEYWORDS, "void lv_ta_cursor_up(lv_obj_t *ta)"},
     {NULL}  /* Sentinel */
 };
 
@@ -5626,21 +5626,21 @@ pylv_btn_get_style(pylv_Obj *self, PyObject *args, PyObject *kwds)
 
 
 static PyMethodDef pylv_btn_methods[] = {
-    {"set_toggle", (PyCFunction) pylv_btn_set_toggle, METH_VARARGS | METH_KEYWORDS, NULL},
-    {"set_state", (PyCFunction) pylv_btn_set_state, METH_VARARGS | METH_KEYWORDS, NULL},
-    {"toggle", (PyCFunction) pylv_btn_toggle, METH_VARARGS | METH_KEYWORDS, NULL},
-    {"set_action", (PyCFunction) pylv_btn_set_action, METH_VARARGS | METH_KEYWORDS, NULL},
-    {"set_ink_in_time", (PyCFunction) pylv_btn_set_ink_in_time, METH_VARARGS | METH_KEYWORDS, NULL},
-    {"set_ink_wait_time", (PyCFunction) pylv_btn_set_ink_wait_time, METH_VARARGS | METH_KEYWORDS, NULL},
-    {"set_ink_out_time", (PyCFunction) pylv_btn_set_ink_out_time, METH_VARARGS | METH_KEYWORDS, NULL},
-    {"set_style", (PyCFunction) pylv_btn_set_style, METH_VARARGS | METH_KEYWORDS, NULL},
-    {"get_state", (PyCFunction) pylv_btn_get_state, METH_VARARGS | METH_KEYWORDS, NULL},
-    {"get_toggle", (PyCFunction) pylv_btn_get_toggle, METH_VARARGS | METH_KEYWORDS, NULL},
-    {"get_action", (PyCFunction) pylv_btn_get_action, METH_VARARGS | METH_KEYWORDS, NULL},
-    {"get_ink_in_time", (PyCFunction) pylv_btn_get_ink_in_time, METH_VARARGS | METH_KEYWORDS, NULL},
-    {"get_ink_wait_time", (PyCFunction) pylv_btn_get_ink_wait_time, METH_VARARGS | METH_KEYWORDS, NULL},
-    {"get_ink_out_time", (PyCFunction) pylv_btn_get_ink_out_time, METH_VARARGS | METH_KEYWORDS, NULL},
-    {"get_style", (PyCFunction) pylv_btn_get_style, METH_VARARGS | METH_KEYWORDS, NULL},
+    {"set_toggle", (PyCFunction) pylv_btn_set_toggle, METH_VARARGS | METH_KEYWORDS, "void lv_btn_set_toggle(lv_obj_t *btn, bool tgl)"},
+    {"set_state", (PyCFunction) pylv_btn_set_state, METH_VARARGS | METH_KEYWORDS, "void lv_btn_set_state(lv_obj_t *btn, lv_btn_state_t state)"},
+    {"toggle", (PyCFunction) pylv_btn_toggle, METH_VARARGS | METH_KEYWORDS, "void lv_btn_toggle(lv_obj_t *btn)"},
+    {"set_action", (PyCFunction) pylv_btn_set_action, METH_VARARGS | METH_KEYWORDS, ""},
+    {"set_ink_in_time", (PyCFunction) pylv_btn_set_ink_in_time, METH_VARARGS | METH_KEYWORDS, "void lv_btn_set_ink_in_time(lv_obj_t *btn, uint16_t time)"},
+    {"set_ink_wait_time", (PyCFunction) pylv_btn_set_ink_wait_time, METH_VARARGS | METH_KEYWORDS, "void lv_btn_set_ink_wait_time(lv_obj_t *btn, uint16_t time)"},
+    {"set_ink_out_time", (PyCFunction) pylv_btn_set_ink_out_time, METH_VARARGS | METH_KEYWORDS, "void lv_btn_set_ink_out_time(lv_obj_t *btn, uint16_t time)"},
+    {"set_style", (PyCFunction) pylv_btn_set_style, METH_VARARGS | METH_KEYWORDS, "void lv_btn_set_style(lv_obj_t *btn, lv_btn_style_t type, lv_style_t *style)"},
+    {"get_state", (PyCFunction) pylv_btn_get_state, METH_VARARGS | METH_KEYWORDS, "lv_btn_state_t lv_btn_get_state(const lv_obj_t *btn)"},
+    {"get_toggle", (PyCFunction) pylv_btn_get_toggle, METH_VARARGS | METH_KEYWORDS, "bool lv_btn_get_toggle(const lv_obj_t *btn)"},
+    {"get_action", (PyCFunction) pylv_btn_get_action, METH_VARARGS | METH_KEYWORDS, ""},
+    {"get_ink_in_time", (PyCFunction) pylv_btn_get_ink_in_time, METH_VARARGS | METH_KEYWORDS, "uint16_t lv_btn_get_ink_in_time(const lv_obj_t *btn)"},
+    {"get_ink_wait_time", (PyCFunction) pylv_btn_get_ink_wait_time, METH_VARARGS | METH_KEYWORDS, "uint16_t lv_btn_get_ink_wait_time(const lv_obj_t *btn)"},
+    {"get_ink_out_time", (PyCFunction) pylv_btn_get_ink_out_time, METH_VARARGS | METH_KEYWORDS, "uint16_t lv_btn_get_ink_out_time(const lv_obj_t *btn)"},
+    {"get_style", (PyCFunction) pylv_btn_get_style, METH_VARARGS | METH_KEYWORDS, "lv_style_t *lv_btn_get_style(const lv_obj_t *btn, lv_btn_style_t type)"},
     {NULL}  /* Sentinel */
 };
 
@@ -5750,7 +5750,7 @@ static PyObject*
 pylv_ddlist_set_options(pylv_Obj *self, PyObject *args, PyObject *kwds)
 {
     static char *kwlist[] = {"options", NULL};
-    char * options;
+    const char * options;
     if (!PyArg_ParseTupleAndKeywords(args, kwds, "s", kwlist , &options)) return NULL;
 
     LVGL_LOCK         
@@ -5832,7 +5832,7 @@ pylv_ddlist_get_options(pylv_Obj *self, PyObject *args, PyObject *kwds)
     if (!PyArg_ParseTupleAndKeywords(args, kwds, "", kwlist )) return NULL;
 
     LVGL_LOCK        
-    char * result = lv_ddlist_get_options(self->ref);
+    const char * result = lv_ddlist_get_options(self->ref);
     LVGL_UNLOCK
     return Py_BuildValue("s", result);
 }
@@ -5853,7 +5853,7 @@ static PyObject*
 pylv_ddlist_get_selected_str(pylv_Obj *self, PyObject *args, PyObject *kwds)
 {
     static char *kwlist[] = {"buf", NULL};
-    char * buf;
+    const char * buf;
     if (!PyArg_ParseTupleAndKeywords(args, kwds, "s", kwlist , &buf)) return NULL;
 
     LVGL_LOCK         
@@ -5923,22 +5923,22 @@ pylv_ddlist_close(pylv_Obj *self, PyObject *args, PyObject *kwds)
 
 
 static PyMethodDef pylv_ddlist_methods[] = {
-    {"set_options", (PyCFunction) pylv_ddlist_set_options, METH_VARARGS | METH_KEYWORDS, NULL},
-    {"set_selected", (PyCFunction) pylv_ddlist_set_selected, METH_VARARGS | METH_KEYWORDS, NULL},
-    {"set_action", (PyCFunction) pylv_ddlist_set_action, METH_VARARGS | METH_KEYWORDS, NULL},
-    {"set_fix_height", (PyCFunction) pylv_ddlist_set_fix_height, METH_VARARGS | METH_KEYWORDS, NULL},
-    {"set_hor_fit", (PyCFunction) pylv_ddlist_set_hor_fit, METH_VARARGS | METH_KEYWORDS, NULL},
-    {"set_anim_time", (PyCFunction) pylv_ddlist_set_anim_time, METH_VARARGS | METH_KEYWORDS, NULL},
-    {"set_style", (PyCFunction) pylv_ddlist_set_style, METH_VARARGS | METH_KEYWORDS, NULL},
-    {"get_options", (PyCFunction) pylv_ddlist_get_options, METH_VARARGS | METH_KEYWORDS, NULL},
-    {"get_selected", (PyCFunction) pylv_ddlist_get_selected, METH_VARARGS | METH_KEYWORDS, NULL},
-    {"get_selected_str", (PyCFunction) pylv_ddlist_get_selected_str, METH_VARARGS | METH_KEYWORDS, NULL},
-    {"get_action", (PyCFunction) pylv_ddlist_get_action, METH_VARARGS | METH_KEYWORDS, NULL},
-    {"get_fix_height", (PyCFunction) pylv_ddlist_get_fix_height, METH_VARARGS | METH_KEYWORDS, NULL},
-    {"get_anim_time", (PyCFunction) pylv_ddlist_get_anim_time, METH_VARARGS | METH_KEYWORDS, NULL},
-    {"get_style", (PyCFunction) pylv_ddlist_get_style, METH_VARARGS | METH_KEYWORDS, NULL},
-    {"open", (PyCFunction) pylv_ddlist_open, METH_VARARGS | METH_KEYWORDS, NULL},
-    {"close", (PyCFunction) pylv_ddlist_close, METH_VARARGS | METH_KEYWORDS, NULL},
+    {"set_options", (PyCFunction) pylv_ddlist_set_options, METH_VARARGS | METH_KEYWORDS, "void lv_ddlist_set_options(lv_obj_t *ddlist, const char *options)"},
+    {"set_selected", (PyCFunction) pylv_ddlist_set_selected, METH_VARARGS | METH_KEYWORDS, "void lv_ddlist_set_selected(lv_obj_t *ddlist, uint16_t sel_opt)"},
+    {"set_action", (PyCFunction) pylv_ddlist_set_action, METH_VARARGS | METH_KEYWORDS, "void lv_ddlist_set_action(lv_obj_t *ddlist, lv_action_t action)"},
+    {"set_fix_height", (PyCFunction) pylv_ddlist_set_fix_height, METH_VARARGS | METH_KEYWORDS, "void lv_ddlist_set_fix_height(lv_obj_t *ddlist, lv_coord_t h)"},
+    {"set_hor_fit", (PyCFunction) pylv_ddlist_set_hor_fit, METH_VARARGS | METH_KEYWORDS, "void lv_ddlist_set_hor_fit(lv_obj_t *ddlist, bool fit_en)"},
+    {"set_anim_time", (PyCFunction) pylv_ddlist_set_anim_time, METH_VARARGS | METH_KEYWORDS, "void lv_ddlist_set_anim_time(lv_obj_t *ddlist, uint16_t anim_time)"},
+    {"set_style", (PyCFunction) pylv_ddlist_set_style, METH_VARARGS | METH_KEYWORDS, "void lv_ddlist_set_style(lv_obj_t *ddlist, lv_ddlist_style_t type, lv_style_t *style)"},
+    {"get_options", (PyCFunction) pylv_ddlist_get_options, METH_VARARGS | METH_KEYWORDS, "const char *lv_ddlist_get_options(const lv_obj_t *ddlist)"},
+    {"get_selected", (PyCFunction) pylv_ddlist_get_selected, METH_VARARGS | METH_KEYWORDS, "uint16_t lv_ddlist_get_selected(const lv_obj_t *ddlist)"},
+    {"get_selected_str", (PyCFunction) pylv_ddlist_get_selected_str, METH_VARARGS | METH_KEYWORDS, "void lv_ddlist_get_selected_str(const lv_obj_t *ddlist, char *buf)"},
+    {"get_action", (PyCFunction) pylv_ddlist_get_action, METH_VARARGS | METH_KEYWORDS, "lv_action_t lv_ddlist_get_action(const lv_obj_t *ddlist)"},
+    {"get_fix_height", (PyCFunction) pylv_ddlist_get_fix_height, METH_VARARGS | METH_KEYWORDS, "lv_coord_t lv_ddlist_get_fix_height(const lv_obj_t *ddlist)"},
+    {"get_anim_time", (PyCFunction) pylv_ddlist_get_anim_time, METH_VARARGS | METH_KEYWORDS, "uint16_t lv_ddlist_get_anim_time(const lv_obj_t *ddlist)"},
+    {"get_style", (PyCFunction) pylv_ddlist_get_style, METH_VARARGS | METH_KEYWORDS, "lv_style_t *lv_ddlist_get_style(const lv_obj_t *ddlist, lv_ddlist_style_t type)"},
+    {"open", (PyCFunction) pylv_ddlist_open, METH_VARARGS | METH_KEYWORDS, "void lv_ddlist_open(lv_obj_t *ddlist, bool anim)"},
+    {"close", (PyCFunction) pylv_ddlist_close, METH_VARARGS | METH_KEYWORDS, "void lv_ddlist_close(lv_obj_t *ddlist, bool anim)"},
     {NULL}  /* Sentinel */
 };
 
@@ -6057,12 +6057,12 @@ pylv_preload_get_style(pylv_Obj *self, PyObject *args, PyObject *kwds)
 
 
 static PyMethodDef pylv_preload_methods[] = {
-    {"set_arc_length", (PyCFunction) pylv_preload_set_arc_length, METH_VARARGS | METH_KEYWORDS, NULL},
-    {"set_spin_time", (PyCFunction) pylv_preload_set_spin_time, METH_VARARGS | METH_KEYWORDS, NULL},
-    {"set_style", (PyCFunction) pylv_preload_set_style, METH_VARARGS | METH_KEYWORDS, NULL},
-    {"get_arc_length", (PyCFunction) pylv_preload_get_arc_length, METH_VARARGS | METH_KEYWORDS, NULL},
-    {"get_spin_time", (PyCFunction) pylv_preload_get_spin_time, METH_VARARGS | METH_KEYWORDS, NULL},
-    {"get_style", (PyCFunction) pylv_preload_get_style, METH_VARARGS | METH_KEYWORDS, NULL},
+    {"set_arc_length", (PyCFunction) pylv_preload_set_arc_length, METH_VARARGS | METH_KEYWORDS, "void lv_preload_set_arc_length(lv_obj_t *preload, uint16_t deg)"},
+    {"set_spin_time", (PyCFunction) pylv_preload_set_spin_time, METH_VARARGS | METH_KEYWORDS, "void lv_preload_set_spin_time(lv_obj_t *preload, uint16_t time)"},
+    {"set_style", (PyCFunction) pylv_preload_set_style, METH_VARARGS | METH_KEYWORDS, "void lv_preload_set_style(lv_obj_t *preload, lv_preload_style_t type, lv_style_t *style)"},
+    {"get_arc_length", (PyCFunction) pylv_preload_get_arc_length, METH_VARARGS | METH_KEYWORDS, "uint16_t lv_preload_get_arc_length(const lv_obj_t *preload)"},
+    {"get_spin_time", (PyCFunction) pylv_preload_get_spin_time, METH_VARARGS | METH_KEYWORDS, "uint16_t lv_preload_get_spin_time(const lv_obj_t *preload)"},
+    {"get_style", (PyCFunction) pylv_preload_get_style, METH_VARARGS | METH_KEYWORDS, "lv_style_t *lv_preload_get_style(const lv_obj_t *preload, lv_preload_style_t type)"},
     {NULL}  /* Sentinel */
 };
 
@@ -6165,7 +6165,7 @@ pylv_list_get_btn_text(pylv_Obj *self, PyObject *args, PyObject *kwds)
     if (!PyArg_ParseTupleAndKeywords(args, kwds, "", kwlist )) return NULL;
 
     LVGL_LOCK        
-    char * result = lv_list_get_btn_text(self->ref);
+    const char * result = lv_list_get_btn_text(self->ref);
     LVGL_UNLOCK
     return Py_BuildValue("s", result);
 }
@@ -6289,22 +6289,22 @@ pylv_list_down(pylv_Obj *self, PyObject *args, PyObject *kwds)
 
 
 static PyMethodDef pylv_list_methods[] = {
-    {"clean", (PyCFunction) pylv_list_clean, METH_VARARGS | METH_KEYWORDS, NULL},
-    {"add", (PyCFunction) pylv_list_add, METH_VARARGS | METH_KEYWORDS, NULL},
-    {"set_btn_selected", (PyCFunction) pylv_list_set_btn_selected, METH_VARARGS | METH_KEYWORDS, NULL},
-    {"set_anim_time", (PyCFunction) pylv_list_set_anim_time, METH_VARARGS | METH_KEYWORDS, NULL},
-    {"set_style", (PyCFunction) pylv_list_set_style, METH_VARARGS | METH_KEYWORDS, NULL},
-    {"get_btn_text", (PyCFunction) pylv_list_get_btn_text, METH_VARARGS | METH_KEYWORDS, NULL},
-    {"get_btn_label", (PyCFunction) pylv_list_get_btn_label, METH_VARARGS | METH_KEYWORDS, NULL},
-    {"get_btn_img", (PyCFunction) pylv_list_get_btn_img, METH_VARARGS | METH_KEYWORDS, NULL},
-    {"get_prev_btn", (PyCFunction) pylv_list_get_prev_btn, METH_VARARGS | METH_KEYWORDS, NULL},
-    {"get_next_btn", (PyCFunction) pylv_list_get_next_btn, METH_VARARGS | METH_KEYWORDS, NULL},
-    {"get_btn_selected", (PyCFunction) pylv_list_get_btn_selected, METH_VARARGS | METH_KEYWORDS, NULL},
-    {"get_anim_time", (PyCFunction) pylv_list_get_anim_time, METH_VARARGS | METH_KEYWORDS, NULL},
-    {"get_style", (PyCFunction) pylv_list_get_style, METH_VARARGS | METH_KEYWORDS, NULL},
-    {"up", (PyCFunction) pylv_list_up, METH_VARARGS | METH_KEYWORDS, NULL},
-    {"down", (PyCFunction) pylv_list_down, METH_VARARGS | METH_KEYWORDS, NULL},
-    {"focus", (PyCFunction) pylv_list_focus, METH_VARARGS | METH_KEYWORDS, NULL},
+    {"clean", (PyCFunction) pylv_list_clean, METH_VARARGS | METH_KEYWORDS, "void lv_list_clean(lv_obj_t *obj)"},
+    {"add", (PyCFunction) pylv_list_add, METH_VARARGS | METH_KEYWORDS, ""},
+    {"set_btn_selected", (PyCFunction) pylv_list_set_btn_selected, METH_VARARGS | METH_KEYWORDS, "void lv_list_set_btn_selected(lv_obj_t *list, lv_obj_t *btn)"},
+    {"set_anim_time", (PyCFunction) pylv_list_set_anim_time, METH_VARARGS | METH_KEYWORDS, "void lv_list_set_anim_time(lv_obj_t *list, uint16_t anim_time)"},
+    {"set_style", (PyCFunction) pylv_list_set_style, METH_VARARGS | METH_KEYWORDS, "void lv_list_set_style(lv_obj_t *list, lv_list_style_t type, lv_style_t *style)"},
+    {"get_btn_text", (PyCFunction) pylv_list_get_btn_text, METH_VARARGS | METH_KEYWORDS, "const char *lv_list_get_btn_text(const lv_obj_t *btn)"},
+    {"get_btn_label", (PyCFunction) pylv_list_get_btn_label, METH_VARARGS | METH_KEYWORDS, "lv_obj_t *lv_list_get_btn_label(const lv_obj_t *btn)"},
+    {"get_btn_img", (PyCFunction) pylv_list_get_btn_img, METH_VARARGS | METH_KEYWORDS, "lv_obj_t *lv_list_get_btn_img(const lv_obj_t *btn)"},
+    {"get_prev_btn", (PyCFunction) pylv_list_get_prev_btn, METH_VARARGS | METH_KEYWORDS, "lv_obj_t *lv_list_get_prev_btn(const lv_obj_t *list, lv_obj_t *prev_btn)"},
+    {"get_next_btn", (PyCFunction) pylv_list_get_next_btn, METH_VARARGS | METH_KEYWORDS, "lv_obj_t *lv_list_get_next_btn(const lv_obj_t *list, lv_obj_t *prev_btn)"},
+    {"get_btn_selected", (PyCFunction) pylv_list_get_btn_selected, METH_VARARGS | METH_KEYWORDS, "lv_obj_t *lv_list_get_btn_selected(const lv_obj_t *list)"},
+    {"get_anim_time", (PyCFunction) pylv_list_get_anim_time, METH_VARARGS | METH_KEYWORDS, "uint16_t lv_list_get_anim_time(const lv_obj_t *list)"},
+    {"get_style", (PyCFunction) pylv_list_get_style, METH_VARARGS | METH_KEYWORDS, "lv_style_t *lv_list_get_style(const lv_obj_t *list, lv_list_style_t type)"},
+    {"up", (PyCFunction) pylv_list_up, METH_VARARGS | METH_KEYWORDS, "void lv_list_up(const lv_obj_t *list)"},
+    {"down", (PyCFunction) pylv_list_down, METH_VARARGS | METH_KEYWORDS, "void lv_list_down(const lv_obj_t *list)"},
+    {"focus", (PyCFunction) pylv_list_focus, METH_VARARGS | METH_KEYWORDS, ""},
     {NULL}  /* Sentinel */
 };
 
@@ -6484,14 +6484,14 @@ pylv_slider_get_style(pylv_Obj *self, PyObject *args, PyObject *kwds)
 
 
 static PyMethodDef pylv_slider_methods[] = {
-    {"set_action", (PyCFunction) pylv_slider_set_action, METH_VARARGS | METH_KEYWORDS, NULL},
-    {"set_knob_in", (PyCFunction) pylv_slider_set_knob_in, METH_VARARGS | METH_KEYWORDS, NULL},
-    {"set_style", (PyCFunction) pylv_slider_set_style, METH_VARARGS | METH_KEYWORDS, NULL},
-    {"get_value", (PyCFunction) pylv_slider_get_value, METH_VARARGS | METH_KEYWORDS, NULL},
-    {"get_action", (PyCFunction) pylv_slider_get_action, METH_VARARGS | METH_KEYWORDS, NULL},
-    {"is_dragged", (PyCFunction) pylv_slider_is_dragged, METH_VARARGS | METH_KEYWORDS, NULL},
-    {"get_knob_in", (PyCFunction) pylv_slider_get_knob_in, METH_VARARGS | METH_KEYWORDS, NULL},
-    {"get_style", (PyCFunction) pylv_slider_get_style, METH_VARARGS | METH_KEYWORDS, NULL},
+    {"set_action", (PyCFunction) pylv_slider_set_action, METH_VARARGS | METH_KEYWORDS, "void lv_slider_set_action(lv_obj_t *slider, lv_action_t action)"},
+    {"set_knob_in", (PyCFunction) pylv_slider_set_knob_in, METH_VARARGS | METH_KEYWORDS, "void lv_slider_set_knob_in(lv_obj_t *slider, bool in)"},
+    {"set_style", (PyCFunction) pylv_slider_set_style, METH_VARARGS | METH_KEYWORDS, "void lv_slider_set_style(lv_obj_t *slider, lv_slider_style_t type, lv_style_t *style)"},
+    {"get_value", (PyCFunction) pylv_slider_get_value, METH_VARARGS | METH_KEYWORDS, "int16_t lv_slider_get_value(const lv_obj_t *slider)"},
+    {"get_action", (PyCFunction) pylv_slider_get_action, METH_VARARGS | METH_KEYWORDS, "lv_action_t lv_slider_get_action(const lv_obj_t *slider)"},
+    {"is_dragged", (PyCFunction) pylv_slider_is_dragged, METH_VARARGS | METH_KEYWORDS, "bool lv_slider_is_dragged(const lv_obj_t *slider)"},
+    {"get_knob_in", (PyCFunction) pylv_slider_get_knob_in, METH_VARARGS | METH_KEYWORDS, "bool lv_slider_get_knob_in(const lv_obj_t *slider)"},
+    {"get_style", (PyCFunction) pylv_slider_get_style, METH_VARARGS | METH_KEYWORDS, "lv_style_t *lv_slider_get_style(const lv_obj_t *slider, lv_slider_style_t type)"},
     {NULL}  /* Sentinel */
 };
 
@@ -6596,11 +6596,11 @@ pylv_sw_get_style(pylv_Obj *self, PyObject *args, PyObject *kwds)
 
 
 static PyMethodDef pylv_sw_methods[] = {
-    {"on", (PyCFunction) pylv_sw_on, METH_VARARGS | METH_KEYWORDS, NULL},
-    {"off", (PyCFunction) pylv_sw_off, METH_VARARGS | METH_KEYWORDS, NULL},
-    {"set_style", (PyCFunction) pylv_sw_set_style, METH_VARARGS | METH_KEYWORDS, NULL},
-    {"get_state", (PyCFunction) pylv_sw_get_state, METH_VARARGS | METH_KEYWORDS, NULL},
-    {"get_style", (PyCFunction) pylv_sw_get_style, METH_VARARGS | METH_KEYWORDS, NULL},
+    {"on", (PyCFunction) pylv_sw_on, METH_VARARGS | METH_KEYWORDS, "void lv_sw_on(lv_obj_t *sw)"},
+    {"off", (PyCFunction) pylv_sw_off, METH_VARARGS | METH_KEYWORDS, "void lv_sw_off(lv_obj_t *sw)"},
+    {"set_style", (PyCFunction) pylv_sw_set_style, METH_VARARGS | METH_KEYWORDS, "void lv_sw_set_style(lv_obj_t *sw, lv_sw_style_t type, lv_style_t *style)"},
+    {"get_state", (PyCFunction) pylv_sw_get_state, METH_VARARGS | METH_KEYWORDS, "inline static bool lv_sw_get_state(const lv_obj_t *sw)"},
+    {"get_style", (PyCFunction) pylv_sw_get_style, METH_VARARGS | METH_KEYWORDS, "lv_style_t *lv_sw_get_style(const lv_obj_t *sw, lv_sw_style_t type)"},
     {NULL}  /* Sentinel */
 };
 
@@ -6710,7 +6710,7 @@ static PyObject*
 pylv_cb_set_text(pylv_Obj *self, PyObject *args, PyObject *kwds)
 {
     static char *kwlist[] = {"txt", NULL};
-    char * txt;
+    const char * txt;
     if (!PyArg_ParseTupleAndKeywords(args, kwds, "s", kwlist , &txt)) return NULL;
 
     LVGL_LOCK         
@@ -6765,7 +6765,7 @@ pylv_cb_get_text(pylv_Obj *self, PyObject *args, PyObject *kwds)
     if (!PyArg_ParseTupleAndKeywords(args, kwds, "", kwlist )) return NULL;
 
     LVGL_LOCK        
-    char * result = lv_cb_get_text(self->ref);
+    const char * result = lv_cb_get_text(self->ref);
     LVGL_UNLOCK
     return Py_BuildValue("s", result);
 }
@@ -6793,15 +6793,15 @@ pylv_cb_get_style(pylv_Obj *self, PyObject *args, PyObject *kwds)
 
 
 static PyMethodDef pylv_cb_methods[] = {
-    {"set_text", (PyCFunction) pylv_cb_set_text, METH_VARARGS | METH_KEYWORDS, NULL},
-    {"set_checked", (PyCFunction) pylv_cb_set_checked, METH_VARARGS | METH_KEYWORDS, NULL},
-    {"set_inactive", (PyCFunction) pylv_cb_set_inactive, METH_VARARGS | METH_KEYWORDS, NULL},
-    {"set_action", (PyCFunction) pylv_cb_set_action, METH_VARARGS | METH_KEYWORDS, NULL},
-    {"set_style", (PyCFunction) pylv_cb_set_style, METH_VARARGS | METH_KEYWORDS, NULL},
-    {"get_text", (PyCFunction) pylv_cb_get_text, METH_VARARGS | METH_KEYWORDS, NULL},
-    {"is_checked", (PyCFunction) pylv_cb_is_checked, METH_VARARGS | METH_KEYWORDS, NULL},
-    {"get_action", (PyCFunction) pylv_cb_get_action, METH_VARARGS | METH_KEYWORDS, NULL},
-    {"get_style", (PyCFunction) pylv_cb_get_style, METH_VARARGS | METH_KEYWORDS, NULL},
+    {"set_text", (PyCFunction) pylv_cb_set_text, METH_VARARGS | METH_KEYWORDS, "void lv_cb_set_text(lv_obj_t *cb, const char *txt)"},
+    {"set_checked", (PyCFunction) pylv_cb_set_checked, METH_VARARGS | METH_KEYWORDS, "inline static void lv_cb_set_checked(lv_obj_t *cb, bool checked)"},
+    {"set_inactive", (PyCFunction) pylv_cb_set_inactive, METH_VARARGS | METH_KEYWORDS, "inline static void lv_cb_set_inactive(lv_obj_t *cb)"},
+    {"set_action", (PyCFunction) pylv_cb_set_action, METH_VARARGS | METH_KEYWORDS, "inline static void lv_cb_set_action(lv_obj_t *cb, lv_action_t action)"},
+    {"set_style", (PyCFunction) pylv_cb_set_style, METH_VARARGS | METH_KEYWORDS, "void lv_cb_set_style(lv_obj_t *cb, lv_cb_style_t type, lv_style_t *style)"},
+    {"get_text", (PyCFunction) pylv_cb_get_text, METH_VARARGS | METH_KEYWORDS, "const char *lv_cb_get_text(const lv_obj_t *cb)"},
+    {"is_checked", (PyCFunction) pylv_cb_is_checked, METH_VARARGS | METH_KEYWORDS, "inline static bool lv_cb_is_checked(const lv_obj_t *cb)"},
+    {"get_action", (PyCFunction) pylv_cb_get_action, METH_VARARGS | METH_KEYWORDS, "inline static lv_action_t lv_cb_get_action(const lv_obj_t *cb)"},
+    {"get_style", (PyCFunction) pylv_cb_get_style, METH_VARARGS | METH_KEYWORDS, "lv_style_t *lv_cb_get_style(const lv_obj_t *cb, lv_cb_style_t type)"},
     {NULL}  /* Sentinel */
 };
 
@@ -6909,11 +6909,11 @@ pylv_roller_get_style(pylv_Obj *self, PyObject *args, PyObject *kwds)
 
 
 static PyMethodDef pylv_roller_methods[] = {
-    {"set_selected", (PyCFunction) pylv_roller_set_selected, METH_VARARGS | METH_KEYWORDS, NULL},
-    {"set_visible_row_count", (PyCFunction) pylv_roller_set_visible_row_count, METH_VARARGS | METH_KEYWORDS, NULL},
-    {"set_style", (PyCFunction) pylv_roller_set_style, METH_VARARGS | METH_KEYWORDS, NULL},
-    {"get_hor_fit", (PyCFunction) pylv_roller_get_hor_fit, METH_VARARGS | METH_KEYWORDS, NULL},
-    {"get_style", (PyCFunction) pylv_roller_get_style, METH_VARARGS | METH_KEYWORDS, NULL},
+    {"set_selected", (PyCFunction) pylv_roller_set_selected, METH_VARARGS | METH_KEYWORDS, "void lv_roller_set_selected(lv_obj_t *roller, uint16_t sel_opt, bool anim_en)"},
+    {"set_visible_row_count", (PyCFunction) pylv_roller_set_visible_row_count, METH_VARARGS | METH_KEYWORDS, "void lv_roller_set_visible_row_count(lv_obj_t *roller, uint8_t row_cnt)"},
+    {"set_style", (PyCFunction) pylv_roller_set_style, METH_VARARGS | METH_KEYWORDS, "void lv_roller_set_style(lv_obj_t *roller, lv_roller_style_t type, lv_style_t *style)"},
+    {"get_hor_fit", (PyCFunction) pylv_roller_get_hor_fit, METH_VARARGS | METH_KEYWORDS, "bool lv_roller_get_hor_fit(const lv_obj_t *roller)"},
+    {"get_style", (PyCFunction) pylv_roller_get_style, METH_VARARGS | METH_KEYWORDS, "lv_style_t *lv_roller_get_style(const lv_obj_t *roller, lv_roller_style_t type)"},
     {NULL}  /* Sentinel */
 };
 
