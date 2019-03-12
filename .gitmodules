@@ -1,6 +1,3 @@
-[submodule "lvgl"]
-	path = lvgl
-	url = https://github.com/amirgon/lvgl.git
 [submodule "pycparser"]
 	path = pycparser
 	url = https://github.com/rreilink/pycparser.git
