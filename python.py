@@ -307,6 +307,8 @@ class PythonBindingsGenerator(BindingsGenerator):
     outputfile = 'lvglmodule.c'
 
     def customize(self):
+        self.parseresult.defines.pop('SYMBOL_BATTERY_EMPTY') # Triggers lvgl Issue 941 https://github.com/littlevgl/lvgl/issues/941
+        
         # TODO: remove these reordering construct (only required to show equality of the bindings generator)
         # All this reordering code is written such, that no items can accidentally be removed or added while reordering
         
@@ -400,8 +402,8 @@ class PythonBindingsGenerator(BindingsGenerator):
             )
     def get_SYMBOL_ASSIGNMENTS(self):
         return ''.join(
-            f'    PyModule_AddStringConstant(module, "{name}", {value});\n'
-            for name, value in self.parseresult.defines.items()
+            f'    PyModule_AddStringMacro(module, {name});\n'
+            for name in self.parseresult.defines
             if name.startswith('SYMBOL_')
             )
 

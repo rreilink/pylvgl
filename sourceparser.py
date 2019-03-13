@@ -9,7 +9,6 @@ from pycparser import c_ast, c_generator
 import copy
 import os
 import re
-import glob
 import collections
 
 def type_repr(x):
@@ -26,31 +25,7 @@ def stripstart(s, start):
     assert s.startswith(start)
     return s[len(start):]
 
-class CPP(pycparser.ply.cpp.Preprocessor):
-    '''
-    This extends the pycparser PLY-based included c preprocessor with 
-    these modifications:
-      - fix #if evaluation of != 
-      - open included source files with utf-8 decoding
-      - defined(x) returns "0" or "1" as opposed to "0L" or "1L" which are no
-        valid Python 3 expressions
-      - define endianness macros
-      - skip inclusion of files in CPP.SKIPINCLUDES
-    '''
-    
-    SKIPINCLUDES = ['stdbool.h', 'stdint.h', 'stddef.h', 'string.h', 'stdio.h']
-    
-    def __init__(self, *args, **kwargs):
-        super().__init__(*args, **kwargs)
 
-        self.define('__ORDER_LITTLE_ENDIAN__ 0')
-        self.define('__ORDER_BIT_ENDIAN__ 1')
-        self.define('__BYTE_ORDER__ 1')
-    
-    def read_include_file(self, filepath):
-        if filepath in self.SKIPINCLUDES:
-            return ''
-        return super().read_include_file(filepath)
 
 ParseResult = collections.namedtuple('ParseResult', 'enums functions declarations typedefs structs objects global_functions defines')
 
@@ -75,44 +50,12 @@ class LvglSourceParser:
     def __init__(self):
         self.lexer = pycparser.ply.lex.lex(module = pycparser.ply.cpp)
 
-    def parse_files(self, filenames):
+    def parse_file(self, filename):
+        args = ['-I../pycparser/utils/fake_libc_include']
         
-        # Parse with Python C-preprocessor
-        input = ''
-        for filename in filenames:
-            with open(filename, 'r', encoding='utf-8') as file:
-                input += file.read()
-    
-        cpp = CPP(self.lexer)
-                
-        cpp.add_path(os.path.dirname(filenames[0]))
+        # TODO: preprocessor for Windows
+        return pycparser.parse_file(filename, use_cpp=True, cpp_path='gcc', cpp_args=['-E'] + args)
         
-        typedefs = ''.join(f'typedef {type} {name};\n' for name, type in self.TYPEDEFS.items())
-        
-        cpp.parse(typedefs + input,filename)
-        
-        preprocessed = ''
-        
-        while True:
-            tok = cpp.token()
-            if not tok: break
-            #print(tok.value, end='')
-            preprocessed += tok.value
-    
-        # All macros which are used in the C-source will have been expanded,
-        # unused macros are not. Expand them all for consistency
-        for macro in cpp.macros.values():
-            cpp.expand_macros(macro.value)
-        
-        # Convert the macro tokens to a string
-        defines = collections.OrderedDict([
-            (name, ''.join(tok.value for tok in macro.value))
-            for name, macro in cpp.macros.items()
-        
-            ])
-    
-        return pycparser.CParser().parse(preprocessed, filename), defines
-    
     @staticmethod
     def enum_to_dict(enum_node):
         '''
@@ -120,7 +63,7 @@ class LvglSourceParser:
         - the name of the enum in python, using the common prefix of all enum items
         - a dictionary with as keys the names as they should be in Python, and as values the C enum constant names
         '''
-        items = [enumitem.name for enumitem in enum_node.values.enumerators]
+        items = [enumitem.name for enumitem in enum_node.values.enumerators if not enumitem.name.startswith('_')]
         
         prefix = os.path.commonprefix(items)
         prefix = "_".join(prefix.split("_")[:-1])
@@ -145,10 +88,8 @@ class LvglSourceParser:
         declarations = collections.OrderedDict()
         structs = collections.OrderedDict()
         typedefs = collections.OrderedDict()
-        
-        filenames = [f for f in glob.glob(os.path.join(path, 'lv_objx/*.h')) if not f.endswith('lv_objx_templ.h')]
 
-        ast, defines = self.parse_files(filenames)
+        ast = self.parse_file(os.path.join(path, 'lvgl.h'))
         
         previous_item = None
         # TODO: this whole filtering of items could be done in the bindings generator to allow for extending bindings generator without changing the sourceparser
@@ -168,13 +109,7 @@ class LvglSourceParser:
                 # to be treated as basic types by the bindings generators
                 typedefs[item.name] = item
                 
-                if isinstance(item.type.type, c_ast.Enum):
-                    # Earlier versions of lvgl use typedef enum { ... } lv_enum_name_t
-                    
-                    
-                    enums[item.name] = self.enum_to_list(item.type.type)
-                    
-                elif isinstance(item.type, c_ast.TypeDecl) and isinstance(item.type.type, c_ast.Struct):
+                if isinstance(item.type, c_ast.TypeDecl) and isinstance(item.type.type, c_ast.Struct):
                     # typedef struct { ... } lv_struct_name_t;
                     structs[item.type.declname] = item.type.type
                     
@@ -197,32 +132,18 @@ class LvglSourceParser:
         objects, global_functions = self.determine_objects(functions, typedefs)
         
         
+        # Find defines in color.h and symbol_def.h
+        defines = collections.OrderedDict() # There is not OrderedSet in Python, so let's use OrderedDict with None values
+        for filename in 'lv_misc/lv_color.h', 'lv_misc/lv_symbol_def.h':
+            with open(os.path.join(path, filename), 'rt', encoding='utf-8') as file:
+                code = file.read()
+                for define in re.findall('^\s*#define\s+(\w+)', code,flags = re.MULTILINE):
+                    if not define.startswith('_'):
+                        defines[define] = None
+        
         return ParseResult(enums, functions, declarations, typedefs, structs, objects, global_functions, defines)
 
-    @staticmethod
-    def determine_ancestor(create_function):
-        return None
-        # Get the name of the first argument to the create function
-        firstargument = create_function.decl.type.args.params[0].name
-        
-        results = []
-        
-        for node in flatten_ast(create_function):
-            if isinstance(node, c_ast.FuncCall) and isinstance(node.name, c_ast.ID):
-                name = node.name.name
-                match = re.match('lv_([A-Za-z0-9]+)_create$', name)
-                
-                # A _create function is called, with the same first argument as our _create
-                if match and node.args:
-                    arg = node.args.exprs[0]
-                    if isinstance(arg, c_ast.ID) and arg.name == firstargument:
-                        results.append(match.group(1))
-            
-        # assert at most 1 match; return None in case of no match
-        assert len(results) <= 1
-        
-        return results[0] if results else None
-    
+  
     @classmethod
     def determine_objects(cls, functions, typedefs):
         # Stage 1: find all objects and the name of their ancestor
