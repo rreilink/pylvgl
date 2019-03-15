@@ -309,13 +309,6 @@ class PythonBindingsGenerator(BindingsGenerator):
     outputfile = 'lvglmodule.c'
 
     def customize(self):
-        # TODO: remove these reordering construct (only required to show equality of the bindings generator)
-        # All this reordering code is written such, that no items can accidentally be removed or added while reordering
-        
-        # reorder objects    
-        for name in 'obj win label lmeter btnm chart cont led kb img bar arc line tabview mbox gauge page ta btn ddlist preload list slider sw cb roller'.split():
-            self.objects[name] = self.objects.pop(name)
-        
         
         
         objects = self.objects
