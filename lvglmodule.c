@@ -1,5 +1,6 @@
 #include "Python.h"
 #include "structmember.h"
+#undef B0 // Workaround for lvgl Issue 941 https://github.com/littlevgl/lvgl/issues/941
 #include "lvgl/lvgl.h"
 
 #if LV_COLOR_DEPTH != 16
@@ -1452,7 +1453,7 @@ pylv_obj_clear_protect(pylv_Obj *self, PyObject *args, PyObject *kwds)
 static PyObject*
 pylv_obj_set_design_func(pylv_Obj *self, PyObject *args, PyObject *kwds)
 {
-    PyErr_SetString(PyExc_NotImplementedError, "not implemented");
+    PyErr_SetString(PyExc_NotImplementedError, "not implemented: lv_obj_set_design_func: Parameter type not found >lv_design_func_t< ");
     return NULL;
 }
 
@@ -1471,7 +1472,7 @@ pylv_obj_refresh_ext_size(pylv_Obj *self, PyObject *args, PyObject *kwds)
 static PyObject*
 pylv_obj_animate(pylv_Obj *self, PyObject *args, PyObject *kwds)
 {
-    PyErr_SetString(PyExc_NotImplementedError, "not implemented");
+    PyErr_SetString(PyExc_NotImplementedError, "not implemented: lv_obj_animate: Parameter type not found >void cb(lv_obj_t *)*< ");
     return NULL;
 }
 
@@ -1518,7 +1519,7 @@ pylv_obj_count_children(pylv_Obj *self, PyObject *args, PyObject *kwds)
 static PyObject*
 pylv_obj_get_coords(pylv_Obj *self, PyObject *args, PyObject *kwds)
 {
-    PyErr_SetString(PyExc_NotImplementedError, "not implemented");
+    PyErr_SetString(PyExc_NotImplementedError, "not implemented: lv_obj_get_coords: Parameter type not found >lv_area_t*< ");
     return NULL;
 }
 
@@ -1726,14 +1727,14 @@ pylv_obj_is_protected(pylv_Obj *self, PyObject *args, PyObject *kwds)
 static PyObject*
 pylv_obj_get_design_func(pylv_Obj *self, PyObject *args, PyObject *kwds)
 {
-    PyErr_SetString(PyExc_NotImplementedError, "not implemented");
+    PyErr_SetString(PyExc_NotImplementedError, "not implemented: lv_obj_get_design_func: Return type not found >lv_design_func_t< ");
     return NULL;
 }
 
 static PyObject*
 pylv_obj_get_group(pylv_Obj *self, PyObject *args, PyObject *kwds)
 {
-    PyErr_SetString(PyExc_NotImplementedError, "not implemented");
+    PyErr_SetString(PyExc_NotImplementedError, "not implemented: lv_obj_get_group: Return type not found >void*< ");
     return NULL;
 }
 
@@ -1864,7 +1865,7 @@ pylv_win_clean(pylv_Obj *self, PyObject *args, PyObject *kwds)
 static PyObject*
 pylv_win_add_btn(pylv_Obj *self, PyObject *args, PyObject *kwds)
 {
-    PyErr_SetString(PyExc_NotImplementedError, "not implemented");
+    PyErr_SetString(PyExc_NotImplementedError, "not implemented: lv_win_add_btn: Parameter type not found >const void*< ");
     return NULL;
 }
 
@@ -2273,7 +2274,7 @@ pylv_label_get_text(pylv_Obj *self, PyObject *args, PyObject *kwds)
     if (!PyArg_ParseTupleAndKeywords(args, kwds, "", kwlist )) return NULL;
 
     LVGL_LOCK        
-    const char * result = lv_label_get_text(self->ref);
+    char * result = lv_label_get_text(self->ref);
     LVGL_UNLOCK
     return Py_BuildValue("s", result);
 }
@@ -2586,7 +2587,7 @@ pylv_btnm_init(pylv_Btnm *self, PyObject *args, PyObject *kwds)
 static PyObject*
 pylv_btnm_set_action(pylv_Obj *self, PyObject *args, PyObject *kwds)
 {
-    PyErr_SetString(PyExc_NotImplementedError, "not implemented");
+    PyErr_SetString(PyExc_NotImplementedError, "not implemented: lv_btnm_set_action: Parameter type not found >lv_btnm_action_t< ");
     return NULL;
 }
 
@@ -2634,14 +2635,14 @@ pylv_btnm_set_recolor(pylv_Obj *self, PyObject *args, PyObject *kwds)
 static PyObject*
 pylv_btnm_get_map(pylv_Obj *self, PyObject *args, PyObject *kwds)
 {
-    PyErr_SetString(PyExc_NotImplementedError, "not implemented");
+    PyErr_SetString(PyExc_NotImplementedError, "not implemented: lv_btnm_get_map: Return type not found >const char**< ");
     return NULL;
 }
 
 static PyObject*
 pylv_btnm_get_action(pylv_Obj *self, PyObject *args, PyObject *kwds)
 {
-    PyErr_SetString(PyExc_NotImplementedError, "not implemented");
+    PyErr_SetString(PyExc_NotImplementedError, "not implemented: lv_btnm_get_action: Return type not found >lv_btnm_action_t< ");
     return NULL;
 }
 
@@ -2749,14 +2750,14 @@ pylv_chart_init(pylv_Chart *self, PyObject *args, PyObject *kwds)
 static PyObject*
 pylv_chart_add_series(pylv_Obj *self, PyObject *args, PyObject *kwds)
 {
-    PyErr_SetString(PyExc_NotImplementedError, "not implemented");
+    PyErr_SetString(PyExc_NotImplementedError, "not implemented: lv_chart_add_series: Parameter type not found >lv_color_t< ");
     return NULL;
 }
 
 static PyObject*
 pylv_chart_clear_serie(pylv_Obj *self, PyObject *args, PyObject *kwds)
 {
-    PyErr_SetString(PyExc_NotImplementedError, "not implemented");
+    PyErr_SetString(PyExc_NotImplementedError, "not implemented: lv_chart_clear_serie: Parameter type not found >lv_chart_series_t*< ");
     return NULL;
 }
 
@@ -2856,21 +2857,21 @@ pylv_chart_set_series_darking(pylv_Obj *self, PyObject *args, PyObject *kwds)
 static PyObject*
 pylv_chart_init_points(pylv_Obj *self, PyObject *args, PyObject *kwds)
 {
-    PyErr_SetString(PyExc_NotImplementedError, "not implemented");
+    PyErr_SetString(PyExc_NotImplementedError, "not implemented: lv_chart_init_points: Parameter type not found >lv_chart_series_t*< ");
     return NULL;
 }
 
 static PyObject*
 pylv_chart_set_points(pylv_Obj *self, PyObject *args, PyObject *kwds)
 {
-    PyErr_SetString(PyExc_NotImplementedError, "not implemented");
+    PyErr_SetString(PyExc_NotImplementedError, "not implemented: lv_chart_set_points: Parameter type not found >lv_chart_series_t*< ");
     return NULL;
 }
 
 static PyObject*
 pylv_chart_set_next(pylv_Obj *self, PyObject *args, PyObject *kwds)
 {
-    PyErr_SetString(PyExc_NotImplementedError, "not implemented");
+    PyErr_SetString(PyExc_NotImplementedError, "not implemented: lv_chart_set_next: Parameter type not found >lv_chart_series_t*< ");
     return NULL;
 }
 
@@ -3543,7 +3544,7 @@ pylv_img_init(pylv_Img *self, PyObject *args, PyObject *kwds)
 static PyObject*
 pylv_img_set_src(pylv_Obj *self, PyObject *args, PyObject *kwds)
 {
-    PyErr_SetString(PyExc_NotImplementedError, "not implemented");
+    PyErr_SetString(PyExc_NotImplementedError, "not implemented: lv_img_set_src: Parameter type not found >const void*< ");
     return NULL;
 }
 
@@ -3589,7 +3590,7 @@ pylv_img_set_upscale(pylv_Obj *self, PyObject *args, PyObject *kwds)
 static PyObject*
 pylv_img_get_src(pylv_Obj *self, PyObject *args, PyObject *kwds)
 {
-    PyErr_SetString(PyExc_NotImplementedError, "not implemented");
+    PyErr_SetString(PyExc_NotImplementedError, "not implemented: lv_img_get_src: Return type not found >const void*< ");
     return NULL;
 }
 
@@ -3976,7 +3977,7 @@ pylv_line_init(pylv_Line *self, PyObject *args, PyObject *kwds)
 static PyObject*
 pylv_line_set_points(pylv_Obj *self, PyObject *args, PyObject *kwds)
 {
-    PyErr_SetString(PyExc_NotImplementedError, "not implemented");
+    PyErr_SetString(PyExc_NotImplementedError, "not implemented: lv_line_set_points: Parameter type not found >const lv_point_t*< ");
     return NULL;
 }
 
@@ -4151,7 +4152,7 @@ pylv_tabview_set_tab_act(pylv_Obj *self, PyObject *args, PyObject *kwds)
 static PyObject*
 pylv_tabview_set_tab_load_action(pylv_Obj *self, PyObject *args, PyObject *kwds)
 {
-    PyErr_SetString(PyExc_NotImplementedError, "not implemented");
+    PyErr_SetString(PyExc_NotImplementedError, "not implemented: lv_tabview_set_tab_load_action: Parameter type not found >lv_tabview_action_t< ");
     return NULL;
 }
 
@@ -4263,7 +4264,7 @@ pylv_tabview_get_tab(pylv_Obj *self, PyObject *args, PyObject *kwds)
 static PyObject*
 pylv_tabview_get_tab_load_action(pylv_Obj *self, PyObject *args, PyObject *kwds)
 {
-    PyErr_SetString(PyExc_NotImplementedError, "not implemented");
+    PyErr_SetString(PyExc_NotImplementedError, "not implemented: lv_tabview_get_tab_load_action: Return type not found >lv_tabview_action_t< ");
     return NULL;
 }
 
@@ -4390,7 +4391,7 @@ pylv_mbox_init(pylv_Mbox *self, PyObject *args, PyObject *kwds)
 static PyObject*
 pylv_mbox_add_btns(pylv_Obj *self, PyObject *args, PyObject *kwds)
 {
-    PyErr_SetString(PyExc_NotImplementedError, "not implemented");
+    PyErr_SetString(PyExc_NotImplementedError, "not implemented: lv_mbox_add_btns: Parameter type not found >const char**< ");
     return NULL;
 }
 
@@ -4410,7 +4411,7 @@ pylv_mbox_set_text(pylv_Obj *self, PyObject *args, PyObject *kwds)
 static PyObject*
 pylv_mbox_set_action(pylv_Obj *self, PyObject *args, PyObject *kwds)
 {
-    PyErr_SetString(PyExc_NotImplementedError, "not implemented");
+    PyErr_SetString(PyExc_NotImplementedError, "not implemented: lv_mbox_set_action: Parameter type not found >lv_btnm_action_t< ");
     return NULL;
 }
 
@@ -4599,7 +4600,7 @@ pylv_gauge_init(pylv_Gauge *self, PyObject *args, PyObject *kwds)
 static PyObject*
 pylv_gauge_set_needle_count(pylv_Obj *self, PyObject *args, PyObject *kwds)
 {
-    PyErr_SetString(PyExc_NotImplementedError, "not implemented");
+    PyErr_SetString(PyExc_NotImplementedError, "not implemented: lv_gauge_set_needle_count: Parameter type not found >const lv_color_t*< ");
     return NULL;
 }
 
@@ -6170,14 +6171,8 @@ pylv_ddlist_get_selected(pylv_Obj *self, PyObject *args, PyObject *kwds)
 static PyObject*
 pylv_ddlist_get_selected_str(pylv_Obj *self, PyObject *args, PyObject *kwds)
 {
-    static char *kwlist[] = {"buf", NULL};
-    const char * buf;
-    if (!PyArg_ParseTupleAndKeywords(args, kwds, "s", kwlist , &buf)) return NULL;
-
-    LVGL_LOCK         
-    lv_ddlist_get_selected_str(self->ref, buf);
-    LVGL_UNLOCK
-    Py_RETURN_NONE;
+    PyErr_SetString(PyExc_NotImplementedError, "not implemented: lv_ddlist_get_selected_str: Parameter type not found >char*< ");
+    return NULL;
 }
 
 static PyObject*
@@ -6630,8 +6625,14 @@ pylv_list_get_next_btn(pylv_Obj *self, PyObject *args, PyObject *kwds)
 static PyObject*
 pylv_list_get_btn_index(pylv_Obj *self, PyObject *args, PyObject *kwds)
 {
-    PyErr_SetString(PyExc_NotImplementedError, "not implemented");
-    return NULL;
+    static char *kwlist[] = {"btn", NULL};
+    pylv_Obj * btn;
+    if (!PyArg_ParseTupleAndKeywords(args, kwds, "O!", kwlist , &pylv_obj_Type, &btn)) return NULL;
+
+    LVGL_LOCK        
+    int result = lv_list_get_btn_index(self->ref, btn->ref);
+    LVGL_UNLOCK
+    return Py_BuildValue("I", result);
 }
 
 static PyObject*
@@ -7899,6 +7900,7 @@ PyInit_lvgl(void) {
     PyModule_AddStringMacro(module, SYMBOL_BATTERY_3);
     PyModule_AddStringMacro(module, SYMBOL_BATTERY_2);
     PyModule_AddStringMacro(module, SYMBOL_BATTERY_1);
+    PyModule_AddStringMacro(module, SYMBOL_BATTERY_EMPTY);
     PyModule_AddStringMacro(module, SYMBOL_BLUETOOTH);
     PyModule_AddStringMacro(module, SYMBOL_DUMMY);
 

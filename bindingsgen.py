@@ -15,11 +15,10 @@ import copy
 
 assert sys.version_info > (3,6)
 
-from sourceparser import c_ast, c_generator, type_repr, stripstart
+from sourceparser import c_ast, c_generator, generate_c, type_repr, stripstart
 
 
-def generate_c(node):
-    return c_generator.CGenerator().visit(node)
+
 
 def astnode_equals(a, b):
     '''
@@ -53,7 +52,8 @@ def astnode_equals(a, b):
     return True
     
 
-
+class MissingConversionException(ValueError):
+    pass
 
 def flatten_struct(s, prefix=''):
     '''
@@ -67,24 +67,6 @@ def flatten_struct(s, prefix=''):
             bitsize = ':' + d.bitsize.value if d.bitsize else ''
             yield (' '.join(d.type.type.names)+bitsize, prefix+d.name)
 
-
-
-
-typeconv = {
-    'lv_obj_t*': ('O!', 'pylv_Obj *'),     # special case: conversion from/to Python object
-    'lv_style_t*': ('O!', 'Style_Object *'), # special case: conversion from/to Python Style object
-    'bool':      ('p', 'int'),
-    'uint8_t':   ('b', 'unsigned char'),
-    'lv_opa_t':  ('b', 'unsigned char'),
-    'lv_color_t': ('H', 'unsigned short int'),
-    'char':      ('c', 'char'),
-    'char*':     ('s', 'char *'),
-    'lv_coord_t':('h', 'short int'),
-    'uint16_t':  ('H', 'unsigned short int'), 
-    'int16_t':   ('h', 'short int'),
-    'uint32_t':  ('I', 'unsigned int'),
-    
-    }
 
 class CustomMethod(c_ast.FuncDef):
     '''

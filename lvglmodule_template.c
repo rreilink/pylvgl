@@ -1,5 +1,6 @@
 #include "Python.h"
 #include "structmember.h"
+#undef B0 // Workaround for lvgl Issue 941 https://github.com/littlevgl/lvgl/issues/941
 #include "lvgl/lvgl.h"
 
 #if LV_COLOR_DEPTH != 16

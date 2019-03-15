@@ -1,7 +1,7 @@
 import collections
 import re
 
-from bindingsgen import Object, BindingsGenerator, c_ast, stripstart, generate_c, CustomMethod, type_repr, flatten_struct
+from bindingsgen import Object, BindingsGenerator, c_ast, stripstart, generate_c, CustomMethod, type_repr, flatten_struct, MissingConversionException
 
 # TODO: should be common for all bindings generators
 skipfunctions = {
@@ -31,10 +31,6 @@ skipfunctions = {
     
 }
 
-# TODO: remove these
-paramtypes_miss = collections.Counter()
-restypes_miss = collections.Counter()
-
 
 class PythonObject(Object):
         
@@ -42,17 +38,20 @@ class PythonObject(Object):
         'lv_obj_t*': ('O!', 'pylv_Obj *'),     # special case: conversion from/to Python object
         'lv_style_t*': ('O!', 'Style_Object *'), # special case: conversion from/to Python Style object
         'bool':      ('p', 'int'),
-        'uint8_t':   ('b', 'unsigned char'),
-        'lv_opa_t':  ('b', 'unsigned char'),
-        'lv_color_t': ('H', 'unsigned short int'),
         'char':      ('c', 'char'),
-        'char*':     ('s', 'const char *'),
-        'lv_coord_t':('h', 'short int'),
+        'uint8_t':   ('b', 'unsigned char'),
+        'const char*':     ('s', 'const char *'),
         'uint16_t':  ('H', 'unsigned short int'), 
         'int16_t':   ('h', 'short int'),
         'uint32_t':  ('I', 'unsigned int'),
-        
+        'int32_t':  ('I', 'int'),
         }
+    
+    TYPECONV_PARAMETER = TYPECONV.copy()
+    TYPECONV_PARAMETER.update({'const lv_obj_t*': ('O!', 'pylv_Obj *')})
+    
+    TYPECONV_RETURN = TYPECONV.copy()
+    TYPECONV_RETURN.update({'char*':     ('s', 'char *')})
     
 
     
@@ -85,25 +84,22 @@ static PyObject*
 py{method.decl.name}(pylv_Obj *self, PyObject *args, PyObject *kwds)
 {{
 '''
-
-        notImplementedCode = startCode + '    PyErr_SetString(PyExc_NotImplementedError, "not implemented");\n    return NULL;\n}\n'
-        
+       
         paramnames = []
         paramctypes = []
         paramfmt = ''
         for param in method.decl.type.args.params:
             paramtype = type_repr(param.type)
-            # request_enum also registers the use of this enum with the bindingsgenerator
-            if self.bindingsgenerator.request_enum(paramtype):
-                fmt, ctype = 'i', 'int'
-            else:
-                try:
-                    fmt, ctype = self.TYPECONV[self.bindingsgenerator.deref_typedef(paramtype)]
-                except KeyError:
-                    # TODO: raise exception like micropython does
-                    print(f'{method.decl.name}: Parameter type not found >{paramtype}< ')
-                    paramtypes_miss.update((paramtype,))
-                    return notImplementedCode;
+            paramtype_derefed = self.bindingsgenerator.deref_typedef(paramtype)
+            
+            # For params, if the param type is e.g. "lv_obj_t*", "const lv_obj_t*" is allowed, too
+            # However, we do not add "const lv_obj_t*" to the TYPECONV dict, since "const lv_obj_t*" would not be a valid return type
+            
+            try:
+                fmt, ctype = self.TYPECONV_PARAMETER[paramtype_derefed]
+            except KeyError:
+                raise MissingConversionException(f'{method.decl.name}: Parameter type not found >{paramtype}< ')
+            
             paramnames.append(param.name)
             paramctypes.append(ctype)
             paramfmt += fmt
@@ -113,15 +109,10 @@ py{method.decl.name}(pylv_Obj *self, PyObject *args, PyObject *kwds)
         if restype == 'void':
             resfmt, resctype = None, None
         else:
-            if self.bindingsgenerator.request_enum(restype):
-                resfmt, resctype = 'i', 'int'
-            else:
-                try:
-                    resfmt, resctype = self.TYPECONV[self.bindingsgenerator.deref_typedef(restype)]
-                except KeyError:
-                    print(f'{method.decl.name}: Return type not found >{restype}< ')
-                    restypes_miss.update((restype,))
-                    return notImplementedCode            
+            try:
+                resfmt, resctype = self.TYPECONV_RETURN[self.bindingsgenerator.deref_typedef(restype)]
+            except KeyError:
+                raise MissingConversionException(f'{method.decl.name}: Return type not found >{restype}< ')
     
         # First argument should always be a reference to the object itself
         assert paramctypes and paramctypes[0] == 'pylv_Obj *'
@@ -285,8 +276,19 @@ pylv_{self.name}_set_{action}(pylv_{self.pyname} *self, PyObject *args, PyObject
             
         for method in self.methods.values():
             if method.decl.name not in actiongetset:
-                code += self.build_methodcode(method)
-                
+                try:
+                    code += self.build_methodcode(method)
+                except MissingConversionException as e:
+                    print(e)
+                    code += f'''
+static PyObject*
+py{method.decl.name}(pylv_Obj *self, PyObject *args, PyObject *kwds)
+{{
+    PyErr_SetString(PyExc_NotImplementedError, "not implemented: {e}");
+    return NULL;
+}}
+'''
+
         return code
     
     @property
@@ -307,8 +309,6 @@ class PythonBindingsGenerator(BindingsGenerator):
     outputfile = 'lvglmodule.c'
 
     def customize(self):
-        self.parseresult.defines.pop('SYMBOL_BATTERY_EMPTY') # Triggers lvgl Issue 941 https://github.com/littlevgl/lvgl/issues/941
-        
         # TODO: remove these reordering construct (only required to show equality of the bindings generator)
         # All this reordering code is written such, that no items can accidentally be removed or added while reordering
         

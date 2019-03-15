@@ -1,16 +1,8 @@
-from bindingsgen import Object, BindingsGenerator, c_ast, stripstart, generate_c
+from bindingsgen import Object, BindingsGenerator, c_ast, stripstart, generate_c, MissingConversionException, type_repr
 import re
 import collections
 
-def get_arg_type(arg): # TODO: merge with type_repr
-    indirect_level = 0
-    while isinstance(arg, c_ast.PtrDecl):
-        indirect_level += 1
-        arg = arg.type
-    return '{quals}{type}{indirection}'.format(
-        quals=''.join('%s ' % qual for qual in arg.quals) if hasattr(arg, 'quals') else '',
-        type=generate_c(arg),
-        indirection='*' * indirect_level)
+
 
 
 def get_arg_name(arg):
@@ -62,9 +54,6 @@ lv_to_mp = {
     
 
 }
-
-class MissingConversionException(ValueError):
-    pass
 
 
 
@@ -178,7 +167,7 @@ class MicroPythonCallback:
             return gen_func_error(self.typedef.type.type, exp)
 
     def build_callback_func_arg(self, arg, index, func):
-        arg_type = get_arg_type(arg.type)
+        arg_type = type_repr(arg.type)
         if not arg_type in lv_to_mp:
             self.bindingsgenerator.try_generate_type(arg_type)
             if not arg_type in lv_to_mp:
@@ -194,7 +183,7 @@ class MicroPythonCallback:
         if len(args) < 1 or hasattr(args[0].type.type, 'names') and self.lv_base_obj_pattern.match(args[0].type.type.names[0]):
             raise MissingConversionException("Callback: First argument of callback function must be lv_obj_t")
         func_name = get_arg_name(func.type)
-        return_type = get_arg_type(func.type)
+        return_type = type_repr(func.type)
         if not self.lv_callback_return_type_pattern.match(return_type):
             raise MissingConversionException("Callback: Can only handle callbaks that return lv_res_t or void")
             
@@ -219,7 +208,7 @@ STATIC {return_type} {func_name}_callback({func_args})
             func_prototype = generate_c(func),
             func_name = func_name,
             return_type = return_type,
-            func_args = ', '.join(["%s arg%s" % (get_arg_type(arg.type), i) for i,arg in enumerate(args)]),
+            func_args = ', '.join(["%s arg%s" % (type_repr(arg.type), i) for i,arg in enumerate(args)]),
             num_args=len(args),
             build_args="\n    ".join([self.build_callback_func_arg(arg, i, func) for i,arg in enumerate(args)]),
             return_value='' if return_type=='void' else ' schedule_result? LV_RES_OK: LV_RES_INV'))
@@ -269,7 +258,7 @@ class MicroPythonBindingsGenerator(BindingsGenerator):
 
         orig_type = type
         while type in self.parseresult.typedefs:
-            type = get_arg_type(self.parseresult.typedefs[type].type.type)
+            type = type_repr(self.parseresult.typedefs[type].type.type)
         
         # todo: no need to add to mp_to_lv and vv
         if type in mp_to_lv:
@@ -282,11 +271,11 @@ class MicroPythonBindingsGenerator(BindingsGenerator):
         # print("/*\n{ast}\n*/").format(ast=func)
         args = func.type.args.params
         # Handle the case of a single function argument which is "void"
-        if len(args)==1 and get_arg_type(args[0].type) == "void":
+        if len(args)==1 and type_repr(args[0].type) == "void":
             param_count = 0
         else:
             param_count = len(args)
-        return_type = get_arg_type(func.type.type)
+        return_type = type_repr(func.type.type)
         if return_type == "void":        
             build_result = ""
             build_return_value = "mp_const_none" 
@@ -324,7 +313,7 @@ MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(mp_{func}_obj, {count}, {count}, mp_{func});
 
 
     def build_mp_func_arg(self, arg, index, func, obj_name):
-        arg_type = get_arg_type(arg.type)
+        arg_type = type_repr(arg.type)
         if not arg_type in mp_to_lv:
             self.try_generate_type(arg_type)
             if not arg_type in mp_to_lv:

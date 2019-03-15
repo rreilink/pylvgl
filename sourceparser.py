@@ -1,6 +1,6 @@
 
 import sys
-sys.path.insert(0, '/Users/rob/Projecten/python/pycparser/')
+sys.path.insert(0, './pycparser/')
 
 import pycparser
 import pycparser.ply.cpp
@@ -11,15 +11,20 @@ import os
 import re
 import collections
 
-def type_repr(x):
+# TODO: this should go into a utils.py
+def generate_c(node):
+    return c_generator.CGenerator().visit(node)
+
+
+def type_repr(arg):
     ptrs = ''
-    while isinstance(x, c_ast.PtrDecl):
-        x = x.type
+    while isinstance(arg, c_ast.PtrDecl):
         ptrs += '*'
-    if isinstance(x, c_ast.FuncDecl):
-        return f'<function{ptrs}>'
-    assert isinstance(x, c_ast.TypeDecl)
-    return ' '.join(x.type.names) + ptrs 
+        arg = arg.type
+    
+    quals = ''.join('%s ' % qual for qual in sorted(arg.quals)) if hasattr(arg, 'quals') else ''
+    
+    return f'{quals}{generate_c(arg)}{ptrs}'
 
 def stripstart(s, start):
     assert s.startswith(start)
@@ -196,7 +201,7 @@ class LvglSourceParser:
             
             name, method = match.groups() if match else (None, None)
             
-            if name in objects and type_repr(function.decl.type.args.params[0].type) == 'lv_obj_t*':
+            if name in objects and type_repr(function.decl.type.args.params[0].type) in ('lv_obj_t*', 'const lv_obj_t*'):
                 if method != 'create':
                     objects[name].methods[method] = function
             else:
