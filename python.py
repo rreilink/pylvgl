@@ -1,7 +1,7 @@
 import collections
 import re
 
-from bindingsgen import Object, BindingsGenerator, c_ast, stripstart, generate_c, CustomMethod, type_repr, flatten_struct, MissingConversionException
+from bindingsgen import Object, Struct, BindingsGenerator, c_ast, stripstart, generate_c, CustomMethod, type_repr, flatten_struct, MissingConversionException
 
 # TODO: should be common for all bindings generators
 skipfunctions = {
@@ -288,9 +288,51 @@ py{method.decl.name}(pylv_Obj *self, PyObject *args, PyObject *kwds)
     
         return methodtablecode
 
+
+class PythonStruct(Struct):
+    TYPES = {
+        'int8_t': ('struct_get_int8', 'struct_set_int8'),
+        'uint8_t': ('struct_get_uint8', 'struct_set_uint8'),
+
+        'int16_t': ('struct_get_int16', 'struct_set_int16'),
+        'uint16_t': ('struct_get_uint16', 'struct_set_uint16'),
+
+        'int32_t': ('struct_get_int32', 'struct_set_int32'),
+        'uint32_t': ('struct_get_uint32', 'struct_set_uint32'),
+
+    
+    }
+
+
+    @property
+    def getset(self):
+        code = ''
+        for decl in self.decls:
+            typestr = self.bindingsgenerator.deref_typedef(type_repr(decl.type))
+            if decl.bitsize is None:
+                try:
+                    getter, setter = self.TYPES[typestr]
+                except KeyError:
+                    print(typestr)
+                    getter, setter = 'struct_get_blob', 'struct_set_blob'
+                    
+                closure = f'(void*)offsetof(lv_{self.name}, {decl.name})'
+                
+            else: # bit fields unsupported so far
+                getter, setter, closure = 'NULL', 'NULL', 'NULL'
+            
+            typedoc = generate_c(decl.type).replace('\n', ' ')
+            code += f'    {{"{decl.name}", (getter) {getter}, (setter) {setter}, "{typedoc} {decl.name}", {closure}}},\n'
+            
+        return code
+#
+#    {"y", (getter) struct_get_int16, (setter) struct_set_int16, "y", (void*)offsetof(lv_point_t, y)},
+
+
 class PythonBindingsGenerator(BindingsGenerator):
     templatefile = 'lvglmodule_template.c'
     objectclass = PythonObject
+    structclass = PythonStruct
     outputfile = 'lvglmodule.c'
 
     def customize(self):
@@ -310,6 +352,13 @@ class PythonBindingsGenerator(BindingsGenerator):
     
         self.request_enum('lv_btn_action_t') # This enum is used in the custom implementation in Btn.set_action/get_action
     
+    @property
+    def struct_inttypes(self):
+        
+        types = [{'type': f'uint{x}','min' : 0, 'max': (1<<x)-1} for x in (8,16,32)] + \
+            [{'type': f'int{x}','min' : -(1<<(x-1)), 'max': (1<<(x-1))-1} for x in (8,16,32)]
+            
+        return {type['type']: type for type in types}
     
     def deref_typedef(self, typestr):
         '''
@@ -322,25 +371,7 @@ class PythonBindingsGenerator(BindingsGenerator):
                 return typestr
             typestr = type_repr(typedef.type)
     
-    def get_STYLE_GETSET(self):
-        
-        t_types = {
-            'uint8_t:1': None,
-            'uint8_t': 'uint8',
-            'lv_color16_t': 'uint16',
-            'int16_t': 'int16',
-            'const lv_font_t *': None,
-            
-        
-            }
-        
-        return ''.join(
-            f'   {{"{name.replace(".", "_")}", (getter) Style_get_{t_types[self.deref_typedef(dtype)]}, (setter) Style_set_{t_types[self.deref_typedef(dtype)]}, "{name}", (void*)offsetof(lv_style_t, {name})}},\n' 
-            for dtype, name in flatten_struct(self.parseresult.structs['lv_style_t'])
-            if t_types[self.deref_typedef(dtype)] is not None
-            )
-
-        
+           
     def get_ENUM_ASSIGNMENTS(self):
         ret = ''    
         for enumname, enum in self.parseresult.enums.items():

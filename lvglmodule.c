@@ -294,6 +294,2674 @@ error:
 }
 
 
+/****************************************************************
+ * Custom types: structs                                        *  
+ ****************************************************************/
+typedef struct {
+    PyObject_HEAD
+    void *data;
+    PyObject *owner; // NULL = reference to global C data, self=allocated @ init, other object=sharing from that object; decref when we are deallocated
+} StructObject;
+
+static PyObject*
+Struct_repr(StructObject *self) {
+    return PyUnicode_FromFormat("<%s struct at %p data = %p owner = %p>", Py_TYPE(self)->tp_name, self, self->data, self->owner);
+}
+
+static void
+Struct_dealloc(StructObject *self)
+{
+    if (self->owner == (PyObject *)self) {
+        PyMem_Free(self->data);
+    } else {
+        Py_XDECREF(self->owner); // owner could be NULL if data is global, in that case this statement has no effect
+    }
+    Py_TYPE(self)->tp_free((PyObject *) self);
+}
+
+// Struct members whose type is unsupported, get / set a 'blob', which stores
+// a reference to the data, which can be copied but not accessed otherwise
+
+static PyTypeObject Blob_Type = {
+    PyVarObject_HEAD_INIT(NULL, 0)
+    .tp_name = "lvgl.blob",
+    .tp_doc = "lvgl data blob",
+    .tp_basicsize = sizeof(StructObject),
+    .tp_itemsize = 0,
+    .tp_flags = Py_TPFLAGS_DEFAULT | Py_TPFLAGS_BASETYPE,
+    .tp_new = NULL, // cannot be instantiated
+    .tp_repr = (reprfunc) Struct_repr,
+    .tp_dealloc = (destructor) Struct_dealloc
+};
+
+
+
+static int long_to_int(PyObject *value, long *v, long min, long max) {
+    long r = PyLong_AsLong(value);
+    if ((r == -1) && PyErr_Occurred()) return -1;
+    if ((r<min) || (r>max)) {
+        PyErr_Format(PyExc_ValueError, "value out of range %ld..%ld", min, max);
+        return -1;
+    }
+    *v = r;
+    return 0;
+}   
+
+
+static PyObject *
+struct_get_uint8(StructObject *self, void *closure)
+{
+    return PyLong_FromLong(*((uint8_t*)((char*)self->data + (int)closure) ));
+}
+
+static int
+struct_set_uint8(StructObject *self, PyObject *value, void *closure)
+{
+    long v;
+    if (long_to_int(value, &v, 0, 255)) return -1;
+    
+    *((uint8_t*)((char*)self->data + (int)closure) ) = v;
+    return 0;
+}
+
+static PyObject *
+struct_get_uint16(StructObject *self, void *closure)
+{
+    return PyLong_FromLong(*((uint16_t*)((char*)self->data + (int)closure) ));
+}
+
+static int
+struct_set_uint16(StructObject *self, PyObject *value, void *closure)
+{
+    long v;
+    if (long_to_int(value, &v, 0, 65535)) return -1;
+    
+    *((uint16_t*)((char*)self->data + (int)closure) ) = v;
+    return 0;
+}
+
+static PyObject *
+struct_get_uint32(StructObject *self, void *closure)
+{
+    return PyLong_FromLong(*((uint32_t*)((char*)self->data + (int)closure) ));
+}
+
+static int
+struct_set_uint32(StructObject *self, PyObject *value, void *closure)
+{
+    long v;
+    if (long_to_int(value, &v, 0, 4294967295)) return -1;
+    
+    *((uint32_t*)((char*)self->data + (int)closure) ) = v;
+    return 0;
+}
+
+static PyObject *
+struct_get_int8(StructObject *self, void *closure)
+{
+    return PyLong_FromLong(*((int8_t*)((char*)self->data + (int)closure) ));
+}
+
+static int
+struct_set_int8(StructObject *self, PyObject *value, void *closure)
+{
+    long v;
+    if (long_to_int(value, &v, -128, 127)) return -1;
+    
+    *((int8_t*)((char*)self->data + (int)closure) ) = v;
+    return 0;
+}
+
+static PyObject *
+struct_get_int16(StructObject *self, void *closure)
+{
+    return PyLong_FromLong(*((int16_t*)((char*)self->data + (int)closure) ));
+}
+
+static int
+struct_set_int16(StructObject *self, PyObject *value, void *closure)
+{
+    long v;
+    if (long_to_int(value, &v, -32768, 32767)) return -1;
+    
+    *((int16_t*)((char*)self->data + (int)closure) ) = v;
+    return 0;
+}
+
+static PyObject *
+struct_get_int32(StructObject *self, void *closure)
+{
+    return PyLong_FromLong(*((int32_t*)((char*)self->data + (int)closure) ));
+}
+
+static int
+struct_set_int32(StructObject *self, PyObject *value, void *closure)
+{
+    long v;
+    if (long_to_int(value, &v, -2147483648, 2147483647)) return -1;
+    
+    *((int32_t*)((char*)self->data + (int)closure) ) = v;
+    return 0;
+}
+
+
+static PyObject *
+struct_get_blob(StructObject *self, void *closure)
+{
+    StructObject *ret;
+    ret = (StructObject*)PyObject_New(StructObject, &Blob_Type);
+    if (ret) {
+        ret->owner = self->owner;
+        Py_INCREF(self->owner);
+        ret->data = self->data + (int)closure; // TODO: stash the size in there, too
+    }
+    return (PyObject*)ret;
+}
+
+static int
+struct_set_blob(StructObject *self, PyObject *value, void *closure)
+{
+    PyErr_SetString(PyExc_NotImplementedError, "setting this data type is not supported");
+    return -1;
+}
+
+
+
+
+
+
+static int
+pylv_mem_monitor_t_init(StructObject *self, PyObject *args, PyObject *kwds) 
+{
+
+    self->data = PyMem_Malloc(sizeof(lv_mem_monitor_t));
+    if (!self->data) return -1;
+    
+    memset(self->data, 0, sizeof(lv_mem_monitor_t));
+    self->owner = (PyObject *)self;
+
+    return 0;
+}
+
+
+static PyGetSetDef pylv_mem_monitor_t_getset[] = {
+    {"total_size", (getter) struct_get_uint32, (setter) struct_set_uint32, "uint32_t total_size", (void*)offsetof(lv_mem_monitor_t, total_size)},
+    {"free_cnt", (getter) struct_get_uint32, (setter) struct_set_uint32, "uint32_t free_cnt", (void*)offsetof(lv_mem_monitor_t, free_cnt)},
+    {"free_size", (getter) struct_get_uint32, (setter) struct_set_uint32, "uint32_t free_size", (void*)offsetof(lv_mem_monitor_t, free_size)},
+    {"free_biggest_size", (getter) struct_get_uint32, (setter) struct_set_uint32, "uint32_t free_biggest_size", (void*)offsetof(lv_mem_monitor_t, free_biggest_size)},
+    {"used_cnt", (getter) struct_get_uint32, (setter) struct_set_uint32, "uint32_t used_cnt", (void*)offsetof(lv_mem_monitor_t, used_cnt)},
+    {"used_pct", (getter) struct_get_uint8, (setter) struct_set_uint8, "uint8_t used_pct", (void*)offsetof(lv_mem_monitor_t, used_pct)},
+    {"frag_pct", (getter) struct_get_uint8, (setter) struct_set_uint8, "uint8_t frag_pct", (void*)offsetof(lv_mem_monitor_t, frag_pct)},
+
+    {NULL}
+};
+
+static PyTypeObject pylv_mem_monitor_t_Type = {
+    PyVarObject_HEAD_INIT(NULL, 0)
+    .tp_name = "lvgl.mem_monitor_t",
+    .tp_doc = "lvgl mem_monitor_t",
+    .tp_basicsize = sizeof(StructObject),
+    .tp_itemsize = 0,
+    .tp_flags = Py_TPFLAGS_DEFAULT | Py_TPFLAGS_BASETYPE,
+    .tp_new = PyType_GenericNew,
+    .tp_init = (initproc) pylv_mem_monitor_t_init,
+    .tp_dealloc = (destructor) Struct_dealloc,
+    .tp_getset = pylv_mem_monitor_t_getset,
+    .tp_repr = (reprfunc) Struct_repr
+
+};
+
+
+
+static int
+pylv_ll_t_init(StructObject *self, PyObject *args, PyObject *kwds) 
+{
+
+    self->data = PyMem_Malloc(sizeof(lv_ll_t));
+    if (!self->data) return -1;
+    
+    memset(self->data, 0, sizeof(lv_ll_t));
+    self->owner = (PyObject *)self;
+
+    return 0;
+}
+
+
+static PyGetSetDef pylv_ll_t_getset[] = {
+    {"n_size", (getter) struct_get_uint32, (setter) struct_set_uint32, "uint32_t n_size", (void*)offsetof(lv_ll_t, n_size)},
+    {"head", (getter) struct_get_blob, (setter) struct_set_blob, "lv_ll_node_t head", (void*)offsetof(lv_ll_t, head)},
+    {"tail", (getter) struct_get_blob, (setter) struct_set_blob, "lv_ll_node_t tail", (void*)offsetof(lv_ll_t, tail)},
+
+    {NULL}
+};
+
+static PyTypeObject pylv_ll_t_Type = {
+    PyVarObject_HEAD_INIT(NULL, 0)
+    .tp_name = "lvgl.ll_t",
+    .tp_doc = "lvgl ll_t",
+    .tp_basicsize = sizeof(StructObject),
+    .tp_itemsize = 0,
+    .tp_flags = Py_TPFLAGS_DEFAULT | Py_TPFLAGS_BASETYPE,
+    .tp_new = PyType_GenericNew,
+    .tp_init = (initproc) pylv_ll_t_init,
+    .tp_dealloc = (destructor) Struct_dealloc,
+    .tp_getset = pylv_ll_t_getset,
+    .tp_repr = (reprfunc) Struct_repr
+
+};
+
+
+
+static int
+pylv_task_t_init(StructObject *self, PyObject *args, PyObject *kwds) 
+{
+
+    self->data = PyMem_Malloc(sizeof(lv_task_t));
+    if (!self->data) return -1;
+    
+    memset(self->data, 0, sizeof(lv_task_t));
+    self->owner = (PyObject *)self;
+
+    return 0;
+}
+
+
+static PyGetSetDef pylv_task_t_getset[] = {
+    {"period", (getter) struct_get_uint32, (setter) struct_set_uint32, "uint32_t period", (void*)offsetof(lv_task_t, period)},
+    {"last_run", (getter) struct_get_uint32, (setter) struct_set_uint32, "uint32_t last_run", (void*)offsetof(lv_task_t, last_run)},
+    {"task", (getter) struct_get_blob, (setter) struct_set_blob, "void task(void *) task", (void*)offsetof(lv_task_t, task)},
+    {"param", (getter) struct_get_blob, (setter) struct_set_blob, "void param", (void*)offsetof(lv_task_t, param)},
+    {"prio", (getter) NULL, (setter) NULL, "uint8_t prio", NULL},
+    {"once", (getter) NULL, (setter) NULL, "uint8_t once", NULL},
+
+    {NULL}
+};
+
+static PyTypeObject pylv_task_t_Type = {
+    PyVarObject_HEAD_INIT(NULL, 0)
+    .tp_name = "lvgl.task_t",
+    .tp_doc = "lvgl task_t",
+    .tp_basicsize = sizeof(StructObject),
+    .tp_itemsize = 0,
+    .tp_flags = Py_TPFLAGS_DEFAULT | Py_TPFLAGS_BASETYPE,
+    .tp_new = PyType_GenericNew,
+    .tp_init = (initproc) pylv_task_t_init,
+    .tp_dealloc = (destructor) Struct_dealloc,
+    .tp_getset = pylv_task_t_getset,
+    .tp_repr = (reprfunc) Struct_repr
+
+};
+
+
+
+static int
+pylv_color_hsv_t_init(StructObject *self, PyObject *args, PyObject *kwds) 
+{
+
+    self->data = PyMem_Malloc(sizeof(lv_color_hsv_t));
+    if (!self->data) return -1;
+    
+    memset(self->data, 0, sizeof(lv_color_hsv_t));
+    self->owner = (PyObject *)self;
+
+    return 0;
+}
+
+
+static PyGetSetDef pylv_color_hsv_t_getset[] = {
+    {"h", (getter) struct_get_uint16, (setter) struct_set_uint16, "uint16_t h", (void*)offsetof(lv_color_hsv_t, h)},
+    {"s", (getter) struct_get_uint8, (setter) struct_set_uint8, "uint8_t s", (void*)offsetof(lv_color_hsv_t, s)},
+    {"v", (getter) struct_get_uint8, (setter) struct_set_uint8, "uint8_t v", (void*)offsetof(lv_color_hsv_t, v)},
+
+    {NULL}
+};
+
+static PyTypeObject pylv_color_hsv_t_Type = {
+    PyVarObject_HEAD_INIT(NULL, 0)
+    .tp_name = "lvgl.color_hsv_t",
+    .tp_doc = "lvgl color_hsv_t",
+    .tp_basicsize = sizeof(StructObject),
+    .tp_itemsize = 0,
+    .tp_flags = Py_TPFLAGS_DEFAULT | Py_TPFLAGS_BASETYPE,
+    .tp_new = PyType_GenericNew,
+    .tp_init = (initproc) pylv_color_hsv_t_init,
+    .tp_dealloc = (destructor) Struct_dealloc,
+    .tp_getset = pylv_color_hsv_t_getset,
+    .tp_repr = (reprfunc) Struct_repr
+
+};
+
+
+
+static int
+pylv_point_t_init(StructObject *self, PyObject *args, PyObject *kwds) 
+{
+
+    self->data = PyMem_Malloc(sizeof(lv_point_t));
+    if (!self->data) return -1;
+    
+    memset(self->data, 0, sizeof(lv_point_t));
+    self->owner = (PyObject *)self;
+
+    return 0;
+}
+
+
+static PyGetSetDef pylv_point_t_getset[] = {
+    {"x", (getter) struct_get_int16, (setter) struct_set_int16, "lv_coord_t x", (void*)offsetof(lv_point_t, x)},
+    {"y", (getter) struct_get_int16, (setter) struct_set_int16, "lv_coord_t y", (void*)offsetof(lv_point_t, y)},
+
+    {NULL}
+};
+
+static PyTypeObject pylv_point_t_Type = {
+    PyVarObject_HEAD_INIT(NULL, 0)
+    .tp_name = "lvgl.point_t",
+    .tp_doc = "lvgl point_t",
+    .tp_basicsize = sizeof(StructObject),
+    .tp_itemsize = 0,
+    .tp_flags = Py_TPFLAGS_DEFAULT | Py_TPFLAGS_BASETYPE,
+    .tp_new = PyType_GenericNew,
+    .tp_init = (initproc) pylv_point_t_init,
+    .tp_dealloc = (destructor) Struct_dealloc,
+    .tp_getset = pylv_point_t_getset,
+    .tp_repr = (reprfunc) Struct_repr
+
+};
+
+
+
+static int
+pylv_area_t_init(StructObject *self, PyObject *args, PyObject *kwds) 
+{
+
+    self->data = PyMem_Malloc(sizeof(lv_area_t));
+    if (!self->data) return -1;
+    
+    memset(self->data, 0, sizeof(lv_area_t));
+    self->owner = (PyObject *)self;
+
+    return 0;
+}
+
+
+static PyGetSetDef pylv_area_t_getset[] = {
+    {"x1", (getter) struct_get_int16, (setter) struct_set_int16, "lv_coord_t x1", (void*)offsetof(lv_area_t, x1)},
+    {"y1", (getter) struct_get_int16, (setter) struct_set_int16, "lv_coord_t y1", (void*)offsetof(lv_area_t, y1)},
+    {"x2", (getter) struct_get_int16, (setter) struct_set_int16, "lv_coord_t x2", (void*)offsetof(lv_area_t, x2)},
+    {"y2", (getter) struct_get_int16, (setter) struct_set_int16, "lv_coord_t y2", (void*)offsetof(lv_area_t, y2)},
+
+    {NULL}
+};
+
+static PyTypeObject pylv_area_t_Type = {
+    PyVarObject_HEAD_INIT(NULL, 0)
+    .tp_name = "lvgl.area_t",
+    .tp_doc = "lvgl area_t",
+    .tp_basicsize = sizeof(StructObject),
+    .tp_itemsize = 0,
+    .tp_flags = Py_TPFLAGS_DEFAULT | Py_TPFLAGS_BASETYPE,
+    .tp_new = PyType_GenericNew,
+    .tp_init = (initproc) pylv_area_t_init,
+    .tp_dealloc = (destructor) Struct_dealloc,
+    .tp_getset = pylv_area_t_getset,
+    .tp_repr = (reprfunc) Struct_repr
+
+};
+
+
+
+static int
+pylv_disp_buf_t_init(StructObject *self, PyObject *args, PyObject *kwds) 
+{
+
+    self->data = PyMem_Malloc(sizeof(lv_disp_buf_t));
+    if (!self->data) return -1;
+    
+    memset(self->data, 0, sizeof(lv_disp_buf_t));
+    self->owner = (PyObject *)self;
+
+    return 0;
+}
+
+
+static PyGetSetDef pylv_disp_buf_t_getset[] = {
+    {"buf1", (getter) struct_get_blob, (setter) struct_set_blob, "void buf1", (void*)offsetof(lv_disp_buf_t, buf1)},
+    {"buf2", (getter) struct_get_blob, (setter) struct_set_blob, "void buf2", (void*)offsetof(lv_disp_buf_t, buf2)},
+    {"buf_act", (getter) struct_get_blob, (setter) struct_set_blob, "void buf_act", (void*)offsetof(lv_disp_buf_t, buf_act)},
+    {"size", (getter) struct_get_uint32, (setter) struct_set_uint32, "uint32_t size", (void*)offsetof(lv_disp_buf_t, size)},
+    {"area", (getter) struct_get_blob, (setter) struct_set_blob, "lv_area_t area", (void*)offsetof(lv_disp_buf_t, area)},
+    {"flushing", (getter) NULL, (setter) NULL, "uint32_t flushing", NULL},
+
+    {NULL}
+};
+
+static PyTypeObject pylv_disp_buf_t_Type = {
+    PyVarObject_HEAD_INIT(NULL, 0)
+    .tp_name = "lvgl.disp_buf_t",
+    .tp_doc = "lvgl disp_buf_t",
+    .tp_basicsize = sizeof(StructObject),
+    .tp_itemsize = 0,
+    .tp_flags = Py_TPFLAGS_DEFAULT | Py_TPFLAGS_BASETYPE,
+    .tp_new = PyType_GenericNew,
+    .tp_init = (initproc) pylv_disp_buf_t_init,
+    .tp_dealloc = (destructor) Struct_dealloc,
+    .tp_getset = pylv_disp_buf_t_getset,
+    .tp_repr = (reprfunc) Struct_repr
+
+};
+
+
+
+static int
+pylv_disp_drv_t_init(StructObject *self, PyObject *args, PyObject *kwds) 
+{
+
+    self->data = PyMem_Malloc(sizeof(lv_disp_drv_t));
+    if (!self->data) return -1;
+    
+    memset(self->data, 0, sizeof(lv_disp_drv_t));
+    self->owner = (PyObject *)self;
+
+    return 0;
+}
+
+
+static PyGetSetDef pylv_disp_drv_t_getset[] = {
+    {"hor_res", (getter) struct_get_int16, (setter) struct_set_int16, "lv_coord_t hor_res", (void*)offsetof(lv_disp_drv_t, hor_res)},
+    {"ver_res", (getter) struct_get_int16, (setter) struct_set_int16, "lv_coord_t ver_res", (void*)offsetof(lv_disp_drv_t, ver_res)},
+    {"buffer", (getter) struct_get_blob, (setter) struct_set_blob, "lv_disp_buf_t buffer", (void*)offsetof(lv_disp_drv_t, buffer)},
+    {"flush_cb", (getter) struct_get_blob, (setter) struct_set_blob, "void flush_cb(struct _disp_drv_t *disp_drv, const lv_area_t *area, lv_color_t *color_p) flush_cb", (void*)offsetof(lv_disp_drv_t, flush_cb)},
+    {"rounder_cb", (getter) struct_get_blob, (setter) struct_set_blob, "void rounder_cb(struct _disp_drv_t *disp_drv, lv_area_t *area) rounder_cb", (void*)offsetof(lv_disp_drv_t, rounder_cb)},
+    {"set_px_cb", (getter) struct_get_blob, (setter) struct_set_blob, "void set_px_cb(struct _disp_drv_t *disp_drv, uint8_t *buf, lv_coord_t buf_w, lv_coord_t x, lv_coord_t y, lv_color_t color, lv_opa_t opa) set_px_cb", (void*)offsetof(lv_disp_drv_t, set_px_cb)},
+    {"monitor_cb", (getter) struct_get_blob, (setter) struct_set_blob, "void monitor_cb(struct _disp_drv_t *disp_drv, uint32_t time, uint32_t px) monitor_cb", (void*)offsetof(lv_disp_drv_t, monitor_cb)},
+    {"user_data", (getter) struct_get_blob, (setter) struct_set_blob, "lv_disp_drv_user_data_t user_data", (void*)offsetof(lv_disp_drv_t, user_data)},
+    {"mem_blend", (getter) struct_get_blob, (setter) struct_set_blob, "void mem_blend(lv_color_t *dest, const lv_color_t *src, uint32_t length, lv_opa_t opa) mem_blend", (void*)offsetof(lv_disp_drv_t, mem_blend)},
+    {"mem_fill", (getter) struct_get_blob, (setter) struct_set_blob, "void mem_fill(lv_color_t *dest, uint32_t length, lv_color_t color) mem_fill", (void*)offsetof(lv_disp_drv_t, mem_fill)},
+
+    {NULL}
+};
+
+static PyTypeObject pylv_disp_drv_t_Type = {
+    PyVarObject_HEAD_INIT(NULL, 0)
+    .tp_name = "lvgl.disp_drv_t",
+    .tp_doc = "lvgl disp_drv_t",
+    .tp_basicsize = sizeof(StructObject),
+    .tp_itemsize = 0,
+    .tp_flags = Py_TPFLAGS_DEFAULT | Py_TPFLAGS_BASETYPE,
+    .tp_new = PyType_GenericNew,
+    .tp_init = (initproc) pylv_disp_drv_t_init,
+    .tp_dealloc = (destructor) Struct_dealloc,
+    .tp_getset = pylv_disp_drv_t_getset,
+    .tp_repr = (reprfunc) Struct_repr
+
+};
+
+
+
+static int
+pylv_disp_t_init(StructObject *self, PyObject *args, PyObject *kwds) 
+{
+
+    self->data = PyMem_Malloc(sizeof(lv_disp_t));
+    if (!self->data) return -1;
+    
+    memset(self->data, 0, sizeof(lv_disp_t));
+    self->owner = (PyObject *)self;
+
+    return 0;
+}
+
+
+static PyGetSetDef pylv_disp_t_getset[] = {
+    {"driver", (getter) struct_get_blob, (setter) struct_set_blob, "lv_disp_drv_t driver", (void*)offsetof(lv_disp_t, driver)},
+    {"scr_ll", (getter) struct_get_blob, (setter) struct_set_blob, "lv_ll_t scr_ll", (void*)offsetof(lv_disp_t, scr_ll)},
+    {"act_scr", (getter) struct_get_blob, (setter) struct_set_blob, "struct _lv_obj_t act_scr", (void*)offsetof(lv_disp_t, act_scr)},
+    {"top_layer", (getter) struct_get_blob, (setter) struct_set_blob, "struct _lv_obj_t top_layer", (void*)offsetof(lv_disp_t, top_layer)},
+    {"sys_layer", (getter) struct_get_blob, (setter) struct_set_blob, "struct _lv_obj_t sys_layer", (void*)offsetof(lv_disp_t, sys_layer)},
+    {"inv_areas", (getter) struct_get_blob, (setter) struct_set_blob, "lv_area_t32 inv_areas", (void*)offsetof(lv_disp_t, inv_areas)},
+    {"inv_area_joined", (getter) struct_get_blob, (setter) struct_set_blob, "uint8_t32 inv_area_joined", (void*)offsetof(lv_disp_t, inv_area_joined)},
+    {"inv_p", (getter) NULL, (setter) NULL, "uint32_t inv_p", NULL},
+
+    {NULL}
+};
+
+static PyTypeObject pylv_disp_t_Type = {
+    PyVarObject_HEAD_INIT(NULL, 0)
+    .tp_name = "lvgl.disp_t",
+    .tp_doc = "lvgl disp_t",
+    .tp_basicsize = sizeof(StructObject),
+    .tp_itemsize = 0,
+    .tp_flags = Py_TPFLAGS_DEFAULT | Py_TPFLAGS_BASETYPE,
+    .tp_new = PyType_GenericNew,
+    .tp_init = (initproc) pylv_disp_t_init,
+    .tp_dealloc = (destructor) Struct_dealloc,
+    .tp_getset = pylv_disp_t_getset,
+    .tp_repr = (reprfunc) Struct_repr
+
+};
+
+
+
+static int
+pylv_indev_data_t_init(StructObject *self, PyObject *args, PyObject *kwds) 
+{
+
+    self->data = PyMem_Malloc(sizeof(lv_indev_data_t));
+    if (!self->data) return -1;
+    
+    memset(self->data, 0, sizeof(lv_indev_data_t));
+    self->owner = (PyObject *)self;
+
+    return 0;
+}
+
+
+static PyGetSetDef pylv_indev_data_t_getset[] = {
+    {"point", (getter) struct_get_blob, (setter) struct_set_blob, "lv_point_t point", (void*)offsetof(lv_indev_data_t, point)},
+    {"key", (getter) struct_get_uint32, (setter) struct_set_uint32, "uint32_t key", (void*)offsetof(lv_indev_data_t, key)},
+    {"btn_id", (getter) struct_get_uint32, (setter) struct_set_uint32, "uint32_t btn_id", (void*)offsetof(lv_indev_data_t, btn_id)},
+    {"enc_diff", (getter) struct_get_int16, (setter) struct_set_int16, "int16_t enc_diff", (void*)offsetof(lv_indev_data_t, enc_diff)},
+    {"state", (getter) struct_get_uint8, (setter) struct_set_uint8, "lv_indev_state_t state", (void*)offsetof(lv_indev_data_t, state)},
+
+    {NULL}
+};
+
+static PyTypeObject pylv_indev_data_t_Type = {
+    PyVarObject_HEAD_INIT(NULL, 0)
+    .tp_name = "lvgl.indev_data_t",
+    .tp_doc = "lvgl indev_data_t",
+    .tp_basicsize = sizeof(StructObject),
+    .tp_itemsize = 0,
+    .tp_flags = Py_TPFLAGS_DEFAULT | Py_TPFLAGS_BASETYPE,
+    .tp_new = PyType_GenericNew,
+    .tp_init = (initproc) pylv_indev_data_t_init,
+    .tp_dealloc = (destructor) Struct_dealloc,
+    .tp_getset = pylv_indev_data_t_getset,
+    .tp_repr = (reprfunc) Struct_repr
+
+};
+
+
+
+static int
+pylv_indev_drv_t_init(StructObject *self, PyObject *args, PyObject *kwds) 
+{
+
+    self->data = PyMem_Malloc(sizeof(lv_indev_drv_t));
+    if (!self->data) return -1;
+    
+    memset(self->data, 0, sizeof(lv_indev_drv_t));
+    self->owner = (PyObject *)self;
+
+    return 0;
+}
+
+
+static PyGetSetDef pylv_indev_drv_t_getset[] = {
+    {"type", (getter) struct_get_uint8, (setter) struct_set_uint8, "lv_hal_indev_type_t type", (void*)offsetof(lv_indev_drv_t, type)},
+    {"read_cb", (getter) struct_get_blob, (setter) struct_set_blob, "bool read_cb(struct _lv_indev_drv_t *indev_drv, lv_indev_data_t *data) read_cb", (void*)offsetof(lv_indev_drv_t, read_cb)},
+    {"user_data", (getter) struct_get_blob, (setter) struct_set_blob, "lv_indev_drv_user_data_t user_data", (void*)offsetof(lv_indev_drv_t, user_data)},
+    {"disp", (getter) struct_get_blob, (setter) struct_set_blob, "struct _disp_t disp", (void*)offsetof(lv_indev_drv_t, disp)},
+
+    {NULL}
+};
+
+static PyTypeObject pylv_indev_drv_t_Type = {
+    PyVarObject_HEAD_INIT(NULL, 0)
+    .tp_name = "lvgl.indev_drv_t",
+    .tp_doc = "lvgl indev_drv_t",
+    .tp_basicsize = sizeof(StructObject),
+    .tp_itemsize = 0,
+    .tp_flags = Py_TPFLAGS_DEFAULT | Py_TPFLAGS_BASETYPE,
+    .tp_new = PyType_GenericNew,
+    .tp_init = (initproc) pylv_indev_drv_t_init,
+    .tp_dealloc = (destructor) Struct_dealloc,
+    .tp_getset = pylv_indev_drv_t_getset,
+    .tp_repr = (reprfunc) Struct_repr
+
+};
+
+
+
+static int
+pylv_indev_proc_t_init(StructObject *self, PyObject *args, PyObject *kwds) 
+{
+
+    self->data = PyMem_Malloc(sizeof(lv_indev_proc_t));
+    if (!self->data) return -1;
+    
+    memset(self->data, 0, sizeof(lv_indev_proc_t));
+    self->owner = (PyObject *)self;
+
+    return 0;
+}
+
+
+static PyGetSetDef pylv_indev_proc_t_getset[] = {
+    {"state", (getter) struct_get_uint8, (setter) struct_set_uint8, "lv_indev_state_t state", (void*)offsetof(lv_indev_proc_t, state)},
+    {"types", (getter) struct_get_blob, (setter) struct_set_blob, "union  {   struct    {     lv_point_t act_point;     lv_point_t last_point;     lv_point_t vect;     lv_point_t drag_sum;     lv_point_t drag_throw_vect;     struct _lv_obj_t *act_obj;     struct _lv_obj_t *last_obj;     struct _lv_obj_t *last_pressed;     uint8_t drag_limit_out : 1;     uint8_t drag_in_prog : 1;     uint8_t wait_until_release : 1;   } pointer;   struct    {     lv_indev_state_t last_state;     uint32_t last_key;   } keypad; } types", (void*)offsetof(lv_indev_proc_t, types)},
+    {"pr_timestamp", (getter) struct_get_uint32, (setter) struct_set_uint32, "uint32_t pr_timestamp", (void*)offsetof(lv_indev_proc_t, pr_timestamp)},
+    {"longpr_rep_timestamp", (getter) struct_get_uint32, (setter) struct_set_uint32, "uint32_t longpr_rep_timestamp", (void*)offsetof(lv_indev_proc_t, longpr_rep_timestamp)},
+    {"long_pr_sent", (getter) NULL, (setter) NULL, "uint8_t long_pr_sent", NULL},
+    {"reset_query", (getter) NULL, (setter) NULL, "uint8_t reset_query", NULL},
+    {"disabled", (getter) NULL, (setter) NULL, "uint8_t disabled", NULL},
+
+    {NULL}
+};
+
+static PyTypeObject pylv_indev_proc_t_Type = {
+    PyVarObject_HEAD_INIT(NULL, 0)
+    .tp_name = "lvgl.indev_proc_t",
+    .tp_doc = "lvgl indev_proc_t",
+    .tp_basicsize = sizeof(StructObject),
+    .tp_itemsize = 0,
+    .tp_flags = Py_TPFLAGS_DEFAULT | Py_TPFLAGS_BASETYPE,
+    .tp_new = PyType_GenericNew,
+    .tp_init = (initproc) pylv_indev_proc_t_init,
+    .tp_dealloc = (destructor) Struct_dealloc,
+    .tp_getset = pylv_indev_proc_t_getset,
+    .tp_repr = (reprfunc) Struct_repr
+
+};
+
+
+
+static int
+pylv_indev_t_init(StructObject *self, PyObject *args, PyObject *kwds) 
+{
+
+    self->data = PyMem_Malloc(sizeof(lv_indev_t));
+    if (!self->data) return -1;
+    
+    memset(self->data, 0, sizeof(lv_indev_t));
+    self->owner = (PyObject *)self;
+
+    return 0;
+}
+
+
+static PyGetSetDef pylv_indev_t_getset[] = {
+    {"driver", (getter) struct_get_blob, (setter) struct_set_blob, "lv_indev_drv_t driver", (void*)offsetof(lv_indev_t, driver)},
+    {"proc", (getter) struct_get_blob, (setter) struct_set_blob, "lv_indev_proc_t proc", (void*)offsetof(lv_indev_t, proc)},
+    {"feedback", (getter) struct_get_blob, (setter) struct_set_blob, "lv_indev_feedback_t feedback", (void*)offsetof(lv_indev_t, feedback)},
+    {"last_activity_time", (getter) struct_get_uint32, (setter) struct_set_uint32, "uint32_t last_activity_time", (void*)offsetof(lv_indev_t, last_activity_time)},
+    {"cursor", (getter) struct_get_blob, (setter) struct_set_blob, "struct _lv_obj_t cursor", (void*)offsetof(lv_indev_t, cursor)},
+    {"group", (getter) struct_get_blob, (setter) struct_set_blob, "struct _lv_group_t group", (void*)offsetof(lv_indev_t, group)},
+    {"btn_points", (getter) struct_get_blob, (setter) struct_set_blob, "lv_point_t btn_points", (void*)offsetof(lv_indev_t, btn_points)},
+
+    {NULL}
+};
+
+static PyTypeObject pylv_indev_t_Type = {
+    PyVarObject_HEAD_INIT(NULL, 0)
+    .tp_name = "lvgl.indev_t",
+    .tp_doc = "lvgl indev_t",
+    .tp_basicsize = sizeof(StructObject),
+    .tp_itemsize = 0,
+    .tp_flags = Py_TPFLAGS_DEFAULT | Py_TPFLAGS_BASETYPE,
+    .tp_new = PyType_GenericNew,
+    .tp_init = (initproc) pylv_indev_t_init,
+    .tp_dealloc = (destructor) Struct_dealloc,
+    .tp_getset = pylv_indev_t_getset,
+    .tp_repr = (reprfunc) Struct_repr
+
+};
+
+
+
+static int
+pylv_font_glyph_dsc_t_init(StructObject *self, PyObject *args, PyObject *kwds) 
+{
+
+    self->data = PyMem_Malloc(sizeof(lv_font_glyph_dsc_t));
+    if (!self->data) return -1;
+    
+    memset(self->data, 0, sizeof(lv_font_glyph_dsc_t));
+    self->owner = (PyObject *)self;
+
+    return 0;
+}
+
+
+static PyGetSetDef pylv_font_glyph_dsc_t_getset[] = {
+    {"w_px", (getter) NULL, (setter) NULL, "uint32_t w_px", NULL},
+    {"glyph_index", (getter) NULL, (setter) NULL, "uint32_t glyph_index", NULL},
+
+    {NULL}
+};
+
+static PyTypeObject pylv_font_glyph_dsc_t_Type = {
+    PyVarObject_HEAD_INIT(NULL, 0)
+    .tp_name = "lvgl.font_glyph_dsc_t",
+    .tp_doc = "lvgl font_glyph_dsc_t",
+    .tp_basicsize = sizeof(StructObject),
+    .tp_itemsize = 0,
+    .tp_flags = Py_TPFLAGS_DEFAULT | Py_TPFLAGS_BASETYPE,
+    .tp_new = PyType_GenericNew,
+    .tp_init = (initproc) pylv_font_glyph_dsc_t_init,
+    .tp_dealloc = (destructor) Struct_dealloc,
+    .tp_getset = pylv_font_glyph_dsc_t_getset,
+    .tp_repr = (reprfunc) Struct_repr
+
+};
+
+
+
+static int
+pylv_font_unicode_map_t_init(StructObject *self, PyObject *args, PyObject *kwds) 
+{
+
+    self->data = PyMem_Malloc(sizeof(lv_font_unicode_map_t));
+    if (!self->data) return -1;
+    
+    memset(self->data, 0, sizeof(lv_font_unicode_map_t));
+    self->owner = (PyObject *)self;
+
+    return 0;
+}
+
+
+static PyGetSetDef pylv_font_unicode_map_t_getset[] = {
+    {"unicode", (getter) NULL, (setter) NULL, "uint32_t unicode", NULL},
+    {"glyph_dsc_index", (getter) NULL, (setter) NULL, "uint32_t glyph_dsc_index", NULL},
+
+    {NULL}
+};
+
+static PyTypeObject pylv_font_unicode_map_t_Type = {
+    PyVarObject_HEAD_INIT(NULL, 0)
+    .tp_name = "lvgl.font_unicode_map_t",
+    .tp_doc = "lvgl font_unicode_map_t",
+    .tp_basicsize = sizeof(StructObject),
+    .tp_itemsize = 0,
+    .tp_flags = Py_TPFLAGS_DEFAULT | Py_TPFLAGS_BASETYPE,
+    .tp_new = PyType_GenericNew,
+    .tp_init = (initproc) pylv_font_unicode_map_t_init,
+    .tp_dealloc = (destructor) Struct_dealloc,
+    .tp_getset = pylv_font_unicode_map_t_getset,
+    .tp_repr = (reprfunc) Struct_repr
+
+};
+
+
+
+static int
+pylv_font_t_init(StructObject *self, PyObject *args, PyObject *kwds) 
+{
+
+    self->data = PyMem_Malloc(sizeof(lv_font_t));
+    if (!self->data) return -1;
+    
+    memset(self->data, 0, sizeof(lv_font_t));
+    self->owner = (PyObject *)self;
+
+    return 0;
+}
+
+
+static PyGetSetDef pylv_font_t_getset[] = {
+    {"unicode_first", (getter) struct_get_uint32, (setter) struct_set_uint32, "uint32_t unicode_first", (void*)offsetof(lv_font_t, unicode_first)},
+    {"unicode_last", (getter) struct_get_uint32, (setter) struct_set_uint32, "uint32_t unicode_last", (void*)offsetof(lv_font_t, unicode_last)},
+    {"glyph_bitmap", (getter) struct_get_blob, (setter) struct_set_blob, "uint8_t glyph_bitmap", (void*)offsetof(lv_font_t, glyph_bitmap)},
+    {"glyph_dsc", (getter) struct_get_blob, (setter) struct_set_blob, "lv_font_glyph_dsc_t glyph_dsc", (void*)offsetof(lv_font_t, glyph_dsc)},
+    {"unicode_list", (getter) struct_get_blob, (setter) struct_set_blob, "uint32_t unicode_list", (void*)offsetof(lv_font_t, unicode_list)},
+    {"get_bitmap", (getter) struct_get_blob, (setter) struct_set_blob, "const uint8_t *get_bitmap(const struct _lv_font_struct *, uint32_t) get_bitmap", (void*)offsetof(lv_font_t, get_bitmap)},
+    {"get_width", (getter) struct_get_blob, (setter) struct_set_blob, "int16_t get_width(const struct _lv_font_struct *, uint32_t) get_width", (void*)offsetof(lv_font_t, get_width)},
+    {"next_page", (getter) struct_get_blob, (setter) struct_set_blob, "struct _lv_font_struct next_page", (void*)offsetof(lv_font_t, next_page)},
+    {"h_px", (getter) NULL, (setter) NULL, "uint32_t h_px", NULL},
+    {"bpp", (getter) NULL, (setter) NULL, "uint32_t bpp", NULL},
+    {"monospace", (getter) NULL, (setter) NULL, "uint32_t monospace", NULL},
+    {"glyph_cnt", (getter) struct_get_uint16, (setter) struct_set_uint16, "uint16_t glyph_cnt", (void*)offsetof(lv_font_t, glyph_cnt)},
+
+    {NULL}
+};
+
+static PyTypeObject pylv_font_t_Type = {
+    PyVarObject_HEAD_INIT(NULL, 0)
+    .tp_name = "lvgl.font_t",
+    .tp_doc = "lvgl font_t",
+    .tp_basicsize = sizeof(StructObject),
+    .tp_itemsize = 0,
+    .tp_flags = Py_TPFLAGS_DEFAULT | Py_TPFLAGS_BASETYPE,
+    .tp_new = PyType_GenericNew,
+    .tp_init = (initproc) pylv_font_t_init,
+    .tp_dealloc = (destructor) Struct_dealloc,
+    .tp_getset = pylv_font_t_getset,
+    .tp_repr = (reprfunc) Struct_repr
+
+};
+
+
+
+static int
+pylv_anim_t_init(StructObject *self, PyObject *args, PyObject *kwds) 
+{
+
+    self->data = PyMem_Malloc(sizeof(lv_anim_t));
+    if (!self->data) return -1;
+    
+    memset(self->data, 0, sizeof(lv_anim_t));
+    self->owner = (PyObject *)self;
+
+    return 0;
+}
+
+
+static PyGetSetDef pylv_anim_t_getset[] = {
+    {"var", (getter) struct_get_blob, (setter) struct_set_blob, "void var", (void*)offsetof(lv_anim_t, var)},
+    {"fp", (getter) struct_get_blob, (setter) struct_set_blob, "lv_anim_fp_t fp", (void*)offsetof(lv_anim_t, fp)},
+    {"end_cb", (getter) struct_get_blob, (setter) struct_set_blob, "lv_anim_cb_t end_cb", (void*)offsetof(lv_anim_t, end_cb)},
+    {"path", (getter) struct_get_blob, (setter) struct_set_blob, "lv_anim_path_t path", (void*)offsetof(lv_anim_t, path)},
+    {"start", (getter) struct_get_int32, (setter) struct_set_int32, "int32_t start", (void*)offsetof(lv_anim_t, start)},
+    {"end", (getter) struct_get_int32, (setter) struct_set_int32, "int32_t end", (void*)offsetof(lv_anim_t, end)},
+    {"time", (getter) struct_get_uint16, (setter) struct_set_uint16, "uint16_t time", (void*)offsetof(lv_anim_t, time)},
+    {"act_time", (getter) struct_get_int16, (setter) struct_set_int16, "int16_t act_time", (void*)offsetof(lv_anim_t, act_time)},
+    {"playback_pause", (getter) struct_get_uint16, (setter) struct_set_uint16, "uint16_t playback_pause", (void*)offsetof(lv_anim_t, playback_pause)},
+    {"repeat_pause", (getter) struct_get_uint16, (setter) struct_set_uint16, "uint16_t repeat_pause", (void*)offsetof(lv_anim_t, repeat_pause)},
+    {"playback", (getter) NULL, (setter) NULL, "uint8_t playback", NULL},
+    {"repeat", (getter) NULL, (setter) NULL, "uint8_t repeat", NULL},
+    {"playback_now", (getter) NULL, (setter) NULL, "uint8_t playback_now", NULL},
+    {"has_run", (getter) NULL, (setter) NULL, "uint32_t has_run", NULL},
+
+    {NULL}
+};
+
+static PyTypeObject pylv_anim_t_Type = {
+    PyVarObject_HEAD_INIT(NULL, 0)
+    .tp_name = "lvgl.anim_t",
+    .tp_doc = "lvgl anim_t",
+    .tp_basicsize = sizeof(StructObject),
+    .tp_itemsize = 0,
+    .tp_flags = Py_TPFLAGS_DEFAULT | Py_TPFLAGS_BASETYPE,
+    .tp_new = PyType_GenericNew,
+    .tp_init = (initproc) pylv_anim_t_init,
+    .tp_dealloc = (destructor) Struct_dealloc,
+    .tp_getset = pylv_anim_t_getset,
+    .tp_repr = (reprfunc) Struct_repr
+
+};
+
+
+
+static int
+pylv_style_t_init(StructObject *self, PyObject *args, PyObject *kwds) 
+{
+
+    self->data = PyMem_Malloc(sizeof(lv_style_t));
+    if (!self->data) return -1;
+    
+    memset(self->data, 0, sizeof(lv_style_t));
+    self->owner = (PyObject *)self;
+
+    return 0;
+}
+
+
+static PyGetSetDef pylv_style_t_getset[] = {
+    {"glass", (getter) NULL, (setter) NULL, "uint8_t glass", NULL},
+    {"body", (getter) struct_get_blob, (setter) struct_set_blob, "struct  {   lv_color_t main_color;   lv_color_t grad_color;   lv_coord_t radius;   lv_opa_t opa;   struct    {     lv_color_t color;     lv_coord_t width;     lv_border_part_t part;     lv_opa_t opa;   } border;   struct    {     lv_color_t color;     lv_coord_t width;     lv_shadow_type_t type;   } shadow;   struct    {     lv_coord_t ver;     lv_coord_t hor;     lv_coord_t inner;   } padding; } body", (void*)offsetof(lv_style_t, body)},
+    {"text", (getter) struct_get_blob, (setter) struct_set_blob, "struct  {   lv_color_t color;   const lv_font_t *font;   lv_coord_t letter_space;   lv_coord_t line_space;   lv_opa_t opa; } text", (void*)offsetof(lv_style_t, text)},
+    {"image", (getter) struct_get_blob, (setter) struct_set_blob, "struct  {   lv_color_t color;   lv_opa_t intense;   lv_opa_t opa; } image", (void*)offsetof(lv_style_t, image)},
+    {"line", (getter) struct_get_blob, (setter) struct_set_blob, "struct  {   lv_color_t color;   lv_coord_t width;   lv_opa_t opa;   uint8_t rounded : 1; } line", (void*)offsetof(lv_style_t, line)},
+
+    {NULL}
+};
+
+static PyTypeObject pylv_style_t_Type = {
+    PyVarObject_HEAD_INIT(NULL, 0)
+    .tp_name = "lvgl.style_t",
+    .tp_doc = "lvgl style_t",
+    .tp_basicsize = sizeof(StructObject),
+    .tp_itemsize = 0,
+    .tp_flags = Py_TPFLAGS_DEFAULT | Py_TPFLAGS_BASETYPE,
+    .tp_new = PyType_GenericNew,
+    .tp_init = (initproc) pylv_style_t_init,
+    .tp_dealloc = (destructor) Struct_dealloc,
+    .tp_getset = pylv_style_t_getset,
+    .tp_repr = (reprfunc) Struct_repr
+
+};
+
+
+
+static int
+pylv_style_anim_t_init(StructObject *self, PyObject *args, PyObject *kwds) 
+{
+
+    self->data = PyMem_Malloc(sizeof(lv_style_anim_t));
+    if (!self->data) return -1;
+    
+    memset(self->data, 0, sizeof(lv_style_anim_t));
+    self->owner = (PyObject *)self;
+
+    return 0;
+}
+
+
+static PyGetSetDef pylv_style_anim_t_getset[] = {
+    {"style_start", (getter) struct_get_blob, (setter) struct_set_blob, "lv_style_t style_start", (void*)offsetof(lv_style_anim_t, style_start)},
+    {"style_end", (getter) struct_get_blob, (setter) struct_set_blob, "lv_style_t style_end", (void*)offsetof(lv_style_anim_t, style_end)},
+    {"style_anim", (getter) struct_get_blob, (setter) struct_set_blob, "lv_style_t style_anim", (void*)offsetof(lv_style_anim_t, style_anim)},
+    {"end_cb", (getter) struct_get_blob, (setter) struct_set_blob, "lv_anim_cb_t end_cb", (void*)offsetof(lv_style_anim_t, end_cb)},
+    {"time", (getter) struct_get_int16, (setter) struct_set_int16, "int16_t time", (void*)offsetof(lv_style_anim_t, time)},
+    {"act_time", (getter) struct_get_int16, (setter) struct_set_int16, "int16_t act_time", (void*)offsetof(lv_style_anim_t, act_time)},
+    {"playback_pause", (getter) struct_get_uint16, (setter) struct_set_uint16, "uint16_t playback_pause", (void*)offsetof(lv_style_anim_t, playback_pause)},
+    {"repeat_pause", (getter) struct_get_uint16, (setter) struct_set_uint16, "uint16_t repeat_pause", (void*)offsetof(lv_style_anim_t, repeat_pause)},
+    {"playback", (getter) NULL, (setter) NULL, "uint8_t playback", NULL},
+    {"repeat", (getter) NULL, (setter) NULL, "uint8_t repeat", NULL},
+
+    {NULL}
+};
+
+static PyTypeObject pylv_style_anim_t_Type = {
+    PyVarObject_HEAD_INIT(NULL, 0)
+    .tp_name = "lvgl.style_anim_t",
+    .tp_doc = "lvgl style_anim_t",
+    .tp_basicsize = sizeof(StructObject),
+    .tp_itemsize = 0,
+    .tp_flags = Py_TPFLAGS_DEFAULT | Py_TPFLAGS_BASETYPE,
+    .tp_new = PyType_GenericNew,
+    .tp_init = (initproc) pylv_style_anim_t_init,
+    .tp_dealloc = (destructor) Struct_dealloc,
+    .tp_getset = pylv_style_anim_t_getset,
+    .tp_repr = (reprfunc) Struct_repr
+
+};
+
+
+
+static int
+pylv_obj_t_init(StructObject *self, PyObject *args, PyObject *kwds) 
+{
+
+    self->data = PyMem_Malloc(sizeof(lv_obj_t));
+    if (!self->data) return -1;
+    
+    memset(self->data, 0, sizeof(lv_obj_t));
+    self->owner = (PyObject *)self;
+
+    return 0;
+}
+
+
+static PyGetSetDef pylv_obj_t_getset[] = {
+    {"par", (getter) struct_get_blob, (setter) struct_set_blob, "struct _lv_obj_t par", (void*)offsetof(lv_obj_t, par)},
+    {"child_ll", (getter) struct_get_blob, (setter) struct_set_blob, "lv_ll_t child_ll", (void*)offsetof(lv_obj_t, child_ll)},
+    {"coords", (getter) struct_get_blob, (setter) struct_set_blob, "lv_area_t coords", (void*)offsetof(lv_obj_t, coords)},
+    {"event_cb", (getter) struct_get_blob, (setter) struct_set_blob, "lv_event_cb_t event_cb", (void*)offsetof(lv_obj_t, event_cb)},
+    {"signal_cb", (getter) struct_get_blob, (setter) struct_set_blob, "lv_signal_cb_t signal_cb", (void*)offsetof(lv_obj_t, signal_cb)},
+    {"design_cb", (getter) struct_get_blob, (setter) struct_set_blob, "lv_design_cb_t design_cb", (void*)offsetof(lv_obj_t, design_cb)},
+    {"ext_attr", (getter) struct_get_blob, (setter) struct_set_blob, "void ext_attr", (void*)offsetof(lv_obj_t, ext_attr)},
+    {"style_p", (getter) struct_get_blob, (setter) struct_set_blob, "lv_style_t style_p", (void*)offsetof(lv_obj_t, style_p)},
+    {"group_p", (getter) struct_get_blob, (setter) struct_set_blob, "void group_p", (void*)offsetof(lv_obj_t, group_p)},
+    {"click", (getter) NULL, (setter) NULL, "uint8_t click", NULL},
+    {"drag", (getter) NULL, (setter) NULL, "uint8_t drag", NULL},
+    {"drag_throw", (getter) NULL, (setter) NULL, "uint8_t drag_throw", NULL},
+    {"drag_parent", (getter) NULL, (setter) NULL, "uint8_t drag_parent", NULL},
+    {"hidden", (getter) NULL, (setter) NULL, "uint8_t hidden", NULL},
+    {"top", (getter) NULL, (setter) NULL, "uint8_t top", NULL},
+    {"opa_scale_en", (getter) NULL, (setter) NULL, "uint8_t opa_scale_en", NULL},
+    {"parent_event", (getter) NULL, (setter) NULL, "uint8_t parent_event", NULL},
+    {"protect", (getter) struct_get_uint8, (setter) struct_set_uint8, "uint8_t protect", (void*)offsetof(lv_obj_t, protect)},
+    {"opa_scale", (getter) struct_get_uint8, (setter) struct_set_uint8, "lv_opa_t opa_scale", (void*)offsetof(lv_obj_t, opa_scale)},
+    {"ext_size", (getter) struct_get_int16, (setter) struct_set_int16, "lv_coord_t ext_size", (void*)offsetof(lv_obj_t, ext_size)},
+    {"user_data", (getter) struct_get_blob, (setter) struct_set_blob, "lv_obj_user_data_t user_data", (void*)offsetof(lv_obj_t, user_data)},
+
+    {NULL}
+};
+
+static PyTypeObject pylv_obj_t_Type = {
+    PyVarObject_HEAD_INIT(NULL, 0)
+    .tp_name = "lvgl.obj_t",
+    .tp_doc = "lvgl obj_t",
+    .tp_basicsize = sizeof(StructObject),
+    .tp_itemsize = 0,
+    .tp_flags = Py_TPFLAGS_DEFAULT | Py_TPFLAGS_BASETYPE,
+    .tp_new = PyType_GenericNew,
+    .tp_init = (initproc) pylv_obj_t_init,
+    .tp_dealloc = (destructor) Struct_dealloc,
+    .tp_getset = pylv_obj_t_getset,
+    .tp_repr = (reprfunc) Struct_repr
+
+};
+
+
+
+static int
+pylv_obj_type_t_init(StructObject *self, PyObject *args, PyObject *kwds) 
+{
+
+    self->data = PyMem_Malloc(sizeof(lv_obj_type_t));
+    if (!self->data) return -1;
+    
+    memset(self->data, 0, sizeof(lv_obj_type_t));
+    self->owner = (PyObject *)self;
+
+    return 0;
+}
+
+
+static PyGetSetDef pylv_obj_type_t_getset[] = {
+    {"type", (getter) struct_get_blob, (setter) struct_set_blob, "char8 type", (void*)offsetof(lv_obj_type_t, type)},
+
+    {NULL}
+};
+
+static PyTypeObject pylv_obj_type_t_Type = {
+    PyVarObject_HEAD_INIT(NULL, 0)
+    .tp_name = "lvgl.obj_type_t",
+    .tp_doc = "lvgl obj_type_t",
+    .tp_basicsize = sizeof(StructObject),
+    .tp_itemsize = 0,
+    .tp_flags = Py_TPFLAGS_DEFAULT | Py_TPFLAGS_BASETYPE,
+    .tp_new = PyType_GenericNew,
+    .tp_init = (initproc) pylv_obj_type_t_init,
+    .tp_dealloc = (destructor) Struct_dealloc,
+    .tp_getset = pylv_obj_type_t_getset,
+    .tp_repr = (reprfunc) Struct_repr
+
+};
+
+
+
+static int
+pylv_group_t_init(StructObject *self, PyObject *args, PyObject *kwds) 
+{
+
+    self->data = PyMem_Malloc(sizeof(lv_group_t));
+    if (!self->data) return -1;
+    
+    memset(self->data, 0, sizeof(lv_group_t));
+    self->owner = (PyObject *)self;
+
+    return 0;
+}
+
+
+static PyGetSetDef pylv_group_t_getset[] = {
+    {"obj_ll", (getter) struct_get_blob, (setter) struct_set_blob, "lv_ll_t obj_ll", (void*)offsetof(lv_group_t, obj_ll)},
+    {"obj_focus", (getter) struct_get_blob, (setter) struct_set_blob, "lv_obj_t obj_focus", (void*)offsetof(lv_group_t, obj_focus)},
+    {"style_mod", (getter) struct_get_blob, (setter) struct_set_blob, "lv_group_style_mod_func_t style_mod", (void*)offsetof(lv_group_t, style_mod)},
+    {"style_mod_edit", (getter) struct_get_blob, (setter) struct_set_blob, "lv_group_style_mod_func_t style_mod_edit", (void*)offsetof(lv_group_t, style_mod_edit)},
+    {"focus_cb", (getter) struct_get_blob, (setter) struct_set_blob, "lv_group_focus_cb_t focus_cb", (void*)offsetof(lv_group_t, focus_cb)},
+    {"style_tmp", (getter) struct_get_blob, (setter) struct_set_blob, "lv_style_t style_tmp", (void*)offsetof(lv_group_t, style_tmp)},
+    {"user_data", (getter) struct_get_blob, (setter) struct_set_blob, "lv_group_user_data_t user_data", (void*)offsetof(lv_group_t, user_data)},
+    {"frozen", (getter) NULL, (setter) NULL, "uint8_t frozen", NULL},
+    {"editing", (getter) NULL, (setter) NULL, "uint8_t editing", NULL},
+    {"click_focus", (getter) NULL, (setter) NULL, "uint8_t click_focus", NULL},
+    {"refocus_policy", (getter) NULL, (setter) NULL, "uint8_t refocus_policy", NULL},
+    {"wrap", (getter) NULL, (setter) NULL, "uint8_t wrap", NULL},
+
+    {NULL}
+};
+
+static PyTypeObject pylv_group_t_Type = {
+    PyVarObject_HEAD_INIT(NULL, 0)
+    .tp_name = "lvgl.group_t",
+    .tp_doc = "lvgl group_t",
+    .tp_basicsize = sizeof(StructObject),
+    .tp_itemsize = 0,
+    .tp_flags = Py_TPFLAGS_DEFAULT | Py_TPFLAGS_BASETYPE,
+    .tp_new = PyType_GenericNew,
+    .tp_init = (initproc) pylv_group_t_init,
+    .tp_dealloc = (destructor) Struct_dealloc,
+    .tp_getset = pylv_group_t_getset,
+    .tp_repr = (reprfunc) Struct_repr
+
+};
+
+
+
+static int
+pylv_theme_t_init(StructObject *self, PyObject *args, PyObject *kwds) 
+{
+
+    self->data = PyMem_Malloc(sizeof(lv_theme_t));
+    if (!self->data) return -1;
+    
+    memset(self->data, 0, sizeof(lv_theme_t));
+    self->owner = (PyObject *)self;
+
+    return 0;
+}
+
+
+static PyGetSetDef pylv_theme_t_getset[] = {
+    {"style", (getter) struct_get_blob, (setter) struct_set_blob, "struct  {   lv_style_t *bg;   lv_style_t *panel;   lv_style_t *cont;   struct    {     lv_style_t *rel;     lv_style_t *pr;     lv_style_t *tgl_rel;     lv_style_t *tgl_pr;     lv_style_t *ina;   } btn;   struct    {     lv_style_t *rel;     lv_style_t *pr;     lv_style_t *tgl_rel;     lv_style_t *tgl_pr;     lv_style_t *ina;   } imgbtn;   struct    {     lv_style_t *prim;     lv_style_t *sec;     lv_style_t *hint;   } label;   struct    {     lv_style_t *light;     lv_style_t *dark;   } img;   struct    {     lv_style_t *decor;   } line;   lv_style_t *led;   struct    {     lv_style_t *bg;     lv_style_t *indic;   } bar;   struct    {     lv_style_t *bg;     lv_style_t *indic;     lv_style_t *knob;   } slider;   lv_style_t *lmeter;   lv_style_t *gauge;   lv_style_t *arc;   lv_style_t *preload;   struct    {     lv_style_t *bg;     lv_style_t *indic;     lv_style_t *knob_off;     lv_style_t *knob_on;   } sw;   lv_style_t *chart;   struct    {     lv_style_t *bg;     struct      {       lv_style_t *rel;       lv_style_t *pr;       lv_style_t *tgl_rel;       lv_style_t *tgl_pr;       lv_style_t *ina;     } box;   } cb;   struct    {     lv_style_t *bg;     struct      {       lv_style_t *rel;       lv_style_t *pr;       lv_style_t *tgl_rel;       lv_style_t *tgl_pr;       lv_style_t *ina;     } btn;   } btnm;   struct    {     lv_style_t *bg;     struct      {       lv_style_t *rel;       lv_style_t *pr;       lv_style_t *tgl_rel;       lv_style_t *tgl_pr;       lv_style_t *ina;     } btn;   } kb;   struct    {     lv_style_t *bg;     struct      {       lv_style_t *bg;       lv_style_t *rel;       lv_style_t *pr;     } btn;   } mbox;   struct    {     lv_style_t *bg;     lv_style_t *scrl;     lv_style_t *sb;   } page;   struct    {     lv_style_t *area;     lv_style_t *oneline;     lv_style_t *cursor;     lv_style_t *sb;   } ta;   struct    {     lv_style_t *bg;     lv_style_t *cursor;     lv_style_t *sb;   } spinbox;   struct    {     lv_style_t *bg;     lv_style_t *scrl;     lv_style_t *sb;     struct      {       lv_style_t *rel;       lv_style_t *pr;       lv_style_t *tgl_rel;       lv_style_t *tgl_pr;       lv_style_t *ina;     } btn;   } list;   struct    {     lv_style_t *bg;     lv_style_t *sel;     lv_style_t *sb;   } ddlist;   struct    {     lv_style_t *bg;     lv_style_t *sel;   } roller;   struct    {     lv_style_t *bg;     lv_style_t *indic;     struct      {       lv_style_t *bg;       lv_style_t *rel;       lv_style_t *pr;       lv_style_t *tgl_rel;       lv_style_t *tgl_pr;     } btn;   } tabview;   struct    {     lv_style_t *bg;     lv_style_t *scrl;     lv_style_t *sb;   } tileview;   struct    {     lv_style_t *bg;     lv_style_t *cell;   } table;   struct    {     lv_style_t *bg;     lv_style_t *sb;     lv_style_t *header;     struct      {       lv_style_t *bg;       lv_style_t *scrl;     } content;     struct      {       lv_style_t *rel;       lv_style_t *pr;     } btn;   } win; } style", (void*)offsetof(lv_theme_t, style)},
+    {"group", (getter) struct_get_blob, (setter) struct_set_blob, "struct  {   lv_group_style_mod_func_t style_mod;   lv_group_style_mod_func_t style_mod_edit; } group", (void*)offsetof(lv_theme_t, group)},
+
+    {NULL}
+};
+
+static PyTypeObject pylv_theme_t_Type = {
+    PyVarObject_HEAD_INIT(NULL, 0)
+    .tp_name = "lvgl.theme_t",
+    .tp_doc = "lvgl theme_t",
+    .tp_basicsize = sizeof(StructObject),
+    .tp_itemsize = 0,
+    .tp_flags = Py_TPFLAGS_DEFAULT | Py_TPFLAGS_BASETYPE,
+    .tp_new = PyType_GenericNew,
+    .tp_init = (initproc) pylv_theme_t_init,
+    .tp_dealloc = (destructor) Struct_dealloc,
+    .tp_getset = pylv_theme_t_getset,
+    .tp_repr = (reprfunc) Struct_repr
+
+};
+
+
+
+static int
+pylv_cont_ext_t_init(StructObject *self, PyObject *args, PyObject *kwds) 
+{
+
+    self->data = PyMem_Malloc(sizeof(lv_cont_ext_t));
+    if (!self->data) return -1;
+    
+    memset(self->data, 0, sizeof(lv_cont_ext_t));
+    self->owner = (PyObject *)self;
+
+    return 0;
+}
+
+
+static PyGetSetDef pylv_cont_ext_t_getset[] = {
+    {"layout", (getter) NULL, (setter) NULL, "uint8_t layout", NULL},
+    {"fit_left", (getter) NULL, (setter) NULL, "uint8_t fit_left", NULL},
+    {"fit_right", (getter) NULL, (setter) NULL, "uint8_t fit_right", NULL},
+    {"fit_top", (getter) NULL, (setter) NULL, "uint8_t fit_top", NULL},
+    {"fit_bottom", (getter) NULL, (setter) NULL, "uint8_t fit_bottom", NULL},
+
+    {NULL}
+};
+
+static PyTypeObject pylv_cont_ext_t_Type = {
+    PyVarObject_HEAD_INIT(NULL, 0)
+    .tp_name = "lvgl.cont_ext_t",
+    .tp_doc = "lvgl cont_ext_t",
+    .tp_basicsize = sizeof(StructObject),
+    .tp_itemsize = 0,
+    .tp_flags = Py_TPFLAGS_DEFAULT | Py_TPFLAGS_BASETYPE,
+    .tp_new = PyType_GenericNew,
+    .tp_init = (initproc) pylv_cont_ext_t_init,
+    .tp_dealloc = (destructor) Struct_dealloc,
+    .tp_getset = pylv_cont_ext_t_getset,
+    .tp_repr = (reprfunc) Struct_repr
+
+};
+
+
+
+static int
+pylv_btn_ext_t_init(StructObject *self, PyObject *args, PyObject *kwds) 
+{
+
+    self->data = PyMem_Malloc(sizeof(lv_btn_ext_t));
+    if (!self->data) return -1;
+    
+    memset(self->data, 0, sizeof(lv_btn_ext_t));
+    self->owner = (PyObject *)self;
+
+    return 0;
+}
+
+
+static PyGetSetDef pylv_btn_ext_t_getset[] = {
+    {"cont", (getter) struct_get_blob, (setter) struct_set_blob, "lv_cont_ext_t cont", (void*)offsetof(lv_btn_ext_t, cont)},
+    {"styles", (getter) struct_get_blob, (setter) struct_set_blob, "lv_style_tLV_BTN_STATE_NUM styles", (void*)offsetof(lv_btn_ext_t, styles)},
+    {"state", (getter) struct_get_uint8, (setter) struct_set_uint8, "lv_btn_state_t state", (void*)offsetof(lv_btn_ext_t, state)},
+    {"ink_in_time", (getter) struct_get_uint16, (setter) struct_set_uint16, "uint16_t ink_in_time", (void*)offsetof(lv_btn_ext_t, ink_in_time)},
+    {"ink_wait_time", (getter) struct_get_uint16, (setter) struct_set_uint16, "uint16_t ink_wait_time", (void*)offsetof(lv_btn_ext_t, ink_wait_time)},
+    {"ink_out_time", (getter) struct_get_uint16, (setter) struct_set_uint16, "uint16_t ink_out_time", (void*)offsetof(lv_btn_ext_t, ink_out_time)},
+    {"toggle", (getter) NULL, (setter) NULL, "uint8_t toggle", NULL},
+
+    {NULL}
+};
+
+static PyTypeObject pylv_btn_ext_t_Type = {
+    PyVarObject_HEAD_INIT(NULL, 0)
+    .tp_name = "lvgl.btn_ext_t",
+    .tp_doc = "lvgl btn_ext_t",
+    .tp_basicsize = sizeof(StructObject),
+    .tp_itemsize = 0,
+    .tp_flags = Py_TPFLAGS_DEFAULT | Py_TPFLAGS_BASETYPE,
+    .tp_new = PyType_GenericNew,
+    .tp_init = (initproc) pylv_btn_ext_t_init,
+    .tp_dealloc = (destructor) Struct_dealloc,
+    .tp_getset = pylv_btn_ext_t_getset,
+    .tp_repr = (reprfunc) Struct_repr
+
+};
+
+
+
+static int
+pylv_img_header_t_init(StructObject *self, PyObject *args, PyObject *kwds) 
+{
+
+    self->data = PyMem_Malloc(sizeof(lv_img_header_t));
+    if (!self->data) return -1;
+    
+    memset(self->data, 0, sizeof(lv_img_header_t));
+    self->owner = (PyObject *)self;
+
+    return 0;
+}
+
+
+static PyGetSetDef pylv_img_header_t_getset[] = {
+    {"cf", (getter) NULL, (setter) NULL, "uint32_t cf", NULL},
+    {"always_zero", (getter) NULL, (setter) NULL, "uint32_t always_zero", NULL},
+    {"reserved", (getter) NULL, (setter) NULL, "uint32_t reserved", NULL},
+    {"w", (getter) NULL, (setter) NULL, "uint32_t w", NULL},
+    {"h", (getter) NULL, (setter) NULL, "uint32_t h", NULL},
+
+    {NULL}
+};
+
+static PyTypeObject pylv_img_header_t_Type = {
+    PyVarObject_HEAD_INIT(NULL, 0)
+    .tp_name = "lvgl.img_header_t",
+    .tp_doc = "lvgl img_header_t",
+    .tp_basicsize = sizeof(StructObject),
+    .tp_itemsize = 0,
+    .tp_flags = Py_TPFLAGS_DEFAULT | Py_TPFLAGS_BASETYPE,
+    .tp_new = PyType_GenericNew,
+    .tp_init = (initproc) pylv_img_header_t_init,
+    .tp_dealloc = (destructor) Struct_dealloc,
+    .tp_getset = pylv_img_header_t_getset,
+    .tp_repr = (reprfunc) Struct_repr
+
+};
+
+
+
+static int
+pylv_img_dsc_t_init(StructObject *self, PyObject *args, PyObject *kwds) 
+{
+
+    self->data = PyMem_Malloc(sizeof(lv_img_dsc_t));
+    if (!self->data) return -1;
+    
+    memset(self->data, 0, sizeof(lv_img_dsc_t));
+    self->owner = (PyObject *)self;
+
+    return 0;
+}
+
+
+static PyGetSetDef pylv_img_dsc_t_getset[] = {
+    {"header", (getter) struct_get_blob, (setter) struct_set_blob, "lv_img_header_t header", (void*)offsetof(lv_img_dsc_t, header)},
+    {"data_size", (getter) struct_get_uint32, (setter) struct_set_uint32, "uint32_t data_size", (void*)offsetof(lv_img_dsc_t, data_size)},
+    {"data", (getter) struct_get_blob, (setter) struct_set_blob, "uint8_t data", (void*)offsetof(lv_img_dsc_t, data)},
+
+    {NULL}
+};
+
+static PyTypeObject pylv_img_dsc_t_Type = {
+    PyVarObject_HEAD_INIT(NULL, 0)
+    .tp_name = "lvgl.img_dsc_t",
+    .tp_doc = "lvgl img_dsc_t",
+    .tp_basicsize = sizeof(StructObject),
+    .tp_itemsize = 0,
+    .tp_flags = Py_TPFLAGS_DEFAULT | Py_TPFLAGS_BASETYPE,
+    .tp_new = PyType_GenericNew,
+    .tp_init = (initproc) pylv_img_dsc_t_init,
+    .tp_dealloc = (destructor) Struct_dealloc,
+    .tp_getset = pylv_img_dsc_t_getset,
+    .tp_repr = (reprfunc) Struct_repr
+
+};
+
+
+
+static int
+pylv_imgbtn_ext_t_init(StructObject *self, PyObject *args, PyObject *kwds) 
+{
+
+    self->data = PyMem_Malloc(sizeof(lv_imgbtn_ext_t));
+    if (!self->data) return -1;
+    
+    memset(self->data, 0, sizeof(lv_imgbtn_ext_t));
+    self->owner = (PyObject *)self;
+
+    return 0;
+}
+
+
+static PyGetSetDef pylv_imgbtn_ext_t_getset[] = {
+    {"btn", (getter) struct_get_blob, (setter) struct_set_blob, "lv_btn_ext_t btn", (void*)offsetof(lv_imgbtn_ext_t, btn)},
+    {"img_src", (getter) struct_get_blob, (setter) struct_set_blob, "voidLV_BTN_STATE_NUM img_src", (void*)offsetof(lv_imgbtn_ext_t, img_src)},
+    {"act_cf", (getter) struct_get_uint8, (setter) struct_set_uint8, "lv_img_cf_t act_cf", (void*)offsetof(lv_imgbtn_ext_t, act_cf)},
+
+    {NULL}
+};
+
+static PyTypeObject pylv_imgbtn_ext_t_Type = {
+    PyVarObject_HEAD_INIT(NULL, 0)
+    .tp_name = "lvgl.imgbtn_ext_t",
+    .tp_doc = "lvgl imgbtn_ext_t",
+    .tp_basicsize = sizeof(StructObject),
+    .tp_itemsize = 0,
+    .tp_flags = Py_TPFLAGS_DEFAULT | Py_TPFLAGS_BASETYPE,
+    .tp_new = PyType_GenericNew,
+    .tp_init = (initproc) pylv_imgbtn_ext_t_init,
+    .tp_dealloc = (destructor) Struct_dealloc,
+    .tp_getset = pylv_imgbtn_ext_t_getset,
+    .tp_repr = (reprfunc) Struct_repr
+
+};
+
+
+
+static int
+pylv_fs_file_t_init(StructObject *self, PyObject *args, PyObject *kwds) 
+{
+
+    self->data = PyMem_Malloc(sizeof(lv_fs_file_t));
+    if (!self->data) return -1;
+    
+    memset(self->data, 0, sizeof(lv_fs_file_t));
+    self->owner = (PyObject *)self;
+
+    return 0;
+}
+
+
+static PyGetSetDef pylv_fs_file_t_getset[] = {
+    {"file_d", (getter) struct_get_blob, (setter) struct_set_blob, "void file_d", (void*)offsetof(lv_fs_file_t, file_d)},
+    {"drv", (getter) struct_get_blob, (setter) struct_set_blob, "struct __lv_fs_drv_t drv", (void*)offsetof(lv_fs_file_t, drv)},
+
+    {NULL}
+};
+
+static PyTypeObject pylv_fs_file_t_Type = {
+    PyVarObject_HEAD_INIT(NULL, 0)
+    .tp_name = "lvgl.fs_file_t",
+    .tp_doc = "lvgl fs_file_t",
+    .tp_basicsize = sizeof(StructObject),
+    .tp_itemsize = 0,
+    .tp_flags = Py_TPFLAGS_DEFAULT | Py_TPFLAGS_BASETYPE,
+    .tp_new = PyType_GenericNew,
+    .tp_init = (initproc) pylv_fs_file_t_init,
+    .tp_dealloc = (destructor) Struct_dealloc,
+    .tp_getset = pylv_fs_file_t_getset,
+    .tp_repr = (reprfunc) Struct_repr
+
+};
+
+
+
+static int
+pylv_fs_dir_t_init(StructObject *self, PyObject *args, PyObject *kwds) 
+{
+
+    self->data = PyMem_Malloc(sizeof(lv_fs_dir_t));
+    if (!self->data) return -1;
+    
+    memset(self->data, 0, sizeof(lv_fs_dir_t));
+    self->owner = (PyObject *)self;
+
+    return 0;
+}
+
+
+static PyGetSetDef pylv_fs_dir_t_getset[] = {
+    {"dir_d", (getter) struct_get_blob, (setter) struct_set_blob, "void dir_d", (void*)offsetof(lv_fs_dir_t, dir_d)},
+    {"drv", (getter) struct_get_blob, (setter) struct_set_blob, "struct __lv_fs_drv_t drv", (void*)offsetof(lv_fs_dir_t, drv)},
+
+    {NULL}
+};
+
+static PyTypeObject pylv_fs_dir_t_Type = {
+    PyVarObject_HEAD_INIT(NULL, 0)
+    .tp_name = "lvgl.fs_dir_t",
+    .tp_doc = "lvgl fs_dir_t",
+    .tp_basicsize = sizeof(StructObject),
+    .tp_itemsize = 0,
+    .tp_flags = Py_TPFLAGS_DEFAULT | Py_TPFLAGS_BASETYPE,
+    .tp_new = PyType_GenericNew,
+    .tp_init = (initproc) pylv_fs_dir_t_init,
+    .tp_dealloc = (destructor) Struct_dealloc,
+    .tp_getset = pylv_fs_dir_t_getset,
+    .tp_repr = (reprfunc) Struct_repr
+
+};
+
+
+
+static int
+pylv_fs_drv_t_init(StructObject *self, PyObject *args, PyObject *kwds) 
+{
+
+    self->data = PyMem_Malloc(sizeof(lv_fs_drv_t));
+    if (!self->data) return -1;
+    
+    memset(self->data, 0, sizeof(lv_fs_drv_t));
+    self->owner = (PyObject *)self;
+
+    return 0;
+}
+
+
+static PyGetSetDef pylv_fs_drv_t_getset[] = {
+    {"letter", (getter) struct_get_blob, (setter) struct_set_blob, "char letter", (void*)offsetof(lv_fs_drv_t, letter)},
+    {"file_size", (getter) struct_get_uint16, (setter) struct_set_uint16, "uint16_t file_size", (void*)offsetof(lv_fs_drv_t, file_size)},
+    {"rddir_size", (getter) struct_get_uint16, (setter) struct_set_uint16, "uint16_t rddir_size", (void*)offsetof(lv_fs_drv_t, rddir_size)},
+    {"ready", (getter) struct_get_blob, (setter) struct_set_blob, "bool ready(void) ready", (void*)offsetof(lv_fs_drv_t, ready)},
+    {"open", (getter) struct_get_blob, (setter) struct_set_blob, "lv_fs_res_t open(void *file_p, const char *path, lv_fs_mode_t mode) open", (void*)offsetof(lv_fs_drv_t, open)},
+    {"close", (getter) struct_get_blob, (setter) struct_set_blob, "lv_fs_res_t close(void *file_p) close", (void*)offsetof(lv_fs_drv_t, close)},
+    {"remove", (getter) struct_get_blob, (setter) struct_set_blob, "lv_fs_res_t remove(const char *fn) remove", (void*)offsetof(lv_fs_drv_t, remove)},
+    {"read", (getter) struct_get_blob, (setter) struct_set_blob, "lv_fs_res_t read(void *file_p, void *buf, uint32_t btr, uint32_t *br) read", (void*)offsetof(lv_fs_drv_t, read)},
+    {"write", (getter) struct_get_blob, (setter) struct_set_blob, "lv_fs_res_t write(void *file_p, const void *buf, uint32_t btw, uint32_t *bw) write", (void*)offsetof(lv_fs_drv_t, write)},
+    {"seek", (getter) struct_get_blob, (setter) struct_set_blob, "lv_fs_res_t seek(void *file_p, uint32_t pos) seek", (void*)offsetof(lv_fs_drv_t, seek)},
+    {"tell", (getter) struct_get_blob, (setter) struct_set_blob, "lv_fs_res_t tell(void *file_p, uint32_t *pos_p) tell", (void*)offsetof(lv_fs_drv_t, tell)},
+    {"trunc", (getter) struct_get_blob, (setter) struct_set_blob, "lv_fs_res_t trunc(void *file_p) trunc", (void*)offsetof(lv_fs_drv_t, trunc)},
+    {"size", (getter) struct_get_blob, (setter) struct_set_blob, "lv_fs_res_t size(void *file_p, uint32_t *size_p) size", (void*)offsetof(lv_fs_drv_t, size)},
+    {"rename", (getter) struct_get_blob, (setter) struct_set_blob, "lv_fs_res_t rename(const char *oldname, const char *newname) rename", (void*)offsetof(lv_fs_drv_t, rename)},
+    {"free_space", (getter) struct_get_blob, (setter) struct_set_blob, "lv_fs_res_t free_space(uint32_t *total_p, uint32_t *free_p) free_space", (void*)offsetof(lv_fs_drv_t, free_space)},
+    {"dir_open", (getter) struct_get_blob, (setter) struct_set_blob, "lv_fs_res_t dir_open(void *rddir_p, const char *path) dir_open", (void*)offsetof(lv_fs_drv_t, dir_open)},
+    {"dir_read", (getter) struct_get_blob, (setter) struct_set_blob, "lv_fs_res_t dir_read(void *rddir_p, char *fn) dir_read", (void*)offsetof(lv_fs_drv_t, dir_read)},
+    {"dir_close", (getter) struct_get_blob, (setter) struct_set_blob, "lv_fs_res_t dir_close(void *rddir_p) dir_close", (void*)offsetof(lv_fs_drv_t, dir_close)},
+
+    {NULL}
+};
+
+static PyTypeObject pylv_fs_drv_t_Type = {
+    PyVarObject_HEAD_INIT(NULL, 0)
+    .tp_name = "lvgl.fs_drv_t",
+    .tp_doc = "lvgl fs_drv_t",
+    .tp_basicsize = sizeof(StructObject),
+    .tp_itemsize = 0,
+    .tp_flags = Py_TPFLAGS_DEFAULT | Py_TPFLAGS_BASETYPE,
+    .tp_new = PyType_GenericNew,
+    .tp_init = (initproc) pylv_fs_drv_t_init,
+    .tp_dealloc = (destructor) Struct_dealloc,
+    .tp_getset = pylv_fs_drv_t_getset,
+    .tp_repr = (reprfunc) Struct_repr
+
+};
+
+
+
+static int
+pylv_label_ext_t_init(StructObject *self, PyObject *args, PyObject *kwds) 
+{
+
+    self->data = PyMem_Malloc(sizeof(lv_label_ext_t));
+    if (!self->data) return -1;
+    
+    memset(self->data, 0, sizeof(lv_label_ext_t));
+    self->owner = (PyObject *)self;
+
+    return 0;
+}
+
+
+static PyGetSetDef pylv_label_ext_t_getset[] = {
+    {"text", (getter) struct_get_blob, (setter) struct_set_blob, "char text", (void*)offsetof(lv_label_ext_t, text)},
+    {"long_mode", (getter) struct_get_uint8, (setter) struct_set_uint8, "lv_label_long_mode_t long_mode", (void*)offsetof(lv_label_ext_t, long_mode)},
+    {"dot_tmp", (getter) struct_get_blob, (setter) struct_set_blob, "char(3 * 4) + 1 dot_tmp", (void*)offsetof(lv_label_ext_t, dot_tmp)},
+    {"dot_end", (getter) struct_get_uint16, (setter) struct_set_uint16, "uint16_t dot_end", (void*)offsetof(lv_label_ext_t, dot_end)},
+    {"anim_speed", (getter) struct_get_uint16, (setter) struct_set_uint16, "uint16_t anim_speed", (void*)offsetof(lv_label_ext_t, anim_speed)},
+    {"offset", (getter) struct_get_blob, (setter) struct_set_blob, "lv_point_t offset", (void*)offsetof(lv_label_ext_t, offset)},
+    {"static_txt", (getter) NULL, (setter) NULL, "uint8_t static_txt", NULL},
+    {"align", (getter) NULL, (setter) NULL, "uint8_t align", NULL},
+    {"recolor", (getter) NULL, (setter) NULL, "uint8_t recolor", NULL},
+    {"expand", (getter) NULL, (setter) NULL, "uint8_t expand", NULL},
+    {"body_draw", (getter) NULL, (setter) NULL, "uint8_t body_draw", NULL},
+
+    {NULL}
+};
+
+static PyTypeObject pylv_label_ext_t_Type = {
+    PyVarObject_HEAD_INIT(NULL, 0)
+    .tp_name = "lvgl.label_ext_t",
+    .tp_doc = "lvgl label_ext_t",
+    .tp_basicsize = sizeof(StructObject),
+    .tp_itemsize = 0,
+    .tp_flags = Py_TPFLAGS_DEFAULT | Py_TPFLAGS_BASETYPE,
+    .tp_new = PyType_GenericNew,
+    .tp_init = (initproc) pylv_label_ext_t_init,
+    .tp_dealloc = (destructor) Struct_dealloc,
+    .tp_getset = pylv_label_ext_t_getset,
+    .tp_repr = (reprfunc) Struct_repr
+
+};
+
+
+
+static int
+pylv_img_ext_t_init(StructObject *self, PyObject *args, PyObject *kwds) 
+{
+
+    self->data = PyMem_Malloc(sizeof(lv_img_ext_t));
+    if (!self->data) return -1;
+    
+    memset(self->data, 0, sizeof(lv_img_ext_t));
+    self->owner = (PyObject *)self;
+
+    return 0;
+}
+
+
+static PyGetSetDef pylv_img_ext_t_getset[] = {
+    {"src", (getter) struct_get_blob, (setter) struct_set_blob, "void src", (void*)offsetof(lv_img_ext_t, src)},
+    {"offset", (getter) struct_get_blob, (setter) struct_set_blob, "lv_point_t offset", (void*)offsetof(lv_img_ext_t, offset)},
+    {"w", (getter) struct_get_int16, (setter) struct_set_int16, "lv_coord_t w", (void*)offsetof(lv_img_ext_t, w)},
+    {"h", (getter) struct_get_int16, (setter) struct_set_int16, "lv_coord_t h", (void*)offsetof(lv_img_ext_t, h)},
+    {"src_type", (getter) NULL, (setter) NULL, "uint8_t src_type", NULL},
+    {"auto_size", (getter) NULL, (setter) NULL, "uint8_t auto_size", NULL},
+    {"cf", (getter) NULL, (setter) NULL, "uint8_t cf", NULL},
+
+    {NULL}
+};
+
+static PyTypeObject pylv_img_ext_t_Type = {
+    PyVarObject_HEAD_INIT(NULL, 0)
+    .tp_name = "lvgl.img_ext_t",
+    .tp_doc = "lvgl img_ext_t",
+    .tp_basicsize = sizeof(StructObject),
+    .tp_itemsize = 0,
+    .tp_flags = Py_TPFLAGS_DEFAULT | Py_TPFLAGS_BASETYPE,
+    .tp_new = PyType_GenericNew,
+    .tp_init = (initproc) pylv_img_ext_t_init,
+    .tp_dealloc = (destructor) Struct_dealloc,
+    .tp_getset = pylv_img_ext_t_getset,
+    .tp_repr = (reprfunc) Struct_repr
+
+};
+
+
+
+static int
+pylv_line_ext_t_init(StructObject *self, PyObject *args, PyObject *kwds) 
+{
+
+    self->data = PyMem_Malloc(sizeof(lv_line_ext_t));
+    if (!self->data) return -1;
+    
+    memset(self->data, 0, sizeof(lv_line_ext_t));
+    self->owner = (PyObject *)self;
+
+    return 0;
+}
+
+
+static PyGetSetDef pylv_line_ext_t_getset[] = {
+    {"point_array", (getter) struct_get_blob, (setter) struct_set_blob, "lv_point_t point_array", (void*)offsetof(lv_line_ext_t, point_array)},
+    {"point_num", (getter) struct_get_uint16, (setter) struct_set_uint16, "uint16_t point_num", (void*)offsetof(lv_line_ext_t, point_num)},
+    {"auto_size", (getter) NULL, (setter) NULL, "uint8_t auto_size", NULL},
+    {"y_inv", (getter) NULL, (setter) NULL, "uint8_t y_inv", NULL},
+
+    {NULL}
+};
+
+static PyTypeObject pylv_line_ext_t_Type = {
+    PyVarObject_HEAD_INIT(NULL, 0)
+    .tp_name = "lvgl.line_ext_t",
+    .tp_doc = "lvgl line_ext_t",
+    .tp_basicsize = sizeof(StructObject),
+    .tp_itemsize = 0,
+    .tp_flags = Py_TPFLAGS_DEFAULT | Py_TPFLAGS_BASETYPE,
+    .tp_new = PyType_GenericNew,
+    .tp_init = (initproc) pylv_line_ext_t_init,
+    .tp_dealloc = (destructor) Struct_dealloc,
+    .tp_getset = pylv_line_ext_t_getset,
+    .tp_repr = (reprfunc) Struct_repr
+
+};
+
+
+
+static int
+pylv_page_ext_t_init(StructObject *self, PyObject *args, PyObject *kwds) 
+{
+
+    self->data = PyMem_Malloc(sizeof(lv_page_ext_t));
+    if (!self->data) return -1;
+    
+    memset(self->data, 0, sizeof(lv_page_ext_t));
+    self->owner = (PyObject *)self;
+
+    return 0;
+}
+
+
+static PyGetSetDef pylv_page_ext_t_getset[] = {
+    {"bg", (getter) struct_get_blob, (setter) struct_set_blob, "lv_cont_ext_t bg", (void*)offsetof(lv_page_ext_t, bg)},
+    {"scrl", (getter) struct_get_blob, (setter) struct_set_blob, "lv_obj_t scrl", (void*)offsetof(lv_page_ext_t, scrl)},
+    {"sb", (getter) struct_get_blob, (setter) struct_set_blob, "struct  {   lv_style_t *style;   lv_area_t hor_area;   lv_area_t ver_area;   uint8_t hor_draw : 1;   uint8_t ver_draw : 1;   lv_sb_mode_t mode : 3; } sb", (void*)offsetof(lv_page_ext_t, sb)},
+    {"edge_flash", (getter) struct_get_blob, (setter) struct_set_blob, "struct  {   uint16_t state;   lv_style_t *style;   uint8_t enabled : 1;   uint8_t top_ip : 1;   uint8_t bottom_ip : 1;   uint8_t right_ip : 1;   uint8_t left_ip : 1; } edge_flash", (void*)offsetof(lv_page_ext_t, edge_flash)},
+    {"arrow_scroll", (getter) NULL, (setter) NULL, "uint8_t arrow_scroll", NULL},
+    {"scroll_prop", (getter) NULL, (setter) NULL, "uint8_t scroll_prop", NULL},
+    {"scroll_prop_ip", (getter) NULL, (setter) NULL, "uint8_t scroll_prop_ip", NULL},
+
+    {NULL}
+};
+
+static PyTypeObject pylv_page_ext_t_Type = {
+    PyVarObject_HEAD_INIT(NULL, 0)
+    .tp_name = "lvgl.page_ext_t",
+    .tp_doc = "lvgl page_ext_t",
+    .tp_basicsize = sizeof(StructObject),
+    .tp_itemsize = 0,
+    .tp_flags = Py_TPFLAGS_DEFAULT | Py_TPFLAGS_BASETYPE,
+    .tp_new = PyType_GenericNew,
+    .tp_init = (initproc) pylv_page_ext_t_init,
+    .tp_dealloc = (destructor) Struct_dealloc,
+    .tp_getset = pylv_page_ext_t_getset,
+    .tp_repr = (reprfunc) Struct_repr
+
+};
+
+
+
+static int
+pylv_list_ext_t_init(StructObject *self, PyObject *args, PyObject *kwds) 
+{
+
+    self->data = PyMem_Malloc(sizeof(lv_list_ext_t));
+    if (!self->data) return -1;
+    
+    memset(self->data, 0, sizeof(lv_list_ext_t));
+    self->owner = (PyObject *)self;
+
+    return 0;
+}
+
+
+static PyGetSetDef pylv_list_ext_t_getset[] = {
+    {"page", (getter) struct_get_blob, (setter) struct_set_blob, "lv_page_ext_t page", (void*)offsetof(lv_list_ext_t, page)},
+    {"anim_time", (getter) struct_get_uint16, (setter) struct_set_uint16, "uint16_t anim_time", (void*)offsetof(lv_list_ext_t, anim_time)},
+    {"styles_btn", (getter) struct_get_blob, (setter) struct_set_blob, "lv_style_tLV_BTN_STATE_NUM styles_btn", (void*)offsetof(lv_list_ext_t, styles_btn)},
+    {"style_img", (getter) struct_get_blob, (setter) struct_set_blob, "lv_style_t style_img", (void*)offsetof(lv_list_ext_t, style_img)},
+    {"size", (getter) struct_get_uint32, (setter) struct_set_uint32, "uint32_t size", (void*)offsetof(lv_list_ext_t, size)},
+    {"single_mode", (getter) struct_get_blob, (setter) struct_set_blob, "bool single_mode", (void*)offsetof(lv_list_ext_t, single_mode)},
+    {"last_sel", (getter) struct_get_blob, (setter) struct_set_blob, "lv_obj_t last_sel", (void*)offsetof(lv_list_ext_t, last_sel)},
+    {"selected_btn", (getter) struct_get_blob, (setter) struct_set_blob, "lv_obj_t selected_btn", (void*)offsetof(lv_list_ext_t, selected_btn)},
+
+    {NULL}
+};
+
+static PyTypeObject pylv_list_ext_t_Type = {
+    PyVarObject_HEAD_INIT(NULL, 0)
+    .tp_name = "lvgl.list_ext_t",
+    .tp_doc = "lvgl list_ext_t",
+    .tp_basicsize = sizeof(StructObject),
+    .tp_itemsize = 0,
+    .tp_flags = Py_TPFLAGS_DEFAULT | Py_TPFLAGS_BASETYPE,
+    .tp_new = PyType_GenericNew,
+    .tp_init = (initproc) pylv_list_ext_t_init,
+    .tp_dealloc = (destructor) Struct_dealloc,
+    .tp_getset = pylv_list_ext_t_getset,
+    .tp_repr = (reprfunc) Struct_repr
+
+};
+
+
+
+static int
+pylv_chart_series_t_init(StructObject *self, PyObject *args, PyObject *kwds) 
+{
+
+    self->data = PyMem_Malloc(sizeof(lv_chart_series_t));
+    if (!self->data) return -1;
+    
+    memset(self->data, 0, sizeof(lv_chart_series_t));
+    self->owner = (PyObject *)self;
+
+    return 0;
+}
+
+
+static PyGetSetDef pylv_chart_series_t_getset[] = {
+    {"points", (getter) struct_get_blob, (setter) struct_set_blob, "lv_coord_t points", (void*)offsetof(lv_chart_series_t, points)},
+    {"color", (getter) struct_get_blob, (setter) struct_set_blob, "lv_color_t color", (void*)offsetof(lv_chart_series_t, color)},
+    {"start_point", (getter) struct_get_uint16, (setter) struct_set_uint16, "uint16_t start_point", (void*)offsetof(lv_chart_series_t, start_point)},
+
+    {NULL}
+};
+
+static PyTypeObject pylv_chart_series_t_Type = {
+    PyVarObject_HEAD_INIT(NULL, 0)
+    .tp_name = "lvgl.chart_series_t",
+    .tp_doc = "lvgl chart_series_t",
+    .tp_basicsize = sizeof(StructObject),
+    .tp_itemsize = 0,
+    .tp_flags = Py_TPFLAGS_DEFAULT | Py_TPFLAGS_BASETYPE,
+    .tp_new = PyType_GenericNew,
+    .tp_init = (initproc) pylv_chart_series_t_init,
+    .tp_dealloc = (destructor) Struct_dealloc,
+    .tp_getset = pylv_chart_series_t_getset,
+    .tp_repr = (reprfunc) Struct_repr
+
+};
+
+
+
+static int
+pylv_chart_ext_t_init(StructObject *self, PyObject *args, PyObject *kwds) 
+{
+
+    self->data = PyMem_Malloc(sizeof(lv_chart_ext_t));
+    if (!self->data) return -1;
+    
+    memset(self->data, 0, sizeof(lv_chart_ext_t));
+    self->owner = (PyObject *)self;
+
+    return 0;
+}
+
+
+static PyGetSetDef pylv_chart_ext_t_getset[] = {
+    {"series_ll", (getter) struct_get_blob, (setter) struct_set_blob, "lv_ll_t series_ll", (void*)offsetof(lv_chart_ext_t, series_ll)},
+    {"ymin", (getter) struct_get_int16, (setter) struct_set_int16, "lv_coord_t ymin", (void*)offsetof(lv_chart_ext_t, ymin)},
+    {"ymax", (getter) struct_get_int16, (setter) struct_set_int16, "lv_coord_t ymax", (void*)offsetof(lv_chart_ext_t, ymax)},
+    {"hdiv_cnt", (getter) struct_get_uint8, (setter) struct_set_uint8, "uint8_t hdiv_cnt", (void*)offsetof(lv_chart_ext_t, hdiv_cnt)},
+    {"vdiv_cnt", (getter) struct_get_uint8, (setter) struct_set_uint8, "uint8_t vdiv_cnt", (void*)offsetof(lv_chart_ext_t, vdiv_cnt)},
+    {"point_cnt", (getter) struct_get_uint16, (setter) struct_set_uint16, "uint16_t point_cnt", (void*)offsetof(lv_chart_ext_t, point_cnt)},
+    {"type", (getter) NULL, (setter) NULL, "uint8_t type", NULL},
+    {"series", (getter) struct_get_blob, (setter) struct_set_blob, "struct  {   lv_coord_t width;   uint8_t num;   lv_opa_t opa;   lv_opa_t dark; } series", (void*)offsetof(lv_chart_ext_t, series)},
+
+    {NULL}
+};
+
+static PyTypeObject pylv_chart_ext_t_Type = {
+    PyVarObject_HEAD_INIT(NULL, 0)
+    .tp_name = "lvgl.chart_ext_t",
+    .tp_doc = "lvgl chart_ext_t",
+    .tp_basicsize = sizeof(StructObject),
+    .tp_itemsize = 0,
+    .tp_flags = Py_TPFLAGS_DEFAULT | Py_TPFLAGS_BASETYPE,
+    .tp_new = PyType_GenericNew,
+    .tp_init = (initproc) pylv_chart_ext_t_init,
+    .tp_dealloc = (destructor) Struct_dealloc,
+    .tp_getset = pylv_chart_ext_t_getset,
+    .tp_repr = (reprfunc) Struct_repr
+
+};
+
+
+
+static int
+pylv_table_ext_t_init(StructObject *self, PyObject *args, PyObject *kwds) 
+{
+
+    self->data = PyMem_Malloc(sizeof(lv_table_ext_t));
+    if (!self->data) return -1;
+    
+    memset(self->data, 0, sizeof(lv_table_ext_t));
+    self->owner = (PyObject *)self;
+
+    return 0;
+}
+
+
+static PyGetSetDef pylv_table_ext_t_getset[] = {
+    {"col_cnt", (getter) struct_get_uint16, (setter) struct_set_uint16, "uint16_t col_cnt", (void*)offsetof(lv_table_ext_t, col_cnt)},
+    {"row_cnt", (getter) struct_get_uint16, (setter) struct_set_uint16, "uint16_t row_cnt", (void*)offsetof(lv_table_ext_t, row_cnt)},
+    {"cell_data", (getter) struct_get_blob, (setter) struct_set_blob, "char cell_data", (void*)offsetof(lv_table_ext_t, cell_data)},
+    {"cell_style", (getter) struct_get_blob, (setter) struct_set_blob, "lv_style_t4 cell_style", (void*)offsetof(lv_table_ext_t, cell_style)},
+    {"col_w", (getter) struct_get_blob, (setter) struct_set_blob, "lv_coord_t12 col_w", (void*)offsetof(lv_table_ext_t, col_w)},
+
+    {NULL}
+};
+
+static PyTypeObject pylv_table_ext_t_Type = {
+    PyVarObject_HEAD_INIT(NULL, 0)
+    .tp_name = "lvgl.table_ext_t",
+    .tp_doc = "lvgl table_ext_t",
+    .tp_basicsize = sizeof(StructObject),
+    .tp_itemsize = 0,
+    .tp_flags = Py_TPFLAGS_DEFAULT | Py_TPFLAGS_BASETYPE,
+    .tp_new = PyType_GenericNew,
+    .tp_init = (initproc) pylv_table_ext_t_init,
+    .tp_dealloc = (destructor) Struct_dealloc,
+    .tp_getset = pylv_table_ext_t_getset,
+    .tp_repr = (reprfunc) Struct_repr
+
+};
+
+
+
+static int
+pylv_cb_ext_t_init(StructObject *self, PyObject *args, PyObject *kwds) 
+{
+
+    self->data = PyMem_Malloc(sizeof(lv_cb_ext_t));
+    if (!self->data) return -1;
+    
+    memset(self->data, 0, sizeof(lv_cb_ext_t));
+    self->owner = (PyObject *)self;
+
+    return 0;
+}
+
+
+static PyGetSetDef pylv_cb_ext_t_getset[] = {
+    {"bg_btn", (getter) struct_get_blob, (setter) struct_set_blob, "lv_btn_ext_t bg_btn", (void*)offsetof(lv_cb_ext_t, bg_btn)},
+    {"bullet", (getter) struct_get_blob, (setter) struct_set_blob, "lv_obj_t bullet", (void*)offsetof(lv_cb_ext_t, bullet)},
+    {"label", (getter) struct_get_blob, (setter) struct_set_blob, "lv_obj_t label", (void*)offsetof(lv_cb_ext_t, label)},
+
+    {NULL}
+};
+
+static PyTypeObject pylv_cb_ext_t_Type = {
+    PyVarObject_HEAD_INIT(NULL, 0)
+    .tp_name = "lvgl.cb_ext_t",
+    .tp_doc = "lvgl cb_ext_t",
+    .tp_basicsize = sizeof(StructObject),
+    .tp_itemsize = 0,
+    .tp_flags = Py_TPFLAGS_DEFAULT | Py_TPFLAGS_BASETYPE,
+    .tp_new = PyType_GenericNew,
+    .tp_init = (initproc) pylv_cb_ext_t_init,
+    .tp_dealloc = (destructor) Struct_dealloc,
+    .tp_getset = pylv_cb_ext_t_getset,
+    .tp_repr = (reprfunc) Struct_repr
+
+};
+
+
+
+static int
+pylv_bar_ext_t_init(StructObject *self, PyObject *args, PyObject *kwds) 
+{
+
+    self->data = PyMem_Malloc(sizeof(lv_bar_ext_t));
+    if (!self->data) return -1;
+    
+    memset(self->data, 0, sizeof(lv_bar_ext_t));
+    self->owner = (PyObject *)self;
+
+    return 0;
+}
+
+
+static PyGetSetDef pylv_bar_ext_t_getset[] = {
+    {"cur_value", (getter) struct_get_int16, (setter) struct_set_int16, "int16_t cur_value", (void*)offsetof(lv_bar_ext_t, cur_value)},
+    {"min_value", (getter) struct_get_int16, (setter) struct_set_int16, "int16_t min_value", (void*)offsetof(lv_bar_ext_t, min_value)},
+    {"max_value", (getter) struct_get_int16, (setter) struct_set_int16, "int16_t max_value", (void*)offsetof(lv_bar_ext_t, max_value)},
+    {"anim_start", (getter) struct_get_int16, (setter) struct_set_int16, "int16_t anim_start", (void*)offsetof(lv_bar_ext_t, anim_start)},
+    {"anim_end", (getter) struct_get_int16, (setter) struct_set_int16, "int16_t anim_end", (void*)offsetof(lv_bar_ext_t, anim_end)},
+    {"anim_state", (getter) struct_get_int16, (setter) struct_set_int16, "int16_t anim_state", (void*)offsetof(lv_bar_ext_t, anim_state)},
+    {"anim_time", (getter) struct_get_uint16, (setter) struct_set_uint16, "uint16_t anim_time", (void*)offsetof(lv_bar_ext_t, anim_time)},
+    {"sym", (getter) NULL, (setter) NULL, "uint8_t sym", NULL},
+    {"style_indic", (getter) struct_get_blob, (setter) struct_set_blob, "lv_style_t style_indic", (void*)offsetof(lv_bar_ext_t, style_indic)},
+
+    {NULL}
+};
+
+static PyTypeObject pylv_bar_ext_t_Type = {
+    PyVarObject_HEAD_INIT(NULL, 0)
+    .tp_name = "lvgl.bar_ext_t",
+    .tp_doc = "lvgl bar_ext_t",
+    .tp_basicsize = sizeof(StructObject),
+    .tp_itemsize = 0,
+    .tp_flags = Py_TPFLAGS_DEFAULT | Py_TPFLAGS_BASETYPE,
+    .tp_new = PyType_GenericNew,
+    .tp_init = (initproc) pylv_bar_ext_t_init,
+    .tp_dealloc = (destructor) Struct_dealloc,
+    .tp_getset = pylv_bar_ext_t_getset,
+    .tp_repr = (reprfunc) Struct_repr
+
+};
+
+
+
+static int
+pylv_slider_ext_t_init(StructObject *self, PyObject *args, PyObject *kwds) 
+{
+
+    self->data = PyMem_Malloc(sizeof(lv_slider_ext_t));
+    if (!self->data) return -1;
+    
+    memset(self->data, 0, sizeof(lv_slider_ext_t));
+    self->owner = (PyObject *)self;
+
+    return 0;
+}
+
+
+static PyGetSetDef pylv_slider_ext_t_getset[] = {
+    {"bar", (getter) struct_get_blob, (setter) struct_set_blob, "lv_bar_ext_t bar", (void*)offsetof(lv_slider_ext_t, bar)},
+    {"style_knob", (getter) struct_get_blob, (setter) struct_set_blob, "lv_style_t style_knob", (void*)offsetof(lv_slider_ext_t, style_knob)},
+    {"drag_value", (getter) struct_get_int16, (setter) struct_set_int16, "int16_t drag_value", (void*)offsetof(lv_slider_ext_t, drag_value)},
+    {"knob_in", (getter) NULL, (setter) NULL, "uint8_t knob_in", NULL},
+
+    {NULL}
+};
+
+static PyTypeObject pylv_slider_ext_t_Type = {
+    PyVarObject_HEAD_INIT(NULL, 0)
+    .tp_name = "lvgl.slider_ext_t",
+    .tp_doc = "lvgl slider_ext_t",
+    .tp_basicsize = sizeof(StructObject),
+    .tp_itemsize = 0,
+    .tp_flags = Py_TPFLAGS_DEFAULT | Py_TPFLAGS_BASETYPE,
+    .tp_new = PyType_GenericNew,
+    .tp_init = (initproc) pylv_slider_ext_t_init,
+    .tp_dealloc = (destructor) Struct_dealloc,
+    .tp_getset = pylv_slider_ext_t_getset,
+    .tp_repr = (reprfunc) Struct_repr
+
+};
+
+
+
+static int
+pylv_led_ext_t_init(StructObject *self, PyObject *args, PyObject *kwds) 
+{
+
+    self->data = PyMem_Malloc(sizeof(lv_led_ext_t));
+    if (!self->data) return -1;
+    
+    memset(self->data, 0, sizeof(lv_led_ext_t));
+    self->owner = (PyObject *)self;
+
+    return 0;
+}
+
+
+static PyGetSetDef pylv_led_ext_t_getset[] = {
+    {"bright", (getter) struct_get_uint8, (setter) struct_set_uint8, "uint8_t bright", (void*)offsetof(lv_led_ext_t, bright)},
+
+    {NULL}
+};
+
+static PyTypeObject pylv_led_ext_t_Type = {
+    PyVarObject_HEAD_INIT(NULL, 0)
+    .tp_name = "lvgl.led_ext_t",
+    .tp_doc = "lvgl led_ext_t",
+    .tp_basicsize = sizeof(StructObject),
+    .tp_itemsize = 0,
+    .tp_flags = Py_TPFLAGS_DEFAULT | Py_TPFLAGS_BASETYPE,
+    .tp_new = PyType_GenericNew,
+    .tp_init = (initproc) pylv_led_ext_t_init,
+    .tp_dealloc = (destructor) Struct_dealloc,
+    .tp_getset = pylv_led_ext_t_getset,
+    .tp_repr = (reprfunc) Struct_repr
+
+};
+
+
+
+static int
+pylv_btnm_ext_t_init(StructObject *self, PyObject *args, PyObject *kwds) 
+{
+
+    self->data = PyMem_Malloc(sizeof(lv_btnm_ext_t));
+    if (!self->data) return -1;
+    
+    memset(self->data, 0, sizeof(lv_btnm_ext_t));
+    self->owner = (PyObject *)self;
+
+    return 0;
+}
+
+
+static PyGetSetDef pylv_btnm_ext_t_getset[] = {
+    {"map_p", (getter) struct_get_blob, (setter) struct_set_blob, "char map_p", (void*)offsetof(lv_btnm_ext_t, map_p)},
+    {"button_areas", (getter) struct_get_blob, (setter) struct_set_blob, "lv_area_t button_areas", (void*)offsetof(lv_btnm_ext_t, button_areas)},
+    {"ctrl_bits", (getter) struct_get_blob, (setter) struct_set_blob, "lv_btnm_ctrl_t ctrl_bits", (void*)offsetof(lv_btnm_ext_t, ctrl_bits)},
+    {"styles_btn", (getter) struct_get_blob, (setter) struct_set_blob, "lv_style_tLV_BTN_STATE_NUM styles_btn", (void*)offsetof(lv_btnm_ext_t, styles_btn)},
+    {"btn_cnt", (getter) struct_get_uint16, (setter) struct_set_uint16, "uint16_t btn_cnt", (void*)offsetof(lv_btnm_ext_t, btn_cnt)},
+    {"btn_id_pr", (getter) struct_get_uint16, (setter) struct_set_uint16, "uint16_t btn_id_pr", (void*)offsetof(lv_btnm_ext_t, btn_id_pr)},
+    {"btn_id_act", (getter) struct_get_uint16, (setter) struct_set_uint16, "uint16_t btn_id_act", (void*)offsetof(lv_btnm_ext_t, btn_id_act)},
+    {"recolor", (getter) NULL, (setter) NULL, "uint8_t recolor", NULL},
+
+    {NULL}
+};
+
+static PyTypeObject pylv_btnm_ext_t_Type = {
+    PyVarObject_HEAD_INIT(NULL, 0)
+    .tp_name = "lvgl.btnm_ext_t",
+    .tp_doc = "lvgl btnm_ext_t",
+    .tp_basicsize = sizeof(StructObject),
+    .tp_itemsize = 0,
+    .tp_flags = Py_TPFLAGS_DEFAULT | Py_TPFLAGS_BASETYPE,
+    .tp_new = PyType_GenericNew,
+    .tp_init = (initproc) pylv_btnm_ext_t_init,
+    .tp_dealloc = (destructor) Struct_dealloc,
+    .tp_getset = pylv_btnm_ext_t_getset,
+    .tp_repr = (reprfunc) Struct_repr
+
+};
+
+
+
+static int
+pylv_kb_ext_t_init(StructObject *self, PyObject *args, PyObject *kwds) 
+{
+
+    self->data = PyMem_Malloc(sizeof(lv_kb_ext_t));
+    if (!self->data) return -1;
+    
+    memset(self->data, 0, sizeof(lv_kb_ext_t));
+    self->owner = (PyObject *)self;
+
+    return 0;
+}
+
+
+static PyGetSetDef pylv_kb_ext_t_getset[] = {
+    {"btnm", (getter) struct_get_blob, (setter) struct_set_blob, "lv_btnm_ext_t btnm", (void*)offsetof(lv_kb_ext_t, btnm)},
+    {"ta", (getter) struct_get_blob, (setter) struct_set_blob, "lv_obj_t ta", (void*)offsetof(lv_kb_ext_t, ta)},
+    {"mode", (getter) struct_get_uint8, (setter) struct_set_uint8, "lv_kb_mode_t mode", (void*)offsetof(lv_kb_ext_t, mode)},
+    {"cursor_mng", (getter) NULL, (setter) NULL, "uint8_t cursor_mng", NULL},
+
+    {NULL}
+};
+
+static PyTypeObject pylv_kb_ext_t_Type = {
+    PyVarObject_HEAD_INIT(NULL, 0)
+    .tp_name = "lvgl.kb_ext_t",
+    .tp_doc = "lvgl kb_ext_t",
+    .tp_basicsize = sizeof(StructObject),
+    .tp_itemsize = 0,
+    .tp_flags = Py_TPFLAGS_DEFAULT | Py_TPFLAGS_BASETYPE,
+    .tp_new = PyType_GenericNew,
+    .tp_init = (initproc) pylv_kb_ext_t_init,
+    .tp_dealloc = (destructor) Struct_dealloc,
+    .tp_getset = pylv_kb_ext_t_getset,
+    .tp_repr = (reprfunc) Struct_repr
+
+};
+
+
+
+static int
+pylv_ddlist_ext_t_init(StructObject *self, PyObject *args, PyObject *kwds) 
+{
+
+    self->data = PyMem_Malloc(sizeof(lv_ddlist_ext_t));
+    if (!self->data) return -1;
+    
+    memset(self->data, 0, sizeof(lv_ddlist_ext_t));
+    self->owner = (PyObject *)self;
+
+    return 0;
+}
+
+
+static PyGetSetDef pylv_ddlist_ext_t_getset[] = {
+    {"page", (getter) struct_get_blob, (setter) struct_set_blob, "lv_page_ext_t page", (void*)offsetof(lv_ddlist_ext_t, page)},
+    {"label", (getter) struct_get_blob, (setter) struct_set_blob, "lv_obj_t label", (void*)offsetof(lv_ddlist_ext_t, label)},
+    {"sel_style", (getter) struct_get_blob, (setter) struct_set_blob, "lv_style_t sel_style", (void*)offsetof(lv_ddlist_ext_t, sel_style)},
+    {"option_cnt", (getter) struct_get_uint16, (setter) struct_set_uint16, "uint16_t option_cnt", (void*)offsetof(lv_ddlist_ext_t, option_cnt)},
+    {"sel_opt_id", (getter) struct_get_uint16, (setter) struct_set_uint16, "uint16_t sel_opt_id", (void*)offsetof(lv_ddlist_ext_t, sel_opt_id)},
+    {"sel_opt_id_ori", (getter) struct_get_uint16, (setter) struct_set_uint16, "uint16_t sel_opt_id_ori", (void*)offsetof(lv_ddlist_ext_t, sel_opt_id_ori)},
+    {"anim_time", (getter) struct_get_uint16, (setter) struct_set_uint16, "uint16_t anim_time", (void*)offsetof(lv_ddlist_ext_t, anim_time)},
+    {"opened", (getter) NULL, (setter) NULL, "uint8_t opened", NULL},
+    {"draw_arrow", (getter) NULL, (setter) NULL, "uint8_t draw_arrow", NULL},
+    {"stay_open", (getter) NULL, (setter) NULL, "uint8_t stay_open", NULL},
+    {"fix_height", (getter) struct_get_int16, (setter) struct_set_int16, "lv_coord_t fix_height", (void*)offsetof(lv_ddlist_ext_t, fix_height)},
+
+    {NULL}
+};
+
+static PyTypeObject pylv_ddlist_ext_t_Type = {
+    PyVarObject_HEAD_INIT(NULL, 0)
+    .tp_name = "lvgl.ddlist_ext_t",
+    .tp_doc = "lvgl ddlist_ext_t",
+    .tp_basicsize = sizeof(StructObject),
+    .tp_itemsize = 0,
+    .tp_flags = Py_TPFLAGS_DEFAULT | Py_TPFLAGS_BASETYPE,
+    .tp_new = PyType_GenericNew,
+    .tp_init = (initproc) pylv_ddlist_ext_t_init,
+    .tp_dealloc = (destructor) Struct_dealloc,
+    .tp_getset = pylv_ddlist_ext_t_getset,
+    .tp_repr = (reprfunc) Struct_repr
+
+};
+
+
+
+static int
+pylv_roller_ext_t_init(StructObject *self, PyObject *args, PyObject *kwds) 
+{
+
+    self->data = PyMem_Malloc(sizeof(lv_roller_ext_t));
+    if (!self->data) return -1;
+    
+    memset(self->data, 0, sizeof(lv_roller_ext_t));
+    self->owner = (PyObject *)self;
+
+    return 0;
+}
+
+
+static PyGetSetDef pylv_roller_ext_t_getset[] = {
+    {"ddlist", (getter) struct_get_blob, (setter) struct_set_blob, "lv_ddlist_ext_t ddlist", (void*)offsetof(lv_roller_ext_t, ddlist)},
+
+    {NULL}
+};
+
+static PyTypeObject pylv_roller_ext_t_Type = {
+    PyVarObject_HEAD_INIT(NULL, 0)
+    .tp_name = "lvgl.roller_ext_t",
+    .tp_doc = "lvgl roller_ext_t",
+    .tp_basicsize = sizeof(StructObject),
+    .tp_itemsize = 0,
+    .tp_flags = Py_TPFLAGS_DEFAULT | Py_TPFLAGS_BASETYPE,
+    .tp_new = PyType_GenericNew,
+    .tp_init = (initproc) pylv_roller_ext_t_init,
+    .tp_dealloc = (destructor) Struct_dealloc,
+    .tp_getset = pylv_roller_ext_t_getset,
+    .tp_repr = (reprfunc) Struct_repr
+
+};
+
+
+
+static int
+pylv_ta_ext_t_init(StructObject *self, PyObject *args, PyObject *kwds) 
+{
+
+    self->data = PyMem_Malloc(sizeof(lv_ta_ext_t));
+    if (!self->data) return -1;
+    
+    memset(self->data, 0, sizeof(lv_ta_ext_t));
+    self->owner = (PyObject *)self;
+
+    return 0;
+}
+
+
+static PyGetSetDef pylv_ta_ext_t_getset[] = {
+    {"page", (getter) struct_get_blob, (setter) struct_set_blob, "lv_page_ext_t page", (void*)offsetof(lv_ta_ext_t, page)},
+    {"label", (getter) struct_get_blob, (setter) struct_set_blob, "lv_obj_t label", (void*)offsetof(lv_ta_ext_t, label)},
+    {"placeholder", (getter) struct_get_blob, (setter) struct_set_blob, "lv_obj_t placeholder", (void*)offsetof(lv_ta_ext_t, placeholder)},
+    {"pwd_tmp", (getter) struct_get_blob, (setter) struct_set_blob, "char pwd_tmp", (void*)offsetof(lv_ta_ext_t, pwd_tmp)},
+    {"accapted_chars", (getter) struct_get_blob, (setter) struct_set_blob, "char accapted_chars", (void*)offsetof(lv_ta_ext_t, accapted_chars)},
+    {"max_length", (getter) struct_get_uint16, (setter) struct_set_uint16, "uint16_t max_length", (void*)offsetof(lv_ta_ext_t, max_length)},
+    {"pwd_mode", (getter) NULL, (setter) NULL, "uint8_t pwd_mode", NULL},
+    {"one_line", (getter) NULL, (setter) NULL, "uint8_t one_line", NULL},
+    {"cursor", (getter) struct_get_blob, (setter) struct_set_blob, "struct  {   lv_style_t *style;   lv_coord_t valid_x;   uint16_t pos;   lv_area_t area;   uint16_t txt_byte_pos;   lv_cursor_type_t type : 4;   uint8_t state : 1; } cursor", (void*)offsetof(lv_ta_ext_t, cursor)},
+
+    {NULL}
+};
+
+static PyTypeObject pylv_ta_ext_t_Type = {
+    PyVarObject_HEAD_INIT(NULL, 0)
+    .tp_name = "lvgl.ta_ext_t",
+    .tp_doc = "lvgl ta_ext_t",
+    .tp_basicsize = sizeof(StructObject),
+    .tp_itemsize = 0,
+    .tp_flags = Py_TPFLAGS_DEFAULT | Py_TPFLAGS_BASETYPE,
+    .tp_new = PyType_GenericNew,
+    .tp_init = (initproc) pylv_ta_ext_t_init,
+    .tp_dealloc = (destructor) Struct_dealloc,
+    .tp_getset = pylv_ta_ext_t_getset,
+    .tp_repr = (reprfunc) Struct_repr
+
+};
+
+
+
+static int
+pylv_canvas_ext_t_init(StructObject *self, PyObject *args, PyObject *kwds) 
+{
+
+    self->data = PyMem_Malloc(sizeof(lv_canvas_ext_t));
+    if (!self->data) return -1;
+    
+    memset(self->data, 0, sizeof(lv_canvas_ext_t));
+    self->owner = (PyObject *)self;
+
+    return 0;
+}
+
+
+static PyGetSetDef pylv_canvas_ext_t_getset[] = {
+    {"img", (getter) struct_get_blob, (setter) struct_set_blob, "lv_img_ext_t img", (void*)offsetof(lv_canvas_ext_t, img)},
+    {"dsc", (getter) struct_get_blob, (setter) struct_set_blob, "lv_img_dsc_t dsc", (void*)offsetof(lv_canvas_ext_t, dsc)},
+
+    {NULL}
+};
+
+static PyTypeObject pylv_canvas_ext_t_Type = {
+    PyVarObject_HEAD_INIT(NULL, 0)
+    .tp_name = "lvgl.canvas_ext_t",
+    .tp_doc = "lvgl canvas_ext_t",
+    .tp_basicsize = sizeof(StructObject),
+    .tp_itemsize = 0,
+    .tp_flags = Py_TPFLAGS_DEFAULT | Py_TPFLAGS_BASETYPE,
+    .tp_new = PyType_GenericNew,
+    .tp_init = (initproc) pylv_canvas_ext_t_init,
+    .tp_dealloc = (destructor) Struct_dealloc,
+    .tp_getset = pylv_canvas_ext_t_getset,
+    .tp_repr = (reprfunc) Struct_repr
+
+};
+
+
+
+static int
+pylv_win_ext_t_init(StructObject *self, PyObject *args, PyObject *kwds) 
+{
+
+    self->data = PyMem_Malloc(sizeof(lv_win_ext_t));
+    if (!self->data) return -1;
+    
+    memset(self->data, 0, sizeof(lv_win_ext_t));
+    self->owner = (PyObject *)self;
+
+    return 0;
+}
+
+
+static PyGetSetDef pylv_win_ext_t_getset[] = {
+    {"page", (getter) struct_get_blob, (setter) struct_set_blob, "lv_obj_t page", (void*)offsetof(lv_win_ext_t, page)},
+    {"header", (getter) struct_get_blob, (setter) struct_set_blob, "lv_obj_t header", (void*)offsetof(lv_win_ext_t, header)},
+    {"title", (getter) struct_get_blob, (setter) struct_set_blob, "lv_obj_t title", (void*)offsetof(lv_win_ext_t, title)},
+    {"style_header", (getter) struct_get_blob, (setter) struct_set_blob, "lv_style_t style_header", (void*)offsetof(lv_win_ext_t, style_header)},
+    {"style_btn_rel", (getter) struct_get_blob, (setter) struct_set_blob, "lv_style_t style_btn_rel", (void*)offsetof(lv_win_ext_t, style_btn_rel)},
+    {"style_btn_pr", (getter) struct_get_blob, (setter) struct_set_blob, "lv_style_t style_btn_pr", (void*)offsetof(lv_win_ext_t, style_btn_pr)},
+    {"btn_size", (getter) struct_get_int16, (setter) struct_set_int16, "lv_coord_t btn_size", (void*)offsetof(lv_win_ext_t, btn_size)},
+
+    {NULL}
+};
+
+static PyTypeObject pylv_win_ext_t_Type = {
+    PyVarObject_HEAD_INIT(NULL, 0)
+    .tp_name = "lvgl.win_ext_t",
+    .tp_doc = "lvgl win_ext_t",
+    .tp_basicsize = sizeof(StructObject),
+    .tp_itemsize = 0,
+    .tp_flags = Py_TPFLAGS_DEFAULT | Py_TPFLAGS_BASETYPE,
+    .tp_new = PyType_GenericNew,
+    .tp_init = (initproc) pylv_win_ext_t_init,
+    .tp_dealloc = (destructor) Struct_dealloc,
+    .tp_getset = pylv_win_ext_t_getset,
+    .tp_repr = (reprfunc) Struct_repr
+
+};
+
+
+
+static int
+pylv_tabview_ext_t_init(StructObject *self, PyObject *args, PyObject *kwds) 
+{
+
+    self->data = PyMem_Malloc(sizeof(lv_tabview_ext_t));
+    if (!self->data) return -1;
+    
+    memset(self->data, 0, sizeof(lv_tabview_ext_t));
+    self->owner = (PyObject *)self;
+
+    return 0;
+}
+
+
+static PyGetSetDef pylv_tabview_ext_t_getset[] = {
+    {"btns", (getter) struct_get_blob, (setter) struct_set_blob, "lv_obj_t btns", (void*)offsetof(lv_tabview_ext_t, btns)},
+    {"indic", (getter) struct_get_blob, (setter) struct_set_blob, "lv_obj_t indic", (void*)offsetof(lv_tabview_ext_t, indic)},
+    {"content", (getter) struct_get_blob, (setter) struct_set_blob, "lv_obj_t content", (void*)offsetof(lv_tabview_ext_t, content)},
+    {"tab_name_ptr", (getter) struct_get_blob, (setter) struct_set_blob, "char tab_name_ptr", (void*)offsetof(lv_tabview_ext_t, tab_name_ptr)},
+    {"point_last", (getter) struct_get_blob, (setter) struct_set_blob, "lv_point_t point_last", (void*)offsetof(lv_tabview_ext_t, point_last)},
+    {"tab_cur", (getter) struct_get_uint16, (setter) struct_set_uint16, "uint16_t tab_cur", (void*)offsetof(lv_tabview_ext_t, tab_cur)},
+    {"tab_cnt", (getter) struct_get_uint16, (setter) struct_set_uint16, "uint16_t tab_cnt", (void*)offsetof(lv_tabview_ext_t, tab_cnt)},
+    {"anim_time", (getter) struct_get_uint16, (setter) struct_set_uint16, "uint16_t anim_time", (void*)offsetof(lv_tabview_ext_t, anim_time)},
+    {"slide_enable", (getter) NULL, (setter) NULL, "uint8_t slide_enable", NULL},
+    {"draging", (getter) NULL, (setter) NULL, "uint8_t draging", NULL},
+    {"drag_hor", (getter) NULL, (setter) NULL, "uint8_t drag_hor", NULL},
+    {"btns_hide", (getter) NULL, (setter) NULL, "uint8_t btns_hide", NULL},
+    {"btns_pos", (getter) NULL, (setter) NULL, "lv_tabview_btns_pos_t btns_pos", NULL},
+
+    {NULL}
+};
+
+static PyTypeObject pylv_tabview_ext_t_Type = {
+    PyVarObject_HEAD_INIT(NULL, 0)
+    .tp_name = "lvgl.tabview_ext_t",
+    .tp_doc = "lvgl tabview_ext_t",
+    .tp_basicsize = sizeof(StructObject),
+    .tp_itemsize = 0,
+    .tp_flags = Py_TPFLAGS_DEFAULT | Py_TPFLAGS_BASETYPE,
+    .tp_new = PyType_GenericNew,
+    .tp_init = (initproc) pylv_tabview_ext_t_init,
+    .tp_dealloc = (destructor) Struct_dealloc,
+    .tp_getset = pylv_tabview_ext_t_getset,
+    .tp_repr = (reprfunc) Struct_repr
+
+};
+
+
+
+static int
+pylv_tileview_ext_t_init(StructObject *self, PyObject *args, PyObject *kwds) 
+{
+
+    self->data = PyMem_Malloc(sizeof(lv_tileview_ext_t));
+    if (!self->data) return -1;
+    
+    memset(self->data, 0, sizeof(lv_tileview_ext_t));
+    self->owner = (PyObject *)self;
+
+    return 0;
+}
+
+
+static PyGetSetDef pylv_tileview_ext_t_getset[] = {
+    {"page", (getter) struct_get_blob, (setter) struct_set_blob, "lv_page_ext_t page", (void*)offsetof(lv_tileview_ext_t, page)},
+    {"valid_pos", (getter) struct_get_blob, (setter) struct_set_blob, "lv_point_t valid_pos", (void*)offsetof(lv_tileview_ext_t, valid_pos)},
+    {"anim_time", (getter) struct_get_uint16, (setter) struct_set_uint16, "uint16_t anim_time", (void*)offsetof(lv_tileview_ext_t, anim_time)},
+    {"act_id", (getter) struct_get_blob, (setter) struct_set_blob, "lv_point_t act_id", (void*)offsetof(lv_tileview_ext_t, act_id)},
+    {"drag_top_en", (getter) NULL, (setter) NULL, "uint8_t drag_top_en", NULL},
+    {"drag_bottom_en", (getter) NULL, (setter) NULL, "uint8_t drag_bottom_en", NULL},
+    {"drag_left_en", (getter) NULL, (setter) NULL, "uint8_t drag_left_en", NULL},
+    {"drag_right_en", (getter) NULL, (setter) NULL, "uint8_t drag_right_en", NULL},
+    {"drag_hor", (getter) NULL, (setter) NULL, "uint8_t drag_hor", NULL},
+    {"drag_ver", (getter) NULL, (setter) NULL, "uint8_t drag_ver", NULL},
+
+    {NULL}
+};
+
+static PyTypeObject pylv_tileview_ext_t_Type = {
+    PyVarObject_HEAD_INIT(NULL, 0)
+    .tp_name = "lvgl.tileview_ext_t",
+    .tp_doc = "lvgl tileview_ext_t",
+    .tp_basicsize = sizeof(StructObject),
+    .tp_itemsize = 0,
+    .tp_flags = Py_TPFLAGS_DEFAULT | Py_TPFLAGS_BASETYPE,
+    .tp_new = PyType_GenericNew,
+    .tp_init = (initproc) pylv_tileview_ext_t_init,
+    .tp_dealloc = (destructor) Struct_dealloc,
+    .tp_getset = pylv_tileview_ext_t_getset,
+    .tp_repr = (reprfunc) Struct_repr
+
+};
+
+
+
+static int
+pylv_mbox_ext_t_init(StructObject *self, PyObject *args, PyObject *kwds) 
+{
+
+    self->data = PyMem_Malloc(sizeof(lv_mbox_ext_t));
+    if (!self->data) return -1;
+    
+    memset(self->data, 0, sizeof(lv_mbox_ext_t));
+    self->owner = (PyObject *)self;
+
+    return 0;
+}
+
+
+static PyGetSetDef pylv_mbox_ext_t_getset[] = {
+    {"bg", (getter) struct_get_blob, (setter) struct_set_blob, "lv_cont_ext_t bg", (void*)offsetof(lv_mbox_ext_t, bg)},
+    {"text", (getter) struct_get_blob, (setter) struct_set_blob, "lv_obj_t text", (void*)offsetof(lv_mbox_ext_t, text)},
+    {"btnm", (getter) struct_get_blob, (setter) struct_set_blob, "lv_obj_t btnm", (void*)offsetof(lv_mbox_ext_t, btnm)},
+    {"anim_time", (getter) struct_get_uint16, (setter) struct_set_uint16, "uint16_t anim_time", (void*)offsetof(lv_mbox_ext_t, anim_time)},
+
+    {NULL}
+};
+
+static PyTypeObject pylv_mbox_ext_t_Type = {
+    PyVarObject_HEAD_INIT(NULL, 0)
+    .tp_name = "lvgl.mbox_ext_t",
+    .tp_doc = "lvgl mbox_ext_t",
+    .tp_basicsize = sizeof(StructObject),
+    .tp_itemsize = 0,
+    .tp_flags = Py_TPFLAGS_DEFAULT | Py_TPFLAGS_BASETYPE,
+    .tp_new = PyType_GenericNew,
+    .tp_init = (initproc) pylv_mbox_ext_t_init,
+    .tp_dealloc = (destructor) Struct_dealloc,
+    .tp_getset = pylv_mbox_ext_t_getset,
+    .tp_repr = (reprfunc) Struct_repr
+
+};
+
+
+
+static int
+pylv_lmeter_ext_t_init(StructObject *self, PyObject *args, PyObject *kwds) 
+{
+
+    self->data = PyMem_Malloc(sizeof(lv_lmeter_ext_t));
+    if (!self->data) return -1;
+    
+    memset(self->data, 0, sizeof(lv_lmeter_ext_t));
+    self->owner = (PyObject *)self;
+
+    return 0;
+}
+
+
+static PyGetSetDef pylv_lmeter_ext_t_getset[] = {
+    {"scale_angle", (getter) struct_get_uint16, (setter) struct_set_uint16, "uint16_t scale_angle", (void*)offsetof(lv_lmeter_ext_t, scale_angle)},
+    {"line_cnt", (getter) struct_get_uint8, (setter) struct_set_uint8, "uint8_t line_cnt", (void*)offsetof(lv_lmeter_ext_t, line_cnt)},
+    {"cur_value", (getter) struct_get_int16, (setter) struct_set_int16, "int16_t cur_value", (void*)offsetof(lv_lmeter_ext_t, cur_value)},
+    {"min_value", (getter) struct_get_int16, (setter) struct_set_int16, "int16_t min_value", (void*)offsetof(lv_lmeter_ext_t, min_value)},
+    {"max_value", (getter) struct_get_int16, (setter) struct_set_int16, "int16_t max_value", (void*)offsetof(lv_lmeter_ext_t, max_value)},
+
+    {NULL}
+};
+
+static PyTypeObject pylv_lmeter_ext_t_Type = {
+    PyVarObject_HEAD_INIT(NULL, 0)
+    .tp_name = "lvgl.lmeter_ext_t",
+    .tp_doc = "lvgl lmeter_ext_t",
+    .tp_basicsize = sizeof(StructObject),
+    .tp_itemsize = 0,
+    .tp_flags = Py_TPFLAGS_DEFAULT | Py_TPFLAGS_BASETYPE,
+    .tp_new = PyType_GenericNew,
+    .tp_init = (initproc) pylv_lmeter_ext_t_init,
+    .tp_dealloc = (destructor) Struct_dealloc,
+    .tp_getset = pylv_lmeter_ext_t_getset,
+    .tp_repr = (reprfunc) Struct_repr
+
+};
+
+
+
+static int
+pylv_gauge_ext_t_init(StructObject *self, PyObject *args, PyObject *kwds) 
+{
+
+    self->data = PyMem_Malloc(sizeof(lv_gauge_ext_t));
+    if (!self->data) return -1;
+    
+    memset(self->data, 0, sizeof(lv_gauge_ext_t));
+    self->owner = (PyObject *)self;
+
+    return 0;
+}
+
+
+static PyGetSetDef pylv_gauge_ext_t_getset[] = {
+    {"lmeter", (getter) struct_get_blob, (setter) struct_set_blob, "lv_lmeter_ext_t lmeter", (void*)offsetof(lv_gauge_ext_t, lmeter)},
+    {"values", (getter) struct_get_blob, (setter) struct_set_blob, "int16_t values", (void*)offsetof(lv_gauge_ext_t, values)},
+    {"needle_colors", (getter) struct_get_blob, (setter) struct_set_blob, "lv_color_t needle_colors", (void*)offsetof(lv_gauge_ext_t, needle_colors)},
+    {"needle_count", (getter) struct_get_uint8, (setter) struct_set_uint8, "uint8_t needle_count", (void*)offsetof(lv_gauge_ext_t, needle_count)},
+    {"label_count", (getter) struct_get_uint8, (setter) struct_set_uint8, "uint8_t label_count", (void*)offsetof(lv_gauge_ext_t, label_count)},
+
+    {NULL}
+};
+
+static PyTypeObject pylv_gauge_ext_t_Type = {
+    PyVarObject_HEAD_INIT(NULL, 0)
+    .tp_name = "lvgl.gauge_ext_t",
+    .tp_doc = "lvgl gauge_ext_t",
+    .tp_basicsize = sizeof(StructObject),
+    .tp_itemsize = 0,
+    .tp_flags = Py_TPFLAGS_DEFAULT | Py_TPFLAGS_BASETYPE,
+    .tp_new = PyType_GenericNew,
+    .tp_init = (initproc) pylv_gauge_ext_t_init,
+    .tp_dealloc = (destructor) Struct_dealloc,
+    .tp_getset = pylv_gauge_ext_t_getset,
+    .tp_repr = (reprfunc) Struct_repr
+
+};
+
+
+
+static int
+pylv_sw_ext_t_init(StructObject *self, PyObject *args, PyObject *kwds) 
+{
+
+    self->data = PyMem_Malloc(sizeof(lv_sw_ext_t));
+    if (!self->data) return -1;
+    
+    memset(self->data, 0, sizeof(lv_sw_ext_t));
+    self->owner = (PyObject *)self;
+
+    return 0;
+}
+
+
+static PyGetSetDef pylv_sw_ext_t_getset[] = {
+    {"slider", (getter) struct_get_blob, (setter) struct_set_blob, "lv_slider_ext_t slider", (void*)offsetof(lv_sw_ext_t, slider)},
+    {"style_knob_off", (getter) struct_get_blob, (setter) struct_set_blob, "lv_style_t style_knob_off", (void*)offsetof(lv_sw_ext_t, style_knob_off)},
+    {"style_knob_on", (getter) struct_get_blob, (setter) struct_set_blob, "lv_style_t style_knob_on", (void*)offsetof(lv_sw_ext_t, style_knob_on)},
+    {"start_x", (getter) struct_get_int16, (setter) struct_set_int16, "lv_coord_t start_x", (void*)offsetof(lv_sw_ext_t, start_x)},
+    {"changed", (getter) NULL, (setter) NULL, "uint8_t changed", NULL},
+    {"slided", (getter) NULL, (setter) NULL, "uint8_t slided", NULL},
+    {"anim_time", (getter) struct_get_uint16, (setter) struct_set_uint16, "uint16_t anim_time", (void*)offsetof(lv_sw_ext_t, anim_time)},
+
+    {NULL}
+};
+
+static PyTypeObject pylv_sw_ext_t_Type = {
+    PyVarObject_HEAD_INIT(NULL, 0)
+    .tp_name = "lvgl.sw_ext_t",
+    .tp_doc = "lvgl sw_ext_t",
+    .tp_basicsize = sizeof(StructObject),
+    .tp_itemsize = 0,
+    .tp_flags = Py_TPFLAGS_DEFAULT | Py_TPFLAGS_BASETYPE,
+    .tp_new = PyType_GenericNew,
+    .tp_init = (initproc) pylv_sw_ext_t_init,
+    .tp_dealloc = (destructor) Struct_dealloc,
+    .tp_getset = pylv_sw_ext_t_getset,
+    .tp_repr = (reprfunc) Struct_repr
+
+};
+
+
+
+static int
+pylv_arc_ext_t_init(StructObject *self, PyObject *args, PyObject *kwds) 
+{
+
+    self->data = PyMem_Malloc(sizeof(lv_arc_ext_t));
+    if (!self->data) return -1;
+    
+    memset(self->data, 0, sizeof(lv_arc_ext_t));
+    self->owner = (PyObject *)self;
+
+    return 0;
+}
+
+
+static PyGetSetDef pylv_arc_ext_t_getset[] = {
+    {"angle_start", (getter) struct_get_int16, (setter) struct_set_int16, "lv_coord_t angle_start", (void*)offsetof(lv_arc_ext_t, angle_start)},
+    {"angle_end", (getter) struct_get_int16, (setter) struct_set_int16, "lv_coord_t angle_end", (void*)offsetof(lv_arc_ext_t, angle_end)},
+
+    {NULL}
+};
+
+static PyTypeObject pylv_arc_ext_t_Type = {
+    PyVarObject_HEAD_INIT(NULL, 0)
+    .tp_name = "lvgl.arc_ext_t",
+    .tp_doc = "lvgl arc_ext_t",
+    .tp_basicsize = sizeof(StructObject),
+    .tp_itemsize = 0,
+    .tp_flags = Py_TPFLAGS_DEFAULT | Py_TPFLAGS_BASETYPE,
+    .tp_new = PyType_GenericNew,
+    .tp_init = (initproc) pylv_arc_ext_t_init,
+    .tp_dealloc = (destructor) Struct_dealloc,
+    .tp_getset = pylv_arc_ext_t_getset,
+    .tp_repr = (reprfunc) Struct_repr
+
+};
+
+
+
+static int
+pylv_preload_ext_t_init(StructObject *self, PyObject *args, PyObject *kwds) 
+{
+
+    self->data = PyMem_Malloc(sizeof(lv_preload_ext_t));
+    if (!self->data) return -1;
+    
+    memset(self->data, 0, sizeof(lv_preload_ext_t));
+    self->owner = (PyObject *)self;
+
+    return 0;
+}
+
+
+static PyGetSetDef pylv_preload_ext_t_getset[] = {
+    {"arc", (getter) struct_get_blob, (setter) struct_set_blob, "lv_arc_ext_t arc", (void*)offsetof(lv_preload_ext_t, arc)},
+    {"arc_length", (getter) struct_get_uint16, (setter) struct_set_uint16, "uint16_t arc_length", (void*)offsetof(lv_preload_ext_t, arc_length)},
+    {"time", (getter) struct_get_uint16, (setter) struct_set_uint16, "uint16_t time", (void*)offsetof(lv_preload_ext_t, time)},
+    {"anim_type", (getter) struct_get_uint8, (setter) struct_set_uint8, "lv_preloader_type_t anim_type", (void*)offsetof(lv_preload_ext_t, anim_type)},
+
+    {NULL}
+};
+
+static PyTypeObject pylv_preload_ext_t_Type = {
+    PyVarObject_HEAD_INIT(NULL, 0)
+    .tp_name = "lvgl.preload_ext_t",
+    .tp_doc = "lvgl preload_ext_t",
+    .tp_basicsize = sizeof(StructObject),
+    .tp_itemsize = 0,
+    .tp_flags = Py_TPFLAGS_DEFAULT | Py_TPFLAGS_BASETYPE,
+    .tp_new = PyType_GenericNew,
+    .tp_init = (initproc) pylv_preload_ext_t_init,
+    .tp_dealloc = (destructor) Struct_dealloc,
+    .tp_getset = pylv_preload_ext_t_getset,
+    .tp_repr = (reprfunc) Struct_repr
+
+};
+
+
+
+static int
+pylv_spinbox_ext_t_init(StructObject *self, PyObject *args, PyObject *kwds) 
+{
+
+    self->data = PyMem_Malloc(sizeof(lv_spinbox_ext_t));
+    if (!self->data) return -1;
+    
+    memset(self->data, 0, sizeof(lv_spinbox_ext_t));
+    self->owner = (PyObject *)self;
+
+    return 0;
+}
+
+
+static PyGetSetDef pylv_spinbox_ext_t_getset[] = {
+    {"ta", (getter) struct_get_blob, (setter) struct_set_blob, "lv_ta_ext_t ta", (void*)offsetof(lv_spinbox_ext_t, ta)},
+    {"value", (getter) struct_get_int32, (setter) struct_set_int32, "int32_t value", (void*)offsetof(lv_spinbox_ext_t, value)},
+    {"range_max", (getter) struct_get_int32, (setter) struct_set_int32, "int32_t range_max", (void*)offsetof(lv_spinbox_ext_t, range_max)},
+    {"range_min", (getter) struct_get_int32, (setter) struct_set_int32, "int32_t range_min", (void*)offsetof(lv_spinbox_ext_t, range_min)},
+    {"step", (getter) struct_get_int32, (setter) struct_set_int32, "int32_t step", (void*)offsetof(lv_spinbox_ext_t, step)},
+    {"digit_count", (getter) NULL, (setter) NULL, "uint16_t digit_count", NULL},
+    {"dec_point_pos", (getter) NULL, (setter) NULL, "uint16_t dec_point_pos", NULL},
+    {"digit_padding_left", (getter) NULL, (setter) NULL, "uint16_t digit_padding_left", NULL},
+
+    {NULL}
+};
+
+static PyTypeObject pylv_spinbox_ext_t_Type = {
+    PyVarObject_HEAD_INIT(NULL, 0)
+    .tp_name = "lvgl.spinbox_ext_t",
+    .tp_doc = "lvgl spinbox_ext_t",
+    .tp_basicsize = sizeof(StructObject),
+    .tp_itemsize = 0,
+    .tp_flags = Py_TPFLAGS_DEFAULT | Py_TPFLAGS_BASETYPE,
+    .tp_new = PyType_GenericNew,
+    .tp_init = (initproc) pylv_spinbox_ext_t_init,
+    .tp_dealloc = (destructor) Struct_dealloc,
+    .tp_getset = pylv_spinbox_ext_t_getset,
+    .tp_repr = (reprfunc) Struct_repr
+
+};
+
+
+
 
 /****************************************************************
  * Custom method implementations                                *
@@ -7391,6 +10059,8 @@ static PyTypeObject pylv_spinbox_Type = {
 
 
 
+
+
 /****************************************************************
  * Miscellaneous functions                                      *
  ****************************************************************/
@@ -7530,7 +10200,7 @@ PyInit_lvgl(void) {
     module = PyModule_Create(&lvglmodule);
     if (!module) goto error;
     
-    pylv_obj_Type.tp_repr = (reprfunc) Obj_repr;
+    pylv_obj_Type.tp_repr = (reprfunc) Obj_repr;   
     
 
     pylv_obj_Type.tp_base = NULL;
@@ -7627,6 +10297,127 @@ PyInit_lvgl(void) {
     if (PyType_Ready(&pylv_spinbox_Type) < 0) return NULL;
 
 
+    if (PyType_Ready(&Blob_Type) < 0) return NULL;
+
+    if (PyType_Ready(&pylv_mem_monitor_t_Type) < 0) return NULL;
+
+    if (PyType_Ready(&pylv_ll_t_Type) < 0) return NULL;
+
+    if (PyType_Ready(&pylv_task_t_Type) < 0) return NULL;
+
+    if (PyType_Ready(&pylv_color_hsv_t_Type) < 0) return NULL;
+
+    if (PyType_Ready(&pylv_point_t_Type) < 0) return NULL;
+
+    if (PyType_Ready(&pylv_area_t_Type) < 0) return NULL;
+
+    if (PyType_Ready(&pylv_disp_buf_t_Type) < 0) return NULL;
+
+    if (PyType_Ready(&pylv_disp_drv_t_Type) < 0) return NULL;
+
+    if (PyType_Ready(&pylv_disp_t_Type) < 0) return NULL;
+
+    if (PyType_Ready(&pylv_indev_data_t_Type) < 0) return NULL;
+
+    if (PyType_Ready(&pylv_indev_drv_t_Type) < 0) return NULL;
+
+    if (PyType_Ready(&pylv_indev_proc_t_Type) < 0) return NULL;
+
+    if (PyType_Ready(&pylv_indev_t_Type) < 0) return NULL;
+
+    if (PyType_Ready(&pylv_font_glyph_dsc_t_Type) < 0) return NULL;
+
+    if (PyType_Ready(&pylv_font_unicode_map_t_Type) < 0) return NULL;
+
+    if (PyType_Ready(&pylv_font_t_Type) < 0) return NULL;
+
+    if (PyType_Ready(&pylv_anim_t_Type) < 0) return NULL;
+
+    if (PyType_Ready(&pylv_style_t_Type) < 0) return NULL;
+
+    if (PyType_Ready(&pylv_style_anim_t_Type) < 0) return NULL;
+
+    if (PyType_Ready(&pylv_obj_t_Type) < 0) return NULL;
+
+    if (PyType_Ready(&pylv_obj_type_t_Type) < 0) return NULL;
+
+    if (PyType_Ready(&pylv_group_t_Type) < 0) return NULL;
+
+    if (PyType_Ready(&pylv_theme_t_Type) < 0) return NULL;
+
+    if (PyType_Ready(&pylv_cont_ext_t_Type) < 0) return NULL;
+
+    if (PyType_Ready(&pylv_btn_ext_t_Type) < 0) return NULL;
+
+    if (PyType_Ready(&pylv_img_header_t_Type) < 0) return NULL;
+
+    if (PyType_Ready(&pylv_img_dsc_t_Type) < 0) return NULL;
+
+    if (PyType_Ready(&pylv_imgbtn_ext_t_Type) < 0) return NULL;
+
+    if (PyType_Ready(&pylv_fs_file_t_Type) < 0) return NULL;
+
+    if (PyType_Ready(&pylv_fs_dir_t_Type) < 0) return NULL;
+
+    if (PyType_Ready(&pylv_fs_drv_t_Type) < 0) return NULL;
+
+    if (PyType_Ready(&pylv_label_ext_t_Type) < 0) return NULL;
+
+    if (PyType_Ready(&pylv_img_ext_t_Type) < 0) return NULL;
+
+    if (PyType_Ready(&pylv_line_ext_t_Type) < 0) return NULL;
+
+    if (PyType_Ready(&pylv_page_ext_t_Type) < 0) return NULL;
+
+    if (PyType_Ready(&pylv_list_ext_t_Type) < 0) return NULL;
+
+    if (PyType_Ready(&pylv_chart_series_t_Type) < 0) return NULL;
+
+    if (PyType_Ready(&pylv_chart_ext_t_Type) < 0) return NULL;
+
+    if (PyType_Ready(&pylv_table_ext_t_Type) < 0) return NULL;
+
+    if (PyType_Ready(&pylv_cb_ext_t_Type) < 0) return NULL;
+
+    if (PyType_Ready(&pylv_bar_ext_t_Type) < 0) return NULL;
+
+    if (PyType_Ready(&pylv_slider_ext_t_Type) < 0) return NULL;
+
+    if (PyType_Ready(&pylv_led_ext_t_Type) < 0) return NULL;
+
+    if (PyType_Ready(&pylv_btnm_ext_t_Type) < 0) return NULL;
+
+    if (PyType_Ready(&pylv_kb_ext_t_Type) < 0) return NULL;
+
+    if (PyType_Ready(&pylv_ddlist_ext_t_Type) < 0) return NULL;
+
+    if (PyType_Ready(&pylv_roller_ext_t_Type) < 0) return NULL;
+
+    if (PyType_Ready(&pylv_ta_ext_t_Type) < 0) return NULL;
+
+    if (PyType_Ready(&pylv_canvas_ext_t_Type) < 0) return NULL;
+
+    if (PyType_Ready(&pylv_win_ext_t_Type) < 0) return NULL;
+
+    if (PyType_Ready(&pylv_tabview_ext_t_Type) < 0) return NULL;
+
+    if (PyType_Ready(&pylv_tileview_ext_t_Type) < 0) return NULL;
+
+    if (PyType_Ready(&pylv_mbox_ext_t_Type) < 0) return NULL;
+
+    if (PyType_Ready(&pylv_lmeter_ext_t_Type) < 0) return NULL;
+
+    if (PyType_Ready(&pylv_gauge_ext_t_Type) < 0) return NULL;
+
+    if (PyType_Ready(&pylv_sw_ext_t_Type) < 0) return NULL;
+
+    if (PyType_Ready(&pylv_arc_ext_t_Type) < 0) return NULL;
+
+    if (PyType_Ready(&pylv_preload_ext_t_Type) < 0) return NULL;
+
+    if (PyType_Ready(&pylv_spinbox_ext_t_Type) < 0) return NULL;
+
+
 
 
     Py_INCREF(&pylv_obj_Type);
@@ -7721,6 +10512,185 @@ PyInit_lvgl(void) {
 
     Py_INCREF(&pylv_spinbox_Type);
     PyModule_AddObject(module, "Spinbox", (PyObject *) &pylv_spinbox_Type); 
+
+
+
+    Py_INCREF(&pylv_mem_monitor_t_Type);
+    PyModule_AddObject(module, "mem_monitor_t", (PyObject *) &pylv_mem_monitor_t_Type); 
+
+    Py_INCREF(&pylv_ll_t_Type);
+    PyModule_AddObject(module, "ll_t", (PyObject *) &pylv_ll_t_Type); 
+
+    Py_INCREF(&pylv_task_t_Type);
+    PyModule_AddObject(module, "task_t", (PyObject *) &pylv_task_t_Type); 
+
+    Py_INCREF(&pylv_color_hsv_t_Type);
+    PyModule_AddObject(module, "color_hsv_t", (PyObject *) &pylv_color_hsv_t_Type); 
+
+    Py_INCREF(&pylv_point_t_Type);
+    PyModule_AddObject(module, "point_t", (PyObject *) &pylv_point_t_Type); 
+
+    Py_INCREF(&pylv_area_t_Type);
+    PyModule_AddObject(module, "area_t", (PyObject *) &pylv_area_t_Type); 
+
+    Py_INCREF(&pylv_disp_buf_t_Type);
+    PyModule_AddObject(module, "disp_buf_t", (PyObject *) &pylv_disp_buf_t_Type); 
+
+    Py_INCREF(&pylv_disp_drv_t_Type);
+    PyModule_AddObject(module, "disp_drv_t", (PyObject *) &pylv_disp_drv_t_Type); 
+
+    Py_INCREF(&pylv_disp_t_Type);
+    PyModule_AddObject(module, "disp_t", (PyObject *) &pylv_disp_t_Type); 
+
+    Py_INCREF(&pylv_indev_data_t_Type);
+    PyModule_AddObject(module, "indev_data_t", (PyObject *) &pylv_indev_data_t_Type); 
+
+    Py_INCREF(&pylv_indev_drv_t_Type);
+    PyModule_AddObject(module, "indev_drv_t", (PyObject *) &pylv_indev_drv_t_Type); 
+
+    Py_INCREF(&pylv_indev_proc_t_Type);
+    PyModule_AddObject(module, "indev_proc_t", (PyObject *) &pylv_indev_proc_t_Type); 
+
+    Py_INCREF(&pylv_indev_t_Type);
+    PyModule_AddObject(module, "indev_t", (PyObject *) &pylv_indev_t_Type); 
+
+    Py_INCREF(&pylv_font_glyph_dsc_t_Type);
+    PyModule_AddObject(module, "font_glyph_dsc_t", (PyObject *) &pylv_font_glyph_dsc_t_Type); 
+
+    Py_INCREF(&pylv_font_unicode_map_t_Type);
+    PyModule_AddObject(module, "font_unicode_map_t", (PyObject *) &pylv_font_unicode_map_t_Type); 
+
+    Py_INCREF(&pylv_font_t_Type);
+    PyModule_AddObject(module, "font_t", (PyObject *) &pylv_font_t_Type); 
+
+    Py_INCREF(&pylv_anim_t_Type);
+    PyModule_AddObject(module, "anim_t", (PyObject *) &pylv_anim_t_Type); 
+
+    Py_INCREF(&pylv_style_t_Type);
+    PyModule_AddObject(module, "style_t", (PyObject *) &pylv_style_t_Type); 
+
+    Py_INCREF(&pylv_style_anim_t_Type);
+    PyModule_AddObject(module, "style_anim_t", (PyObject *) &pylv_style_anim_t_Type); 
+
+    Py_INCREF(&pylv_obj_t_Type);
+    PyModule_AddObject(module, "obj_t", (PyObject *) &pylv_obj_t_Type); 
+
+    Py_INCREF(&pylv_obj_type_t_Type);
+    PyModule_AddObject(module, "obj_type_t", (PyObject *) &pylv_obj_type_t_Type); 
+
+    Py_INCREF(&pylv_group_t_Type);
+    PyModule_AddObject(module, "group_t", (PyObject *) &pylv_group_t_Type); 
+
+    Py_INCREF(&pylv_theme_t_Type);
+    PyModule_AddObject(module, "theme_t", (PyObject *) &pylv_theme_t_Type); 
+
+    Py_INCREF(&pylv_cont_ext_t_Type);
+    PyModule_AddObject(module, "cont_ext_t", (PyObject *) &pylv_cont_ext_t_Type); 
+
+    Py_INCREF(&pylv_btn_ext_t_Type);
+    PyModule_AddObject(module, "btn_ext_t", (PyObject *) &pylv_btn_ext_t_Type); 
+
+    Py_INCREF(&pylv_img_header_t_Type);
+    PyModule_AddObject(module, "img_header_t", (PyObject *) &pylv_img_header_t_Type); 
+
+    Py_INCREF(&pylv_img_dsc_t_Type);
+    PyModule_AddObject(module, "img_dsc_t", (PyObject *) &pylv_img_dsc_t_Type); 
+
+    Py_INCREF(&pylv_imgbtn_ext_t_Type);
+    PyModule_AddObject(module, "imgbtn_ext_t", (PyObject *) &pylv_imgbtn_ext_t_Type); 
+
+    Py_INCREF(&pylv_fs_file_t_Type);
+    PyModule_AddObject(module, "fs_file_t", (PyObject *) &pylv_fs_file_t_Type); 
+
+    Py_INCREF(&pylv_fs_dir_t_Type);
+    PyModule_AddObject(module, "fs_dir_t", (PyObject *) &pylv_fs_dir_t_Type); 
+
+    Py_INCREF(&pylv_fs_drv_t_Type);
+    PyModule_AddObject(module, "fs_drv_t", (PyObject *) &pylv_fs_drv_t_Type); 
+
+    Py_INCREF(&pylv_label_ext_t_Type);
+    PyModule_AddObject(module, "label_ext_t", (PyObject *) &pylv_label_ext_t_Type); 
+
+    Py_INCREF(&pylv_img_ext_t_Type);
+    PyModule_AddObject(module, "img_ext_t", (PyObject *) &pylv_img_ext_t_Type); 
+
+    Py_INCREF(&pylv_line_ext_t_Type);
+    PyModule_AddObject(module, "line_ext_t", (PyObject *) &pylv_line_ext_t_Type); 
+
+    Py_INCREF(&pylv_page_ext_t_Type);
+    PyModule_AddObject(module, "page_ext_t", (PyObject *) &pylv_page_ext_t_Type); 
+
+    Py_INCREF(&pylv_list_ext_t_Type);
+    PyModule_AddObject(module, "list_ext_t", (PyObject *) &pylv_list_ext_t_Type); 
+
+    Py_INCREF(&pylv_chart_series_t_Type);
+    PyModule_AddObject(module, "chart_series_t", (PyObject *) &pylv_chart_series_t_Type); 
+
+    Py_INCREF(&pylv_chart_ext_t_Type);
+    PyModule_AddObject(module, "chart_ext_t", (PyObject *) &pylv_chart_ext_t_Type); 
+
+    Py_INCREF(&pylv_table_ext_t_Type);
+    PyModule_AddObject(module, "table_ext_t", (PyObject *) &pylv_table_ext_t_Type); 
+
+    Py_INCREF(&pylv_cb_ext_t_Type);
+    PyModule_AddObject(module, "cb_ext_t", (PyObject *) &pylv_cb_ext_t_Type); 
+
+    Py_INCREF(&pylv_bar_ext_t_Type);
+    PyModule_AddObject(module, "bar_ext_t", (PyObject *) &pylv_bar_ext_t_Type); 
+
+    Py_INCREF(&pylv_slider_ext_t_Type);
+    PyModule_AddObject(module, "slider_ext_t", (PyObject *) &pylv_slider_ext_t_Type); 
+
+    Py_INCREF(&pylv_led_ext_t_Type);
+    PyModule_AddObject(module, "led_ext_t", (PyObject *) &pylv_led_ext_t_Type); 
+
+    Py_INCREF(&pylv_btnm_ext_t_Type);
+    PyModule_AddObject(module, "btnm_ext_t", (PyObject *) &pylv_btnm_ext_t_Type); 
+
+    Py_INCREF(&pylv_kb_ext_t_Type);
+    PyModule_AddObject(module, "kb_ext_t", (PyObject *) &pylv_kb_ext_t_Type); 
+
+    Py_INCREF(&pylv_ddlist_ext_t_Type);
+    PyModule_AddObject(module, "ddlist_ext_t", (PyObject *) &pylv_ddlist_ext_t_Type); 
+
+    Py_INCREF(&pylv_roller_ext_t_Type);
+    PyModule_AddObject(module, "roller_ext_t", (PyObject *) &pylv_roller_ext_t_Type); 
+
+    Py_INCREF(&pylv_ta_ext_t_Type);
+    PyModule_AddObject(module, "ta_ext_t", (PyObject *) &pylv_ta_ext_t_Type); 
+
+    Py_INCREF(&pylv_canvas_ext_t_Type);
+    PyModule_AddObject(module, "canvas_ext_t", (PyObject *) &pylv_canvas_ext_t_Type); 
+
+    Py_INCREF(&pylv_win_ext_t_Type);
+    PyModule_AddObject(module, "win_ext_t", (PyObject *) &pylv_win_ext_t_Type); 
+
+    Py_INCREF(&pylv_tabview_ext_t_Type);
+    PyModule_AddObject(module, "tabview_ext_t", (PyObject *) &pylv_tabview_ext_t_Type); 
+
+    Py_INCREF(&pylv_tileview_ext_t_Type);
+    PyModule_AddObject(module, "tileview_ext_t", (PyObject *) &pylv_tileview_ext_t_Type); 
+
+    Py_INCREF(&pylv_mbox_ext_t_Type);
+    PyModule_AddObject(module, "mbox_ext_t", (PyObject *) &pylv_mbox_ext_t_Type); 
+
+    Py_INCREF(&pylv_lmeter_ext_t_Type);
+    PyModule_AddObject(module, "lmeter_ext_t", (PyObject *) &pylv_lmeter_ext_t_Type); 
+
+    Py_INCREF(&pylv_gauge_ext_t_Type);
+    PyModule_AddObject(module, "gauge_ext_t", (PyObject *) &pylv_gauge_ext_t_Type); 
+
+    Py_INCREF(&pylv_sw_ext_t_Type);
+    PyModule_AddObject(module, "sw_ext_t", (PyObject *) &pylv_sw_ext_t_Type); 
+
+    Py_INCREF(&pylv_arc_ext_t_Type);
+    PyModule_AddObject(module, "arc_ext_t", (PyObject *) &pylv_arc_ext_t_Type); 
+
+    Py_INCREF(&pylv_preload_ext_t_Type);
+    PyModule_AddObject(module, "preload_ext_t", (PyObject *) &pylv_preload_ext_t_Type); 
+
+    Py_INCREF(&pylv_spinbox_ext_t_Type);
+    PyModule_AddObject(module, "spinbox_ext_t", (PyObject *) &pylv_spinbox_ext_t_Type); 
 
 
     

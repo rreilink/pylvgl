@@ -167,6 +167,138 @@ error:
 }
 
 
+/****************************************************************
+ * Custom types: structs                                        *  
+ ****************************************************************/
+typedef struct {
+    PyObject_HEAD
+    void *data;
+    PyObject *owner; // NULL = reference to global C data, self=allocated @ init, other object=sharing from that object; decref when we are deallocated
+} StructObject;
+
+static PyObject*
+Struct_repr(StructObject *self) {
+    return PyUnicode_FromFormat("<%s struct at %p data = %p owner = %p>", Py_TYPE(self)->tp_name, self, self->data, self->owner);
+}
+
+static void
+Struct_dealloc(StructObject *self)
+{
+    if (self->owner == (PyObject *)self) {
+        PyMem_Free(self->data);
+    } else {
+        Py_XDECREF(self->owner); // owner could be NULL if data is global, in that case this statement has no effect
+    }
+    Py_TYPE(self)->tp_free((PyObject *) self);
+}
+
+// Struct members whose type is unsupported, get / set a 'blob', which stores
+// a reference to the data, which can be copied but not accessed otherwise
+
+static PyTypeObject Blob_Type = {
+    PyVarObject_HEAD_INIT(NULL, 0)
+    .tp_name = "lvgl.blob",
+    .tp_doc = "lvgl data blob",
+    .tp_basicsize = sizeof(StructObject),
+    .tp_itemsize = 0,
+    .tp_flags = Py_TPFLAGS_DEFAULT | Py_TPFLAGS_BASETYPE,
+    .tp_new = NULL, // cannot be instantiated
+    .tp_repr = (reprfunc) Struct_repr,
+    .tp_dealloc = (destructor) Struct_dealloc
+};
+
+
+
+static int long_to_int(PyObject *value, long *v, long min, long max) {
+    long r = PyLong_AsLong(value);
+    if ((r == -1) && PyErr_Occurred()) return -1;
+    if ((r<min) || (r>max)) {
+        PyErr_Format(PyExc_ValueError, "value out of range %ld..%ld", min, max);
+        return -1;
+    }
+    *v = r;
+    return 0;
+}   
+
+<<<struct_inttypes:
+static PyObject *
+struct_get_{type}(StructObject *self, void *closure)
+{{
+    return PyLong_FromLong(*(({type}_t*)((char*)self->data + (int)closure) ));
+}}
+
+static int
+struct_set_{type}(StructObject *self, PyObject *value, void *closure)
+{{
+    long v;
+    if (long_to_int(value, &v, {min}, {max})) return -1;
+    
+    *(({type}_t*)((char*)self->data + (int)closure) ) = v;
+    return 0;
+}}
+>>>
+
+static PyObject *
+struct_get_blob(StructObject *self, void *closure)
+{
+    StructObject *ret;
+    ret = (StructObject*)PyObject_New(StructObject, &Blob_Type);
+    if (ret) {
+        ret->owner = self->owner;
+        Py_INCREF(self->owner);
+        ret->data = self->data + (int)closure; // TODO: stash the size in there, too
+    }
+    return (PyObject*)ret;
+}
+
+static int
+struct_set_blob(StructObject *self, PyObject *value, void *closure)
+{
+    PyErr_SetString(PyExc_NotImplementedError, "setting this data type is not supported");
+    return -1;
+}
+
+
+
+
+<<<structs:
+
+static int
+pylv_{name}_init(StructObject *self, PyObject *args, PyObject *kwds) 
+{{
+
+    self->data = PyMem_Malloc(sizeof(lv_{name}));
+    if (!self->data) return -1;
+    
+    memset(self->data, 0, sizeof(lv_{name}));
+    self->owner = (PyObject *)self;
+
+    return 0;
+}}
+
+
+static PyGetSetDef pylv_{name}_getset[] = {{
+{getset}
+    {{NULL}}
+}};
+
+static PyTypeObject pylv_{name}_Type = {{
+    PyVarObject_HEAD_INIT(NULL, 0)
+    .tp_name = "lvgl.{name}",
+    .tp_doc = "lvgl {name}",
+    .tp_basicsize = sizeof(StructObject),
+    .tp_itemsize = 0,
+    .tp_flags = Py_TPFLAGS_DEFAULT | Py_TPFLAGS_BASETYPE,
+    .tp_new = PyType_GenericNew,
+    .tp_init = (initproc) pylv_{name}_init,
+    .tp_dealloc = (destructor) Struct_dealloc,
+    .tp_getset = pylv_{name}_getset,
+    .tp_repr = (reprfunc) Struct_repr
+
+}};
+
+>>>
+
 
 /****************************************************************
  * Custom method implementations                                *
@@ -379,6 +511,8 @@ static PyTypeObject pylv_{name}_Type = {{
 >>>
 
 
+
+
 /****************************************************************
  * Miscellaneous functions                                      *
  ****************************************************************/
@@ -518,10 +652,15 @@ PyInit_lvgl(void) {
     module = PyModule_Create(&lvglmodule);
     if (!module) goto error;
     
-    pylv_obj_Type.tp_repr = (reprfunc) Obj_repr;
+    pylv_obj_Type.tp_repr = (reprfunc) Obj_repr;   
     
 <<<objects:
     pylv_{name}_Type.tp_base = {base};
+    if (PyType_Ready(&pylv_{name}_Type) < 0) return NULL;
+>>>
+
+    if (PyType_Ready(&Blob_Type) < 0) return NULL;
+<<<structs:
     if (PyType_Ready(&pylv_{name}_Type) < 0) return NULL;
 >>>
 
@@ -529,6 +668,11 @@ PyInit_lvgl(void) {
 <<<objects:
     Py_INCREF(&pylv_{name}_Type);
     PyModule_AddObject(module, "{pyname}", (PyObject *) &pylv_{name}_Type); 
+>>>
+
+<<<structs:
+    Py_INCREF(&pylv_{name}_Type);
+    PyModule_AddObject(module, "{name}", (PyObject *) &pylv_{name}_Type); 
 >>>
 
     

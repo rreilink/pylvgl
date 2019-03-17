@@ -76,6 +76,17 @@ class CustomMethod(c_ast.FuncDef):
     def __init__(self, name):
         super().__init__(c_ast.Decl(name, [], [], [], c_ast.FuncDecl(c_ast.ParamList([]), None, None),None,None,None), None, None)
 
+class Struct:
+    '''
+    Representation of an Lvgl struct type for which to generate bindings
+    
+    To be overridden by language-specific classes
+
+    '''
+    def __init__(self, name, decls, bindingsgenerator):
+        self.name = name
+        self.decls = decls
+        self.bindingsgenerator = bindingsgenerator
 
 class Object:
     '''
@@ -174,6 +185,7 @@ class Object:
 class BindingsGenerator:
     templatefile = None
     objectclass = None
+    structclass = None
     outputfile = None
     sourcepath = 'lvgl'
     
@@ -195,6 +207,10 @@ class BindingsGenerator:
             ancestor = objects[object.ancestor.name] if object.ancestor else None
             objects[name] = self.objectclass(object, ancestor, self)
 
+        self.structs = structs = collections.OrderedDict()
+        for name, struct in self.parseresult.structs.items():
+            structs[name] = self.structclass(name, struct.decls, self)
+        
         
         self.customize()
         

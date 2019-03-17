@@ -27,7 +27,8 @@ def type_repr(arg):
     return f'{quals}{generate_c(arg)}{ptrs}'
 
 def stripstart(s, start):
-    assert s.startswith(start)
+    if not s.startswith(start):
+        raise ValueError(f'{s!r} does not start with {start!r}')
     return s[len(start):]
 
 
@@ -116,7 +117,10 @@ class LvglSourceParser:
                 
                 if isinstance(item.type, c_ast.TypeDecl) and isinstance(item.type.type, c_ast.Struct):
                     # typedef struct { ... } lv_struct_name_t;
-                    structs[item.type.declname] = item.type.type
+                    try:
+                        structs[stripstart(item.type.declname,'lv_')] = item.type.type
+                    except ValueError: # If name does not start with lv_
+                        pass
                     
                 elif (isinstance(item.type, c_ast.TypeDecl) and isinstance(item.type.type, c_ast.IdentifierType) and 
                         isinstance(previous_item, c_ast.Decl) and isinstance(previous_item.type, c_ast.Enum)):
