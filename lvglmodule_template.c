@@ -88,7 +88,7 @@ PyObject * pyobj_from_lv(lv_obj_t *obj) {
         Py_RETURN_NONE;
     }
     
-    pyobj = lv_obj_get_free_ptr(obj);
+    pyobj = *lv_obj_get_user_data(obj);
     
     if (pyobj) {
         Py_INCREF(pyobj); // increase reference count of returned object
@@ -108,112 +108,12 @@ PyObject * pyobj_from_lv(lv_obj_t *obj) {
         memset(pyobj, 0, tp->tp_basicsize);
         PyObject_Init((PyObject *)pyobj, tp);
         pyobj -> ref = obj;
-        lv_obj_set_free_ptr(obj, pyobj);
+        *lv_obj_get_user_data(obj) = pyobj;
     }
     
     return (PyObject *)pyobj;
 }
 
-
-
-/* Given an iterable of bytes, return a char** pointer which contains:
- *
- * - A ""-terminated char** table pointing to strings
- * - the data of those strings
- *
- * buildstringmap returns NULL and sets an exception when an error occurs.
- *
- * The returned buffer must be freed using PyMem_Free if it is no longer used
- */
-
-
-static const char **buildstringmap(PyObject *arg) {
-
-    PyObject *iterator = NULL;
-    PyObject *item;
-    PyObject *list = NULL;
-    char *data;
-    char **ptrs = 0;
-    char *str;
-    Py_ssize_t length;
-    
-    int nitems = 0, totalbytes = 0;
-    int error = 0;
-    
-    iterator =  PyObject_GetIter(arg);
-    if (!iterator) goto error;
-    
-    list = PyList_New(0);
-    if (!list) goto error;
-
-    while (!error && (item = PyIter_Next(iterator))) {
-
-
-        if (!PyBytes_Check(item)) {
-            PyErr_SetString(PyExc_ValueError, "items must be bytes objects");
-            error = 1;
-        } else {
-            totalbytes += PyBytes_GET_SIZE(item) + 1; // +1 for terminating \0
-            nitems ++;
-            if (PyList_Append(list, item) != 0) {
-                error = 1;
-            }
-        }
-
-        Py_DECREF(item);
-    }
-
-    Py_DECREF(iterator);
-    iterator = NULL;
-    
-    if (PyErr_Occurred()) goto error;
-    
-    // Add final empty string
-    item = PyBytes_FromString("");
-    if (!item) goto error;
-    totalbytes += 1;
-    nitems++;
-    error = PyList_Append(list, item);
-    Py_DECREF(item);
-    if (error) goto error;
-
-    // We now have a list of bytes object, and know we need totalbytes of data
-    // We additionally need (nitems) * sizeof (char *) for the pointers to the strings
-    ptrs = (char**) PyMem_Malloc(totalbytes + (nitems * sizeof(char *)));
-    if (!ptrs) goto error;
-    
-    data = (char*)&ptrs[nitems]; // points to first char after the char** list
-    
-    for(int i = 0; i<nitems; i++) {
-        if (PyBytes_AsStringAndSize(PyList_GetItem(list, i), &str, &length)!=0) goto error;
-        length += 1; // length including terminating \0
-        if (length > totalbytes) {
-            PyErr_SetString(PyExc_AssertionError, "length <= totalbytes");
-        }
-    
-        memcpy(data, str, length);
-        ptrs[i] = data;
-
-        data += length;
-        totalbytes -= length;
-    }
-
-    if (totalbytes) {
-        PyErr_SetString(PyExc_AssertionError, "totalbytes==0");
-        goto error;
-    }
-
-    Py_DECREF(list);
-    return (const char **)ptrs;
-    
-error:
-    PyMem_Free(ptrs);
-    Py_XDECREF(iterator);
-    Py_XDECREF(list);
-    
-    return NULL;
-    
-}
 
 
 /****************************************************************
@@ -264,206 +164,6 @@ error:
     Py_DECREF(enum_type);
     return NULL;
 
-}
-
-
-/****************************************************************
- * Font class                                                  *  
- ****************************************************************/
-
-static PyTypeObject Font_Type; // forward declaration of type
-
-typedef struct {
-    PyObject_HEAD
-    const lv_font_t *ref;
-} Font_Object;
-
-static PyObject*
-Font_repr(Font_Object *self) {
-    return PyUnicode_FromFormat("<lvgl.Font object at %p referencing %p>", self, self->ref);
-}
-
-static PyTypeObject Font_Type = {
-    PyVarObject_HEAD_INIT(NULL, 0)
-    .tp_name = "lvgl.Font",
-    .tp_basicsize = sizeof(Font_Object),
-    .tp_itemsize = 0,
-    .tp_flags = Py_TPFLAGS_DEFAULT,
-    //no .tp_new to prevent creation of new instaces from Python
-    .tp_repr = (reprfunc) Font_repr,
-};
-
-static PyObject* 
-Font_From_lv_font(const lv_font_t *font) {
-    Font_Object *ret;
-
-    ret = PyObject_New(Font_Object, &Font_Type);
-    if (ret) ret->ref = font;
-    return (PyObject *)ret;
-}
-
-/****************************************************************
- * Style class                                                  *  
- ****************************************************************/
-
-static PyTypeObject Style_Type; // forward declaration of type
-
-typedef struct {
-    PyObject_HEAD
-    lv_style_t *ref;
-} Style_Object;
-
-
-static PyObject *Style_data(Style_Object *self, PyObject *args) {
-    return PyMemoryView_FromMemory((void*)(self->ref), sizeof(*self->ref), PyBUF_WRITE);
-}
-
-static PyObject *Style_copy(Style_Object *self, PyObject *args) {
-    // Copy style
-    
-    Style_Object *ret = PyObject_New(Style_Object, &Style_Type);
-    if (!ret) return NULL;
-    
-    // This leaks memory (no PyMem_Free) but we have no way of knowing where the
-    // style is in use in lvgl. So to avoid crashes, better not free it is it may
-    // be in use.
-    ret->ref = PyMem_Malloc(sizeof(lv_style_t));
-    
-    if (!ret->ref) {
-        Py_DECREF(ret);
-        return NULL;
-    }
-    
-    memcpy(ret->ref, self->ref, sizeof(lv_style_t));
-    
-    return (PyObject *)ret;
-}
-
-static PyMemberDef Style_members[] = {
-    {NULL, 0, 0, 0, NULL}
-    
-};
-
-static PyObject *
-Style_get_int16(Style_Object *self, void *closure)
-{
-    return PyLong_FromLong(*((int16_t*)((char*)self->ref + (int)closure) ));
-}
-
-static int long_to_int(PyObject *value, long *v, long min, long max) {
-    long r = PyLong_AsLong(value);
-    if ((r == -1) && PyErr_Occurred()) return -1;
-    if ((r<min) || (r>max)) {
-        PyErr_Format(PyExc_ValueError, "value out of range %ld..%ld", min, max);
-        return -1;
-    }
-    *v = r;
-    return 0;
-}    
-
-static int
-Style_set_int16(Style_Object *self, PyObject *value, void *closure)
-{
-    long v;
-    if (long_to_int(value, &v, -32768, 32767)) return -1;
-    
-    *((int16_t*)((char*)self->ref + (int)closure) ) = v;
-    return 0;
-}
-
-static PyObject *
-Style_get_uint16(Style_Object *self, void *closure)
-{
-    return PyLong_FromLong(*((uint16_t*)((char*)self->ref + (int)closure) ));
-}
-
-static int
-Style_set_uint16(Style_Object *self, PyObject *value, void *closure)
-{
-    long v;
-    if (long_to_int(value, &v, 0, 65535)) return -1;
-    
-    *((uint16_t*)((char*)self->ref + (int)closure) ) = v;
-    return 0;
-}
-
-static PyObject *
-Style_get_uint8(Style_Object *self, void *closure)
-{
-    return PyLong_FromLong(*((uint8_t*)((char*)self->ref + (int)closure) ));
-}
-
-static int
-Style_set_uint8(Style_Object *self, PyObject *value, void *closure)
-{
-    long v;
-    if (long_to_int(value, &v, 0, 255)) return -1;
-    
-    *((uint8_t*)((char*)self->ref + (int)closure) ) = v;
-    return 0;
-}
-
-static PyObject *
-Style_get_font(Style_Object *self, void *closure) {
-    return Font_From_lv_font(self->ref->text.font);
-}
-
-
-static int
-Style_set_font(Style_Object *self, PyObject *value, void *closure)
-{
-    if (Py_TYPE(value) != &Font_Type) {
-        PyErr_Format(PyExc_TypeError, "lvgl.Style font attribute must be of type 'lvgl.Font', not '%.200s'", Py_TYPE(value)->tp_name);
-        return 1;
-    }
-    self->ref->text.font = ((Font_Object *)value)->ref;
-
-    return 0;
-}
-
-
-static PyGetSetDef Style_getsetters[] = {
-<<STYLE_GETSET>>
-    {"text_font", (getter) Style_get_font, (setter) Style_set_font, "text.font", NULL},
-    {NULL},
-};
-
-
-static PyMethodDef Style_methods[] = {
-    {"copy", (PyCFunction)Style_copy, METH_NOARGS, ""},
-    {"data", (PyCFunction)Style_data, METH_NOARGS, ""},
-    {NULL}  /* Sentinel */
-};
-
-static PyObject*
-Style_repr(Style_Object *self) {
-    return PyUnicode_FromFormat("<lvgl.Style object at %p referencing %p>", self, self->ref);
-}
-
-static PyTypeObject Style_Type = {
-    PyVarObject_HEAD_INIT(NULL, 0)
-    .tp_name = "lvgl.Style",
-    .tp_basicsize = sizeof(Style_Object),
-    .tp_itemsize = 0,
-    .tp_flags = Py_TPFLAGS_DEFAULT,
-    .tp_members = Style_members,
-    .tp_methods = Style_methods,
-    .tp_getset = Style_getsetters,
-    //no .tp_new to prevent creation of new instaces from Python
-    .tp_repr = (reprfunc) Style_repr,
-};
-
-static PyObject* 
-Style_From_lv_style(lv_style_t *style) {
-    Style_Object *ret;
-    if (!style) {
-        PyErr_SetString(PyExc_RuntimeError, "trying to create lvgl.Style from NULL pointer");
-        return NULL;
-    }
-    
-    ret = PyObject_New(Style_Object, &Style_Type);
-    if (ret) ret->ref = style;
-    return (PyObject *)ret;
 }
 
 
@@ -536,123 +236,6 @@ error:
     return NULL;
 }
 
-lv_res_t pylv_obj_signal_callback(lv_obj_t* obj, lv_signal_t signal, void *param) {
-    pylv_Obj *pyobj;
-    PyObject *handler;
-    PyObject *pyarg;
-    lv_res_t result;
-    lv_point_t point,drag_vect;
-    PyObject *dragging;
-
-    PyGILState_STATE gstate;
-
-    gstate = PyGILState_Ensure();
-    
-    pyobj = lv_obj_get_free_ptr(obj);
-    if (pyobj) {
-        result = pyobj->orig_c_signal_func(obj, signal, param);
-        
-        if (result == LV_RES_OK) {
-            handler = pyobj->signal_func;
-            if (handler) {
-                switch(signal) {
-                /* All signals that have an lv_indev_t * as argument */
-                case LV_SIGNAL_PRESSED:
-                case LV_SIGNAL_PRESSING:
-                case LV_SIGNAL_PRESS_LOST:
-                case LV_SIGNAL_RELEASED:
-                case LV_SIGNAL_LONG_PRESS:
-                case LV_SIGNAL_LONG_PRESS_REP:
-                case LV_SIGNAL_DRAG_BEGIN:
-                case LV_SIGNAL_DRAG_END:
-                    lv_indev_get_point(param, &point);
-                    dragging = lv_indev_is_dragging(param) ? Py_True : Py_False; // ref count is increased by Py_BuildValue "O"
-                    lv_indev_get_vect(param, &drag_vect);
-                    pyarg = Py_BuildValue("{s(ii)s(ii)sOs(ii)}", 
-                        "screenpos", (int) point.x, (int) point.y, 
-                        "objpos", (int) (point.x - obj->coords.x1), (int) (point.y - obj->coords.y1), 
-                        "dragging", dragging, 
-                        "dragvector", (int) drag_vect.x, (int) drag_vect.y);
-                    
-                    break;
-                /* Not implemented (yet), arg = None*/
-                case LV_SIGNAL_CLEANUP:
-                case LV_SIGNAL_CHILD_CHG:
-                case LV_SIGNAL_CORD_CHG:
-                case LV_SIGNAL_STYLE_CHG:
-                case LV_SIGNAL_REFR_EXT_SIZE:
-                case LV_SIGNAL_GET_TYPE:                    
-                case LV_SIGNAL_FOCUS:
-                case LV_SIGNAL_DEFOCUS:
-                case LV_SIGNAL_CONTROLL:
-                default:
-                    pyarg = Py_None;
-                    Py_INCREF(pyarg);
-                }
-                
-                // We are called from within lv_poll which will mean the lock is held
-                // Release it since we are allowed to call lv_ functions now
-                // (Would otherwise result in deadlock when lvgl calls are made from
-                // with the signal handler)
-                if (unlock) unlock(unlock_arg);
-                PyObject_CallFunction(handler, "iO", (int) signal, pyarg);
-                
-                Py_DECREF(pyarg);
-                if (PyErr_Occurred()) PyErr_Print();
-                
-                PyGILState_Release(gstate);
-                if (lock) lock(lock_arg);
-
-                return LV_RES_OK;
-
-            }
-
-        }
-    }
-    
-    PyGILState_Release(gstate);
-    return LV_RES_OK;
-}
-
-
-static PyObject*
-pylv_obj_get_signal_func(pylv_Obj *self, PyObject *args, PyObject *kwds)
-{
-    static char *kwlist[] = {NULL};
-    if (!PyArg_ParseTupleAndKeywords(args, kwds, "", kwlist)) return NULL;   
-    
-    PyObject *signal_func = self->signal_func;
-    if (!signal_func) Py_RETURN_NONE;
-
-    Py_INCREF(signal_func);
-    return signal_func;
-}
-
-static PyObject *
-pylv_obj_set_signal_func(pylv_Ddlist *self, PyObject *args, PyObject *kwds)
-{
-    static char *kwlist[] = {"signal_func", NULL};
-    PyObject *signal_func, *tmp;
-    if (!PyArg_ParseTupleAndKeywords(args, kwds, "O", kwlist , &signal_func)) return NULL;
-    
-    tmp = self->signal_func;
-    if (signal_func == Py_None) {
-        self->signal_func = NULL;
-    } else {
-        self->signal_func = signal_func;
-        Py_INCREF(signal_func);
-        
-        LVGL_LOCK
-        if (!self->orig_c_signal_func) {
-            self->orig_c_signal_func = lv_obj_get_signal_func(self->ref);
-        }
-        lv_obj_set_signal_func(self->ref, pylv_obj_signal_callback);
-        LVGL_UNLOCK
-    }
-    Py_XDECREF(tmp); // Old action (tmp) could be NULL
-
-    Py_RETURN_NONE;
-}
 
 
 static PyObject*
@@ -688,29 +271,7 @@ pylv_label_get_letter_on(pylv_Label *self, PyObject *args, PyObject *kwds)
     return Py_BuildValue("i", index);
 }
 
-static PyObject*
-pylv_btnm_set_map(pylv_Btnm *self, PyObject *args, PyObject *kwds)
-{
-    static char *kwlist[] = {"map", NULL};
-    PyObject *map;
-    const char **cmap;
-    
-    if (!PyArg_ParseTupleAndKeywords(args, kwds, "O", kwlist , &map)) return NULL;   
-       
-    cmap = buildstringmap(map);
-    if (!cmap) return NULL;
-    
-    LVGL_LOCK
-    lv_btnm_set_map(self->ref, cmap);
-    LVGL_UNLOCK
 
-    // Free the old map (if any) and store the new one to be able to free it later
-    if (self->map) PyMem_Free(self->map);
-    self->map = cmap;
-
-    Py_RETURN_NONE;
-    
-}
 
 
 static PyObject*
@@ -766,50 +327,6 @@ pylv_list_focus(pylv_List *self, PyObject *args, PyObject *kwds)
 
 
 
-<<BTN_CALLBACKS>>
-
-static PyObject *
-pylv_btn_get_action(pylv_Btn *self, PyObject *args, PyObject *kwds)
-{
-    static char *kwlist[] = {"type", NULL};
-    int type;
-    if (!PyArg_ParseTupleAndKeywords(args, kwds, "i", kwlist, &type)) return NULL;   
-    if (type<0 || type>= LV_BTN_ACTION_NUM) {
-        return PyErr_Format(PyExc_ValueError, "action type should be 0<=type<%d, got %d", LV_BTN_ACTION_NUM, type);
-    }
-    PyObject *action = self->actions[type];
-    if (!action) Py_RETURN_NONE;
-
-    Py_INCREF(action);
-    return action;
-}
-
-static PyObject *
-pylv_btn_set_action(pylv_Btn *self, PyObject *args, PyObject *kwds)
-{
-    static char *kwlist[] = {"type", "action", NULL};
-    PyObject *action, *tmp;
-    int type;
-    if (!PyArg_ParseTupleAndKeywords(args, kwds, "iO", kwlist , &type, &action)) return NULL;
-    if (type<0 || type>= LV_BTN_ACTION_NUM) {
-        return PyErr_Format(PyExc_ValueError, "action type should be 0<=type<%d, got %d", LV_BTN_ACTION_NUM, type);
-    }
-        
-    tmp = self->actions[type];
-    if (action == Py_None) {
-        lv_btn_set_action(self->ref, type, NULL);
-        self->actions[type] = NULL;
-    } else {
-        self->actions[type] = action;
-        Py_INCREF(action);
-        lv_btn_set_action(self->ref, type, pylv_btn_action_callbacks[type]);
-    }
-    Py_XDECREF(tmp); // Old action (tmp) could be NULL
-
-    Py_RETURN_NONE;
-}
-
-
 /****************************************************************
  * Methods and object definitions                               *
  ****************************************************************/
@@ -835,7 +352,7 @@ pylv_{name}_init(pylv_{pyname} *self, PyObject *args, PyObject *kwds)
     
     LVGL_LOCK
     self->ref = lv_{name}_create(parent ? parent->ref : NULL, copy ? copy->ref : NULL);
-    lv_obj_set_free_ptr(self->ref, self);
+    *lv_obj_get_user_data(self->ref) = self;
     LVGL_UNLOCK
 
     return 0;
@@ -898,57 +415,45 @@ poll(PyObject *self, PyObject *args) {
     Py_RETURN_NONE;
 }
 
-static PyObject *
-report_style_mod(PyObject *self, PyObject *args, PyObject *kwds) {
-    static char *kwlist[] = {"style", NULL};
-    Style_Object *style = NULL;
-    
-    if (!PyArg_ParseTupleAndKeywords(args, kwds, "|O!", kwlist, &Style_Type, &style)) {
-        return NULL;
-    }
-    
-    LVGL_LOCK
-    lv_obj_report_style_mod(style ? style->ref: NULL);
-    LVGL_UNLOCK
-    
-    Py_RETURN_NONE;
-}
 
+/* TODO: all the framebuffer display driver stuff could be separated (i.e. do not default to it but allow user to register custom frame buffer driver) */
 
-char framebuffer[LV_HOR_RES * LV_VER_RES * 2];
-int redraw = 0;
+static lv_color_t disp_buf1[1024 * 10];
+lv_disp_buf_t disp_buffer;
+char framebuffer[LV_HOR_RES_MAX * LV_VER_RES_MAX * 2];
 
 
 /* disp_flush should copy from the VDB (virtual display buffer to the screen.
  * In our case, we copy to the framebuffer
  */
-static void disp_flush(int32_t x1, int32_t y1, int32_t x2, int32_t y2, const lv_color_t * color_p) {
 
-    char *dest = framebuffer + ((y1)*LV_HOR_RES + x1) * 2;
+ 
+static void disp_flush(lv_disp_drv_t * disp_drv, const lv_area_t * area, lv_color_t * color_p) {
+    char *dest = framebuffer + ((area->y1)*LV_HOR_RES_MAX + area->x1) * 2;
     char *src = (char *) color_p;
-    
-    for(int32_t y = y1; y<=y2; y++) {
-        memcpy(dest, src, 2*(x2-x1+1));
-        src += 2*(x2-x1+1);
-        dest += 2*LV_HOR_RES;
+
+    for(int32_t y = area->y1; y<=area->y2; y++) {
+        memcpy(dest, src, 2*(area->x2-area->x1+1));
+        src += 2*(area->x2-area->x1+1);
+        dest += 2*LV_HOR_RES_MAX;
     }
-    redraw++;
     
-    lv_flush_ready();
+    lv_disp_flush_ready(disp_drv);
 }
 
-static lv_disp_drv_t diplay_driver = {0};
+static lv_disp_drv_t display_driver = {0};
 static lv_indev_drv_t indev_driver = {0};
 static int indev_driver_registered = 0;
 static int indev_x, indev_y, indev_state=0;
 
-static bool indev_read(lv_indev_data_t *data) {
+static bool indev_read(struct _lv_indev_drv_t * indev_drv, lv_indev_data_t *data) {
     data->point.x = indev_x;
     data->point.y = indev_y;
     data->state = indev_state;
 
     return false;
 }
+
 
 static PyObject *
 send_mouse_event(PyObject *self, PyObject *args, PyObject *kwds) {
@@ -962,7 +467,7 @@ send_mouse_event(PyObject *self, PyObject *args, PyObject *kwds) {
     if (!indev_driver_registered) {
         lv_indev_drv_init(&indev_driver);
         indev_driver.type = LV_INDEV_TYPE_POINTER;
-        indev_driver.read = indev_read;
+        indev_driver.read_cb = indev_read;
         lv_indev_drv_register(&indev_driver);
         indev_driver_registered = 1;
     }
@@ -984,7 +489,7 @@ static PyMethodDef lvglMethods[] = {
     {"scr_load", (PyCFunction)pylv_scr_load, METH_VARARGS | METH_KEYWORDS, NULL},
     {"poll", poll, METH_NOARGS, NULL},
     {"send_mouse_event", (PyCFunction)send_mouse_event, METH_VARARGS | METH_KEYWORDS, NULL},
-    {"report_style_mod", (PyCFunction)report_style_mod, METH_VARARGS | METH_KEYWORDS, NULL},
+//    {"report_style_mod", (PyCFunction)report_style_mod, METH_VARARGS | METH_KEYWORDS, NULL},
     {NULL, NULL, 0, NULL}        /* Sentinel */
 };
 
@@ -1013,10 +518,6 @@ PyInit_lvgl(void) {
     module = PyModule_Create(&lvglmodule);
     if (!module) goto error;
     
-    if (PyType_Ready(&Font_Type) < 0) return NULL;
-
-    if (PyType_Ready(&Style_Type) < 0) return NULL;
-    
     pylv_obj_Type.tp_repr = (reprfunc) Obj_repr;
     
 <<<objects:
@@ -1024,8 +525,6 @@ PyInit_lvgl(void) {
     if (PyType_Ready(&pylv_{name}_Type) < 0) return NULL;
 >>>
 
-    Py_INCREF(&Style_Type);
-    PyModule_AddObject(module, "Style", (PyObject *) &Style_Type); 
 
 <<<objects:
     Py_INCREF(&pylv_{name}_Type);
@@ -1034,10 +533,6 @@ PyInit_lvgl(void) {
 
     
 <<ENUM_ASSIGNMENTS>>
-    
-<<STYLE_ASSIGNMENTS>>
-
-<<FONT_ASSIGNMENTS>>
 
 <<SYMBOL_ASSIGNMENTS>>
 
@@ -1046,15 +541,23 @@ PyInit_lvgl(void) {
     typesdict = Py_BuildValue("{<<<objects:sO>>>}"<<<objects:,
         "lv_{name}", &pylv_{name}_Type>>>);
     
-    PyModule_AddObject(module, "framebuffer", PyMemoryView_FromMemory(framebuffer, LV_HOR_RES * LV_VER_RES * 2, PyBUF_READ));
-    PyModule_AddObject(module, "HOR_RES", PyLong_FromLong(LV_HOR_RES));
-    PyModule_AddObject(module, "VER_RES", PyLong_FromLong(LV_VER_RES));
+    PyModule_AddObject(module, "framebuffer", PyMemoryView_FromMemory(framebuffer, LV_HOR_RES_MAX * LV_VER_RES_MAX * 2, PyBUF_READ));
+    PyModule_AddObject(module, "HOR_RES", PyLong_FromLong(LV_HOR_RES_MAX));
+    PyModule_AddObject(module, "VER_RES", PyLong_FromLong(LV_VER_RES_MAX));
 
-    diplay_driver.disp_flush = disp_flush;
+
+    lv_disp_drv_init(&display_driver);
+    display_driver.hor_res = LV_HOR_RES_MAX;
+    display_driver.ver_res = LV_VER_RES_MAX;
+    
+    display_driver.flush_cb = disp_flush;
+    
+    lv_disp_buf_init(&disp_buffer,disp_buf1, NULL, sizeof(disp_buf1)/sizeof(lv_color_t));
+    display_driver.buffer = &disp_buffer;
 
     lv_init();
     
-    lv_disp_drv_register(&diplay_driver);
+    lv_disp_drv_register(&display_driver);
 
     return module;
     

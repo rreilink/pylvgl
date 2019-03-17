@@ -10,13 +10,10 @@ skipfunctions = {
     'lv_obj_del',
     'lv_obj_clean',
     
-    # free_ptr is used to store reference to Python objects, don't tamper with that!
-    'lv_obj_set_free_ptr',
-    'lv_obj_get_free_ptr',
+    # user_data is used to store reference to Python objects, don't tamper with that!
+    'lv_obj_get_user_data',
     
     # Just use Python attributes for custom properties of objects
-    'lv_obj_set_free_num',
-    'lv_obj_get_free_num',
     'lv_obj_allocate_ext_attr',
     'lv_obj_get_ext_attr',
     
@@ -25,10 +22,6 @@ skipfunctions = {
     'lv_obj_get_child',
     'lv_obj_get_child_back',
     
-    # Not compatible since it is like a 'class method' (it does not have 
-    # lv_obj_t* as first argument). Implemented as lvgl.report_style_mod
-#    'lv_obj_report_style_mod',
-    
 }
 
 
@@ -36,7 +29,6 @@ class PythonObject(Object):
         
     TYPECONV = {
         'lv_obj_t*': ('O!', 'pylv_Obj *'),     # special case: conversion from/to Python object
-        'lv_style_t*': ('O!', 'Style_Object *'), # special case: conversion from/to Python Style object
         'bool':      ('p', 'int'),
         'char':      ('c', 'char'),
         'uint8_t':   ('b', 'unsigned char'),
@@ -131,10 +123,6 @@ py{method.decl.name}(pylv_Obj *self, PyObject *args, PyObject *kwds)
             if ctype == 'pylv_Obj *' : # Object, convert from Python
                 crefvarlist += f', &pylv_obj_Type, &{name}'
                 cvarlist += f', {name}->ref'
-            
-            elif ctype == 'Style_Object *': # Style object
-                crefvarlist += f', &Style_Type, &{name}'
-                cvarlist += f', {name}->ref'
                 
             else:
                 crefvarlist += f', &{name}'
@@ -155,9 +143,6 @@ py{method.decl.name}(pylv_Obj *self, PyObject *args, PyObject *kwds)
     
     return retobj;
 '''
-    
-        elif resctype == 'Style_Object *':
-            code += f'    return Style_From_lv_style({callcode});\n'
         
         elif resctype is None:
             code += f'''
@@ -312,12 +297,9 @@ class PythonBindingsGenerator(BindingsGenerator):
         
         
         objects = self.objects
-        objects['btnm'].customstructfields.append('const char **map;')
-        objects['obj'].customstructfields.extend(['PyObject_HEAD', 'lv_obj_t *ref;', 'PyObject *signal_func;', 'lv_signal_func_t orig_c_signal_func;'])
-        objects['btn'].customstructfields.append(f'PyObject *actions[LV_BTN_ACTION_NUM];')
+        objects['obj'].customstructfields.extend(['PyObject_HEAD', 'lv_obj_t *ref;', 'PyObject *event;', 'lv_event_cb_t orig_c_event_cb;'])
 
-
-        for custom in ('lv_obj_get_children', 'lv_obj_get_signal_func', 'lv_obj_set_signal_func', 'lv_label_get_letter_pos', 'lv_label_get_letter_on', 'lv_btnm_set_map', 'lv_list_add', 'lv_btn_set_action', 'lv_btn_get_action','lv_obj_get_type', 'lv_list_focus'):
+        for custom in ('lv_obj_get_children', 'lv_label_get_letter_pos', 'lv_label_get_letter_on', 'lv_list_add' ,'lv_obj_get_type', 'lv_list_focus'):
             
             obj, method = re.match('lv_([A-Za-z0-9]+)_(\w+)$', custom).groups()
             objects[obj].methods[method] = CustomMethod(custom)
@@ -357,20 +339,7 @@ class PythonBindingsGenerator(BindingsGenerator):
             for dtype, name in flatten_struct(self.parseresult.structs['lv_style_t'])
             if t_types[self.deref_typedef(dtype)] is not None
             )
-    def get_BTN_CALLBACKS(self):
-        # Button callback handlers
-        ret = ''
-        
-        btncallbacknames = []
-        for i, (name, value) in enumerate(list(self.parseresult.enums['BTN_ACTION'].items())[:-1]): # last is LV_BTN_ACTION_NUM
 
-            actionname = 'action_' + name.lower()
-            ret += self.objects['btn'].build_actioncallbackcode(actionname, f'actions[{i}]')
-            btncallbacknames.append(f'pylv_btn_{actionname}_callback')
-            
-        ret += f'static lv_action_t pylv_btn_action_callbacks[LV_BTN_ACTION_NUM] = {{{", ".join(btncallbacknames)}}};'
-        return ret
-        
         
     def get_ENUM_ASSIGNMENTS(self):
         ret = ''    
@@ -379,20 +348,7 @@ class PythonBindingsGenerator(BindingsGenerator):
             items = ''.join(f', "{name}", {value}' for name, value in enum.items())
             ret += f'    PyModule_AddObject(module, "{enumname}", build_enum("{enumname}"{items}, NULL));\n'
         return ret
-    def get_STYLE_ASSIGNMENTS(self):
 
-        return ''.join(
-            f'    PyModule_AddObject(module, "{stripstart(decl.declname, "lv_")}",Style_From_lv_style(&{decl.declname}));\n'
-            for decl in self.parseresult.declarations.values()
-            if ' '.join(decl.type.names) == 'lv_style_t'
-            )
-
-    def get_FONT_ASSIGNMENTS(self):
-        return ''.join(
-            f'    PyModule_AddObject(module, "{stripstart(decl.declname, "lv_")}", Font_From_lv_font(&{decl.declname}));\n'
-            for decl in self.parseresult.declarations.values()
-            if ' '.join(decl.type.names) == 'lv_font_t'
-            )
     def get_SYMBOL_ASSIGNMENTS(self):
         return ''.join(
             f'    PyModule_AddStringMacro(module, {name});\n'

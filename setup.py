@@ -13,7 +13,8 @@ for path in 'lv_core', 'lv_draw', 'lv_hal', 'lv_misc', 'lv_objx', 'lv_themes', '
     sources.extend(glob.glob('lvgl/'+ path + '/*.c'))
 
 module1 = Extension('lvgl',
-    sources = sources
+    sources = sources,
+    extra_compile_args = ["-g"]
     )
 
 dist = setup (name = 'lvgl',
