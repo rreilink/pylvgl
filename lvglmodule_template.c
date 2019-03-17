@@ -47,6 +47,10 @@ PyObject *typesdict = NULL;
 static PyTypeObject pylv_{name}_Type;
 >>>
 
+<<<allstructs:
+static PyTypeObject pylv_{name}_Type;
+>>>
+
 /****************************************************************
  * Helper functons                                              *  
  ****************************************************************/
@@ -220,6 +224,7 @@ static int long_to_int(PyObject *value, long *v, long min, long max) {
     return 0;
 }   
 
+/* struct member getter/setter for [u]int(8|16|32)_t */
 <<<struct_inttypes:
 static PyObject *
 struct_get_{type}(StructObject *self, void *closure)
@@ -238,6 +243,42 @@ struct_set_{type}(StructObject *self, PyObject *value, void *closure)
 }}
 >>>
 
+/* struct member getter/setter for type 'struct' for sub-structs and unions */
+typedef struct {
+  PyTypeObject *type;
+  size_t offset_from_base;
+  size_t size;
+} struct_closure_t;
+
+static PyObject *
+struct_get_struct(StructObject *self, void *closure) {
+    StructObject *ret;
+    
+    ret = (StructObject*)PyObject_New(StructObject, ((struct_closure_t*)closure)->type);
+    if (ret) {
+        ret->owner = self->owner;
+        Py_INCREF(self->owner);
+        ret->data = self->data;
+    }
+    return (PyObject*)ret;
+
+}
+
+static int
+struct_set_struct(StructObject *self, PyObject *value, void *closure_voidp) {
+    struct_closure_t *closure = closure_voidp; // cast to struct_closure_t for convenience
+    
+    int isinstance = PyObject_IsInstance(value, (PyObject *)closure->type);
+    if (isinstance == -1) return -1; // error
+    if (!isinstance) {
+        return PyErr_Format(PyExc_TypeError, "value should be an instance of '%s'", closure->type->tp_name);
+    }
+    memcpy(self->data + closure->offset_from_base, ((StructObject *)value)->data + closure->offset_from_base, closure->size);
+    return 0;
+}
+
+
+/* struct member getters/setter for type 'blob' for unknown data */
 static PyObject *
 struct_get_blob(StructObject *self, void *closure)
 {
@@ -276,7 +317,6 @@ pylv_{name}_init(StructObject *self, PyObject *args, PyObject *kwds)
     return 0;
 }}
 
-
 static PyGetSetDef pylv_{name}_getset[] = {{
 {getset}
     {{NULL}}
@@ -295,6 +335,28 @@ static PyTypeObject pylv_{name}_Type = {{
     .tp_getset = pylv_{name}_getset,
     .tp_repr = (reprfunc) Struct_repr
 
+}};
+
+>>>
+
+<<<substructs:
+
+static PyGetSetDef pylv_{name}_getset[] = {{
+{getset}
+    {{NULL}}
+}};
+
+static PyTypeObject pylv_{name}_Type = {{
+    PyVarObject_HEAD_INIT(NULL, 0)
+    .tp_name = "lvgl.{name}",
+    .tp_doc = "lvgl {name}",
+    .tp_basicsize = sizeof(StructObject),
+    .tp_itemsize = 0,
+    .tp_flags = Py_TPFLAGS_DEFAULT | Py_TPFLAGS_BASETYPE,
+    .tp_new = NULL, // sub structs cannot be instantiated
+    .tp_dealloc = (destructor) Struct_dealloc,
+    .tp_getset = pylv_{name}_getset,
+    .tp_repr = (reprfunc) Struct_repr
 }};
 
 >>>
@@ -660,7 +722,7 @@ PyInit_lvgl(void) {
 >>>
 
     if (PyType_Ready(&Blob_Type) < 0) return NULL;
-<<<structs:
+<<<allstructs:
     if (PyType_Ready(&pylv_{name}_Type) < 0) return NULL;
 >>>
 

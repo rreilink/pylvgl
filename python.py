@@ -302,31 +302,72 @@ class PythonStruct(Struct):
 
     
     }
-
+    
+    def __init__(self, *args, basename=None, subpath='', **kwargs):
+        super().__init__(*args, **kwargs)
+        
+        # in case of sub structs, basename refers to the name of the original c type
+        # and subpath refers to the path from the original c type to this struct
+        # e.g. name = 'style_t_body_border', basename='style_t', subpath='body.border.'
+        self.basename = basename or self.name
+        self.subpath = subpath
+    
+    def get_flattened_decls(self):
+        '''
+        In case of a union { struct { ... } }, that struct can have no name,
+        and its members are to be regarded as members of the union for the
+        bindings. This generator function yields the 'normal' self.decls,
+        combined with the decls of inner structs that are unnamed.
+        '''
+        for decl in self.decls:
+            if decl.name is None:
+                yield from decl.type.decls
+            else:
+                yield decl
+    
+    def get_substructs(self):
+        '''
+        yield the PythonStruct's for all members of this struct that are again structs.
+        
+        This is done recursively
+        '''
+        for decl in self.get_flattened_decls():
+            if isinstance(decl.type.type, (c_ast.Struct, c_ast.Union)):
+                substruct = PythonStruct(self.name + '_' + decl.name, decl.type.type, self.bindingsgenerator, basename=self.basename, subpath=self.subpath + decl.name + '.')
+                yield substruct
+                yield from substruct.get_substructs()
 
     @property
     def getset(self):
+   
+        
         code = ''
-        for decl in self.decls:
-            typestr = self.bindingsgenerator.deref_typedef(type_repr(decl.type))
-            if decl.bitsize is None:
-                try:
-                    getter, setter = self.TYPES[typestr]
-                except KeyError:
-                    print(typestr)
-                    getter, setter = 'struct_get_blob', 'struct_set_blob'
+        for decl in self.get_flattened_decls():
+            assert decl.name
+            offsetcode = f'offsetof(lv_{self.basename}, {self.subpath}{decl.name})'
+            
+            if isinstance(decl.type.type, (c_ast.Struct, c_ast.Union)):
+                getter, setter = 'struct_get_struct', 'struct_set_struct'
+                # the closure is a struct of PyTypObject*, offset (w.r.t. base type), size (in bytes)
+                closure = f'& ((struct_closure_t){{ &pylv_{self.name}_{decl.name}_Type, {offsetcode}, sizeof(((lv_{self.basename} *)0)->{self.subpath}{decl.name})}})'
+            else:
+                typestr = self.bindingsgenerator.deref_typedef(type_repr(decl.type))
+                if decl.bitsize is None:
+                    try:
+                        getter, setter = self.TYPES[typestr]
+                    except KeyError:
+                        print(typestr)
+                        getter, setter = 'struct_get_blob', 'struct_set_blob'
+                        
+                    closure = f'(void*){offsetcode}'
                     
-                closure = f'(void*)offsetof(lv_{self.name}, {decl.name})'
-                
-            else: # bit fields unsupported so far
-                getter, setter, closure = 'NULL', 'NULL', 'NULL'
+                else: # bit fields unsupported so far
+                    getter, setter, closure = 'NULL', 'NULL', 'NULL'
             
             typedoc = generate_c(decl.type).replace('\n', ' ')
             code += f'    {{"{decl.name}", (getter) {getter}, (setter) {setter}, "{typedoc} {decl.name}", {closure}}},\n'
             
         return code
-#
-#    {"y", (getter) struct_get_int16, (setter) struct_set_int16, "y", (void*)offsetof(lv_point_t, y)},
 
 
 class PythonBindingsGenerator(BindingsGenerator):
@@ -336,6 +377,14 @@ class PythonBindingsGenerator(BindingsGenerator):
     outputfile = 'lvglmodule.c'
 
     def customize(self):
+        # Create self.substructs , which is a collection of derived structs (i.e. structs within structs like lv_style_t_body_border)
+        self.substructs = collections.OrderedDict()
+        for struct in self.structs.values():
+            self.substructs.update((sub.name, sub) for sub in struct.get_substructs())
+            
+        # self.allstructs = self.structs + self.substructs
+        self.allstructs = self.structs.copy()
+        self.allstructs.update(self.substructs)
         
         
         objects = self.objects

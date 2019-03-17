@@ -115,7 +115,7 @@ class LvglSourceParser:
                 # to be treated as basic types by the bindings generators
                 typedefs[item.name] = item
                 
-                if isinstance(item.type, c_ast.TypeDecl) and isinstance(item.type.type, c_ast.Struct):
+                if isinstance(item.type, c_ast.TypeDecl) and (isinstance(item.type.type, c_ast.Struct) or isinstance(item.type.type, c_ast.Union)):
                     # typedef struct { ... } lv_struct_name_t;
                     try:
                         structs[stripstart(item.type.declname,'lv_')] = item.type.type
