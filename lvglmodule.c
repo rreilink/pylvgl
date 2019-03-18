@@ -528,12 +528,13 @@ error:
 typedef struct {
     PyObject_HEAD
     void *data;
+    size_t size;
     PyObject *owner; // NULL = reference to global C data, self=allocated @ init, other object=sharing from that object; decref when we are deallocated
 } StructObject;
 
 static PyObject*
 Struct_repr(StructObject *self) {
-    return PyUnicode_FromFormat("<%s struct at %p data = %p owner = %p>", Py_TYPE(self)->tp_name, self, self->data, self->owner);
+    return PyUnicode_FromFormat("<%s struct at %p data = %p (%d bytes) owner = %p>", Py_TYPE(self)->tp_name, self, self->data, self->size, self->owner);
 }
 
 static void
@@ -547,6 +548,18 @@ Struct_dealloc(StructObject *self)
     Py_TYPE(self)->tp_free((PyObject *) self);
 }
 
+// Provide a read-write buffer to the binary data in this struct
+static int Struct_getbuffer(PyObject *exporter, Py_buffer *view, int flags) {
+    return PyBuffer_FillInfo(view, exporter, ((StructObject*)exporter)->data, ((StructObject*)exporter)->size, 0, flags);
+}
+
+static PyBufferProcs Struct_bufferprocs = {
+    (getbufferproc)Struct_getbuffer,
+    NULL,
+};
+
+
+
 // Struct members whose type is unsupported, get / set a 'blob', which stores
 // a reference to the data, which can be copied but not accessed otherwise
 
@@ -559,7 +572,8 @@ static PyTypeObject Blob_Type = {
     .tp_flags = Py_TPFLAGS_DEFAULT | Py_TPFLAGS_BASETYPE,
     .tp_new = NULL, // cannot be instantiated
     .tp_repr = (reprfunc) Struct_repr,
-    .tp_dealloc = (destructor) Struct_dealloc
+    .tp_dealloc = (destructor) Struct_dealloc,
+    .tp_as_buffer = &Struct_bufferprocs
 };
 
 
@@ -677,59 +691,40 @@ struct_set_int32(StructObject *self, PyObject *value, void *closure)
 /* struct member getter/setter for type 'struct' for sub-structs and unions */
 typedef struct {
   PyTypeObject *type;
-  size_t offset_from_base;
+  size_t offset;
   size_t size;
 } struct_closure_t;
 
 static PyObject *
-struct_get_struct(StructObject *self, void *closure) {
-    StructObject *ret;
-    
-    ret = (StructObject*)PyObject_New(StructObject, ((struct_closure_t*)closure)->type);
+struct_get_struct(StructObject *self, struct_closure_t *closure) {
+    StructObject *ret;    
+    ret = (StructObject*)PyObject_New(StructObject, closure->type);
     if (ret) {
         ret->owner = self->owner;
         Py_INCREF(self->owner);
-        ret->data = self->data;
+        ret->data = self->data + closure->offset;
+        ret->size = closure->size;
     }
     return (PyObject*)ret;
 
 }
 
 static int
-struct_set_struct(StructObject *self, PyObject *value, void *closure_voidp) {
-    struct_closure_t *closure = closure_voidp; // cast to struct_closure_t for convenience
-    
+struct_set_struct(StructObject *self, PyObject *value, struct_closure_t *closure) {
     int isinstance = PyObject_IsInstance(value, (PyObject *)closure->type);
     if (isinstance == -1) return -1; // error
     if (!isinstance) {
-        return PyErr_Format(PyExc_TypeError, "value should be an instance of '%s'", closure->type->tp_name);
+        PyErr_Format(PyExc_TypeError, "value should be an instance of '%s'", closure->type->tp_name);
+        return -1;
     }
-    memcpy(self->data + closure->offset_from_base, ((StructObject *)value)->data + closure->offset_from_base, closure->size);
+    if(closure->size != ((StructObject *)value)->size) {
+        // Should only happen in case of Blob type; but just check always to be sure
+        PyErr_SetString(PyExc_ValueError, "data size mismatch");
+        return -1;
+    }
+    memcpy(self->data + closure->offset, ((StructObject *)value)->data, closure->size);
     return 0;
 }
-
-
-/* struct member getters/setter for type 'blob' for unknown data */
-static PyObject *
-struct_get_blob(StructObject *self, void *closure)
-{
-    StructObject *ret;
-    ret = (StructObject*)PyObject_New(StructObject, &Blob_Type);
-    if (ret) {
-        ret->owner = self->owner;
-        Py_INCREF(self->owner);
-        ret->data = self->data + (int)closure; // TODO: stash the size in there, too
-    }
-    return (PyObject*)ret;
-}
-
-static int
-struct_set_blob(StructObject *self, PyObject *value, void *closure)
-{
-    PyErr_SetString(PyExc_NotImplementedError, "setting this data type is not supported");
-    return -1;
-}
-
 
 
 
@@ -738,11 +733,11 @@ struct_set_blob(StructObject *self, PyObject *value, void *closure)
 static int
 pylv_mem_monitor_t_init(StructObject *self, PyObject *args, PyObject *kwds) 
 {
-
-    self->data = PyMem_Malloc(sizeof(lv_mem_monitor_t));
+    self->size = sizeof(lv_mem_monitor_t);
+    self->data = PyMem_Malloc(self->size);
     if (!self->data) return -1;
     
-    memset(self->data, 0, sizeof(lv_mem_monitor_t));
+    memset(self->data, 0, self->size);
     self->owner = (PyObject *)self;
 
     return 0;
@@ -756,9 +751,9 @@ static PyGetSetDef pylv_mem_monitor_t_getset[] = {
     {"used_cnt", (getter) struct_get_uint32, (setter) struct_set_uint32, "uint32_t used_cnt", (void*)offsetof(lv_mem_monitor_t, used_cnt)},
     {"used_pct", (getter) struct_get_uint8, (setter) struct_set_uint8, "uint8_t used_pct", (void*)offsetof(lv_mem_monitor_t, used_pct)},
     {"frag_pct", (getter) struct_get_uint8, (setter) struct_set_uint8, "uint8_t frag_pct", (void*)offsetof(lv_mem_monitor_t, frag_pct)},
-
     {NULL}
 };
+
 
 static PyTypeObject pylv_mem_monitor_t_Type = {
     PyVarObject_HEAD_INIT(NULL, 0)
@@ -771,8 +766,8 @@ static PyTypeObject pylv_mem_monitor_t_Type = {
     .tp_init = (initproc) pylv_mem_monitor_t_init,
     .tp_dealloc = (destructor) Struct_dealloc,
     .tp_getset = pylv_mem_monitor_t_getset,
-    .tp_repr = (reprfunc) Struct_repr
-
+    .tp_repr = (reprfunc) Struct_repr,
+    .tp_as_buffer = &Struct_bufferprocs
 };
 
 
@@ -780,11 +775,11 @@ static PyTypeObject pylv_mem_monitor_t_Type = {
 static int
 pylv_ll_t_init(StructObject *self, PyObject *args, PyObject *kwds) 
 {
-
-    self->data = PyMem_Malloc(sizeof(lv_ll_t));
+    self->size = sizeof(lv_ll_t);
+    self->data = PyMem_Malloc(self->size);
     if (!self->data) return -1;
     
-    memset(self->data, 0, sizeof(lv_ll_t));
+    memset(self->data, 0, self->size);
     self->owner = (PyObject *)self;
 
     return 0;
@@ -792,11 +787,11 @@ pylv_ll_t_init(StructObject *self, PyObject *args, PyObject *kwds)
 
 static PyGetSetDef pylv_ll_t_getset[] = {
     {"n_size", (getter) struct_get_uint32, (setter) struct_set_uint32, "uint32_t n_size", (void*)offsetof(lv_ll_t, n_size)},
-    {"head", (getter) struct_get_blob, (setter) struct_set_blob, "lv_ll_node_t head", (void*)offsetof(lv_ll_t, head)},
-    {"tail", (getter) struct_get_blob, (setter) struct_set_blob, "lv_ll_node_t tail", (void*)offsetof(lv_ll_t, tail)},
-
+    {"head", (getter) struct_get_struct, (setter) struct_set_struct, "lv_ll_node_t head", & ((struct_closure_t){ &Blob_Type, offsetof(lv_ll_t, head), sizeof(((lv_ll_t *)0)->head)})},
+    {"tail", (getter) struct_get_struct, (setter) struct_set_struct, "lv_ll_node_t tail", & ((struct_closure_t){ &Blob_Type, offsetof(lv_ll_t, tail), sizeof(((lv_ll_t *)0)->tail)})},
     {NULL}
 };
+
 
 static PyTypeObject pylv_ll_t_Type = {
     PyVarObject_HEAD_INIT(NULL, 0)
@@ -809,8 +804,8 @@ static PyTypeObject pylv_ll_t_Type = {
     .tp_init = (initproc) pylv_ll_t_init,
     .tp_dealloc = (destructor) Struct_dealloc,
     .tp_getset = pylv_ll_t_getset,
-    .tp_repr = (reprfunc) Struct_repr
-
+    .tp_repr = (reprfunc) Struct_repr,
+    .tp_as_buffer = &Struct_bufferprocs
 };
 
 
@@ -818,26 +813,60 @@ static PyTypeObject pylv_ll_t_Type = {
 static int
 pylv_task_t_init(StructObject *self, PyObject *args, PyObject *kwds) 
 {
-
-    self->data = PyMem_Malloc(sizeof(lv_task_t));
+    self->size = sizeof(lv_task_t);
+    self->data = PyMem_Malloc(self->size);
     if (!self->data) return -1;
     
-    memset(self->data, 0, sizeof(lv_task_t));
+    memset(self->data, 0, self->size);
     self->owner = (PyObject *)self;
 
+    return 0;
+}
+
+
+
+static PyObject *
+get_struct_bitfield_task_t_prio(StructObject *self, void *closure)
+{
+    return PyLong_FromLong(((lv_task_t*)(self->data))->prio );
+}
+
+static int
+set_struct_bitfield_task_t_prio(StructObject *self, PyObject *value, void *closure)
+{
+    long v;
+    if (long_to_int(value, &v, 0, 7)) return -1;
+    ((lv_task_t*)(self->data))->prio = v;
+    return 0;
+}
+
+
+
+static PyObject *
+get_struct_bitfield_task_t_once(StructObject *self, void *closure)
+{
+    return PyLong_FromLong(((lv_task_t*)(self->data))->once );
+}
+
+static int
+set_struct_bitfield_task_t_once(StructObject *self, PyObject *value, void *closure)
+{
+    long v;
+    if (long_to_int(value, &v, 0, 1)) return -1;
+    ((lv_task_t*)(self->data))->once = v;
     return 0;
 }
 
 static PyGetSetDef pylv_task_t_getset[] = {
     {"period", (getter) struct_get_uint32, (setter) struct_set_uint32, "uint32_t period", (void*)offsetof(lv_task_t, period)},
     {"last_run", (getter) struct_get_uint32, (setter) struct_set_uint32, "uint32_t last_run", (void*)offsetof(lv_task_t, last_run)},
-    {"task", (getter) struct_get_blob, (setter) struct_set_blob, "void task(void *) task", (void*)offsetof(lv_task_t, task)},
-    {"param", (getter) struct_get_blob, (setter) struct_set_blob, "void param", (void*)offsetof(lv_task_t, param)},
-    {"prio", (getter) NULL, (setter) NULL, "uint8_t prio", NULL},
-    {"once", (getter) NULL, (setter) NULL, "uint8_t once", NULL},
-
+    {"task", (getter) struct_get_struct, (setter) struct_set_struct, "void task(void *) task", & ((struct_closure_t){ &Blob_Type, offsetof(lv_task_t, task), sizeof(((lv_task_t *)0)->task)})},
+    {"param", (getter) struct_get_struct, (setter) struct_set_struct, "void param", & ((struct_closure_t){ &Blob_Type, offsetof(lv_task_t, param), sizeof(((lv_task_t *)0)->param)})},
+    {"prio", (getter) get_struct_bitfield_task_t_prio, (setter) set_struct_bitfield_task_t_prio, "uint8_t:3 prio", NULL},
+    {"once", (getter) get_struct_bitfield_task_t_once, (setter) set_struct_bitfield_task_t_once, "uint8_t:1 once", NULL},
     {NULL}
 };
+
 
 static PyTypeObject pylv_task_t_Type = {
     PyVarObject_HEAD_INIT(NULL, 0)
@@ -850,8 +879,8 @@ static PyTypeObject pylv_task_t_Type = {
     .tp_init = (initproc) pylv_task_t_init,
     .tp_dealloc = (destructor) Struct_dealloc,
     .tp_getset = pylv_task_t_getset,
-    .tp_repr = (reprfunc) Struct_repr
-
+    .tp_repr = (reprfunc) Struct_repr,
+    .tp_as_buffer = &Struct_bufferprocs
 };
 
 
@@ -859,24 +888,92 @@ static PyTypeObject pylv_task_t_Type = {
 static int
 pylv_color1_t_init(StructObject *self, PyObject *args, PyObject *kwds) 
 {
-
-    self->data = PyMem_Malloc(sizeof(lv_color1_t));
+    self->size = sizeof(lv_color1_t);
+    self->data = PyMem_Malloc(self->size);
     if (!self->data) return -1;
     
-    memset(self->data, 0, sizeof(lv_color1_t));
+    memset(self->data, 0, self->size);
     self->owner = (PyObject *)self;
 
     return 0;
 }
 
-static PyGetSetDef pylv_color1_t_getset[] = {
-    {"blue", (getter) NULL, (setter) NULL, "uint8_t blue", NULL},
-    {"green", (getter) NULL, (setter) NULL, "uint8_t green", NULL},
-    {"red", (getter) NULL, (setter) NULL, "uint8_t red", NULL},
-    {"full", (getter) NULL, (setter) NULL, "uint8_t full", NULL},
 
+
+static PyObject *
+get_struct_bitfield_color1_t_blue(StructObject *self, void *closure)
+{
+    return PyLong_FromLong(((lv_color1_t*)(self->data))->blue );
+}
+
+static int
+set_struct_bitfield_color1_t_blue(StructObject *self, PyObject *value, void *closure)
+{
+    long v;
+    if (long_to_int(value, &v, 0, 1)) return -1;
+    ((lv_color1_t*)(self->data))->blue = v;
+    return 0;
+}
+
+
+
+static PyObject *
+get_struct_bitfield_color1_t_green(StructObject *self, void *closure)
+{
+    return PyLong_FromLong(((lv_color1_t*)(self->data))->green );
+}
+
+static int
+set_struct_bitfield_color1_t_green(StructObject *self, PyObject *value, void *closure)
+{
+    long v;
+    if (long_to_int(value, &v, 0, 1)) return -1;
+    ((lv_color1_t*)(self->data))->green = v;
+    return 0;
+}
+
+
+
+static PyObject *
+get_struct_bitfield_color1_t_red(StructObject *self, void *closure)
+{
+    return PyLong_FromLong(((lv_color1_t*)(self->data))->red );
+}
+
+static int
+set_struct_bitfield_color1_t_red(StructObject *self, PyObject *value, void *closure)
+{
+    long v;
+    if (long_to_int(value, &v, 0, 1)) return -1;
+    ((lv_color1_t*)(self->data))->red = v;
+    return 0;
+}
+
+
+
+static PyObject *
+get_struct_bitfield_color1_t_full(StructObject *self, void *closure)
+{
+    return PyLong_FromLong(((lv_color1_t*)(self->data))->full );
+}
+
+static int
+set_struct_bitfield_color1_t_full(StructObject *self, PyObject *value, void *closure)
+{
+    long v;
+    if (long_to_int(value, &v, 0, 1)) return -1;
+    ((lv_color1_t*)(self->data))->full = v;
+    return 0;
+}
+
+static PyGetSetDef pylv_color1_t_getset[] = {
+    {"blue", (getter) get_struct_bitfield_color1_t_blue, (setter) set_struct_bitfield_color1_t_blue, "uint8_t:1 blue", NULL},
+    {"green", (getter) get_struct_bitfield_color1_t_green, (setter) set_struct_bitfield_color1_t_green, "uint8_t:1 green", NULL},
+    {"red", (getter) get_struct_bitfield_color1_t_red, (setter) set_struct_bitfield_color1_t_red, "uint8_t:1 red", NULL},
+    {"full", (getter) get_struct_bitfield_color1_t_full, (setter) set_struct_bitfield_color1_t_full, "uint8_t:1 full", NULL},
     {NULL}
 };
+
 
 static PyTypeObject pylv_color1_t_Type = {
     PyVarObject_HEAD_INIT(NULL, 0)
@@ -889,8 +986,8 @@ static PyTypeObject pylv_color1_t_Type = {
     .tp_init = (initproc) pylv_color1_t_init,
     .tp_dealloc = (destructor) Struct_dealloc,
     .tp_getset = pylv_color1_t_getset,
-    .tp_repr = (reprfunc) Struct_repr
-
+    .tp_repr = (reprfunc) Struct_repr,
+    .tp_as_buffer = &Struct_bufferprocs
 };
 
 
@@ -898,11 +995,11 @@ static PyTypeObject pylv_color1_t_Type = {
 static int
 pylv_color8_t_init(StructObject *self, PyObject *args, PyObject *kwds) 
 {
-
-    self->data = PyMem_Malloc(sizeof(lv_color8_t));
+    self->size = sizeof(lv_color8_t);
+    self->data = PyMem_Malloc(self->size);
     if (!self->data) return -1;
     
-    memset(self->data, 0, sizeof(lv_color8_t));
+    memset(self->data, 0, self->size);
     self->owner = (PyObject *)self;
 
     return 0;
@@ -911,9 +1008,9 @@ pylv_color8_t_init(StructObject *self, PyObject *args, PyObject *kwds)
 static PyGetSetDef pylv_color8_t_getset[] = {
     {"ch", (getter) struct_get_struct, (setter) struct_set_struct, "struct  {   uint8_t blue : 2;   uint8_t green : 3;   uint8_t red : 3; } ch", & ((struct_closure_t){ &pylv_color8_t_ch_Type, offsetof(lv_color8_t, ch), sizeof(((lv_color8_t *)0)->ch)})},
     {"full", (getter) struct_get_uint8, (setter) struct_set_uint8, "uint8_t full", (void*)offsetof(lv_color8_t, full)},
-
     {NULL}
 };
+
 
 static PyTypeObject pylv_color8_t_Type = {
     PyVarObject_HEAD_INIT(NULL, 0)
@@ -926,8 +1023,8 @@ static PyTypeObject pylv_color8_t_Type = {
     .tp_init = (initproc) pylv_color8_t_init,
     .tp_dealloc = (destructor) Struct_dealloc,
     .tp_getset = pylv_color8_t_getset,
-    .tp_repr = (reprfunc) Struct_repr
-
+    .tp_repr = (reprfunc) Struct_repr,
+    .tp_as_buffer = &Struct_bufferprocs
 };
 
 
@@ -935,11 +1032,11 @@ static PyTypeObject pylv_color8_t_Type = {
 static int
 pylv_color16_t_init(StructObject *self, PyObject *args, PyObject *kwds) 
 {
-
-    self->data = PyMem_Malloc(sizeof(lv_color16_t));
+    self->size = sizeof(lv_color16_t);
+    self->data = PyMem_Malloc(self->size);
     if (!self->data) return -1;
     
-    memset(self->data, 0, sizeof(lv_color16_t));
+    memset(self->data, 0, self->size);
     self->owner = (PyObject *)self;
 
     return 0;
@@ -948,9 +1045,9 @@ pylv_color16_t_init(StructObject *self, PyObject *args, PyObject *kwds)
 static PyGetSetDef pylv_color16_t_getset[] = {
     {"ch", (getter) struct_get_struct, (setter) struct_set_struct, "struct  {   uint16_t blue : 5;   uint16_t green : 6;   uint16_t red : 5; } ch", & ((struct_closure_t){ &pylv_color16_t_ch_Type, offsetof(lv_color16_t, ch), sizeof(((lv_color16_t *)0)->ch)})},
     {"full", (getter) struct_get_uint16, (setter) struct_set_uint16, "uint16_t full", (void*)offsetof(lv_color16_t, full)},
-
     {NULL}
 };
+
 
 static PyTypeObject pylv_color16_t_Type = {
     PyVarObject_HEAD_INIT(NULL, 0)
@@ -963,8 +1060,8 @@ static PyTypeObject pylv_color16_t_Type = {
     .tp_init = (initproc) pylv_color16_t_init,
     .tp_dealloc = (destructor) Struct_dealloc,
     .tp_getset = pylv_color16_t_getset,
-    .tp_repr = (reprfunc) Struct_repr
-
+    .tp_repr = (reprfunc) Struct_repr,
+    .tp_as_buffer = &Struct_bufferprocs
 };
 
 
@@ -972,11 +1069,11 @@ static PyTypeObject pylv_color16_t_Type = {
 static int
 pylv_color32_t_init(StructObject *self, PyObject *args, PyObject *kwds) 
 {
-
-    self->data = PyMem_Malloc(sizeof(lv_color32_t));
+    self->size = sizeof(lv_color32_t);
+    self->data = PyMem_Malloc(self->size);
     if (!self->data) return -1;
     
-    memset(self->data, 0, sizeof(lv_color32_t));
+    memset(self->data, 0, self->size);
     self->owner = (PyObject *)self;
 
     return 0;
@@ -985,9 +1082,9 @@ pylv_color32_t_init(StructObject *self, PyObject *args, PyObject *kwds)
 static PyGetSetDef pylv_color32_t_getset[] = {
     {"ch", (getter) struct_get_struct, (setter) struct_set_struct, "struct  {   uint8_t blue;   uint8_t green;   uint8_t red;   uint8_t alpha; } ch", & ((struct_closure_t){ &pylv_color32_t_ch_Type, offsetof(lv_color32_t, ch), sizeof(((lv_color32_t *)0)->ch)})},
     {"full", (getter) struct_get_uint32, (setter) struct_set_uint32, "uint32_t full", (void*)offsetof(lv_color32_t, full)},
-
     {NULL}
 };
+
 
 static PyTypeObject pylv_color32_t_Type = {
     PyVarObject_HEAD_INIT(NULL, 0)
@@ -1000,8 +1097,8 @@ static PyTypeObject pylv_color32_t_Type = {
     .tp_init = (initproc) pylv_color32_t_init,
     .tp_dealloc = (destructor) Struct_dealloc,
     .tp_getset = pylv_color32_t_getset,
-    .tp_repr = (reprfunc) Struct_repr
-
+    .tp_repr = (reprfunc) Struct_repr,
+    .tp_as_buffer = &Struct_bufferprocs
 };
 
 
@@ -1009,11 +1106,11 @@ static PyTypeObject pylv_color32_t_Type = {
 static int
 pylv_color_hsv_t_init(StructObject *self, PyObject *args, PyObject *kwds) 
 {
-
-    self->data = PyMem_Malloc(sizeof(lv_color_hsv_t));
+    self->size = sizeof(lv_color_hsv_t);
+    self->data = PyMem_Malloc(self->size);
     if (!self->data) return -1;
     
-    memset(self->data, 0, sizeof(lv_color_hsv_t));
+    memset(self->data, 0, self->size);
     self->owner = (PyObject *)self;
 
     return 0;
@@ -1023,9 +1120,9 @@ static PyGetSetDef pylv_color_hsv_t_getset[] = {
     {"h", (getter) struct_get_uint16, (setter) struct_set_uint16, "uint16_t h", (void*)offsetof(lv_color_hsv_t, h)},
     {"s", (getter) struct_get_uint8, (setter) struct_set_uint8, "uint8_t s", (void*)offsetof(lv_color_hsv_t, s)},
     {"v", (getter) struct_get_uint8, (setter) struct_set_uint8, "uint8_t v", (void*)offsetof(lv_color_hsv_t, v)},
-
     {NULL}
 };
+
 
 static PyTypeObject pylv_color_hsv_t_Type = {
     PyVarObject_HEAD_INIT(NULL, 0)
@@ -1038,8 +1135,8 @@ static PyTypeObject pylv_color_hsv_t_Type = {
     .tp_init = (initproc) pylv_color_hsv_t_init,
     .tp_dealloc = (destructor) Struct_dealloc,
     .tp_getset = pylv_color_hsv_t_getset,
-    .tp_repr = (reprfunc) Struct_repr
-
+    .tp_repr = (reprfunc) Struct_repr,
+    .tp_as_buffer = &Struct_bufferprocs
 };
 
 
@@ -1047,11 +1144,11 @@ static PyTypeObject pylv_color_hsv_t_Type = {
 static int
 pylv_point_t_init(StructObject *self, PyObject *args, PyObject *kwds) 
 {
-
-    self->data = PyMem_Malloc(sizeof(lv_point_t));
+    self->size = sizeof(lv_point_t);
+    self->data = PyMem_Malloc(self->size);
     if (!self->data) return -1;
     
-    memset(self->data, 0, sizeof(lv_point_t));
+    memset(self->data, 0, self->size);
     self->owner = (PyObject *)self;
 
     return 0;
@@ -1060,9 +1157,9 @@ pylv_point_t_init(StructObject *self, PyObject *args, PyObject *kwds)
 static PyGetSetDef pylv_point_t_getset[] = {
     {"x", (getter) struct_get_int16, (setter) struct_set_int16, "lv_coord_t x", (void*)offsetof(lv_point_t, x)},
     {"y", (getter) struct_get_int16, (setter) struct_set_int16, "lv_coord_t y", (void*)offsetof(lv_point_t, y)},
-
     {NULL}
 };
+
 
 static PyTypeObject pylv_point_t_Type = {
     PyVarObject_HEAD_INIT(NULL, 0)
@@ -1075,8 +1172,8 @@ static PyTypeObject pylv_point_t_Type = {
     .tp_init = (initproc) pylv_point_t_init,
     .tp_dealloc = (destructor) Struct_dealloc,
     .tp_getset = pylv_point_t_getset,
-    .tp_repr = (reprfunc) Struct_repr
-
+    .tp_repr = (reprfunc) Struct_repr,
+    .tp_as_buffer = &Struct_bufferprocs
 };
 
 
@@ -1084,11 +1181,11 @@ static PyTypeObject pylv_point_t_Type = {
 static int
 pylv_area_t_init(StructObject *self, PyObject *args, PyObject *kwds) 
 {
-
-    self->data = PyMem_Malloc(sizeof(lv_area_t));
+    self->size = sizeof(lv_area_t);
+    self->data = PyMem_Malloc(self->size);
     if (!self->data) return -1;
     
-    memset(self->data, 0, sizeof(lv_area_t));
+    memset(self->data, 0, self->size);
     self->owner = (PyObject *)self;
 
     return 0;
@@ -1099,9 +1196,9 @@ static PyGetSetDef pylv_area_t_getset[] = {
     {"y1", (getter) struct_get_int16, (setter) struct_set_int16, "lv_coord_t y1", (void*)offsetof(lv_area_t, y1)},
     {"x2", (getter) struct_get_int16, (setter) struct_set_int16, "lv_coord_t x2", (void*)offsetof(lv_area_t, x2)},
     {"y2", (getter) struct_get_int16, (setter) struct_set_int16, "lv_coord_t y2", (void*)offsetof(lv_area_t, y2)},
-
     {NULL}
 };
+
 
 static PyTypeObject pylv_area_t_Type = {
     PyVarObject_HEAD_INIT(NULL, 0)
@@ -1114,8 +1211,8 @@ static PyTypeObject pylv_area_t_Type = {
     .tp_init = (initproc) pylv_area_t_init,
     .tp_dealloc = (destructor) Struct_dealloc,
     .tp_getset = pylv_area_t_getset,
-    .tp_repr = (reprfunc) Struct_repr
-
+    .tp_repr = (reprfunc) Struct_repr,
+    .tp_as_buffer = &Struct_bufferprocs
 };
 
 
@@ -1123,26 +1220,43 @@ static PyTypeObject pylv_area_t_Type = {
 static int
 pylv_disp_buf_t_init(StructObject *self, PyObject *args, PyObject *kwds) 
 {
-
-    self->data = PyMem_Malloc(sizeof(lv_disp_buf_t));
+    self->size = sizeof(lv_disp_buf_t);
+    self->data = PyMem_Malloc(self->size);
     if (!self->data) return -1;
     
-    memset(self->data, 0, sizeof(lv_disp_buf_t));
+    memset(self->data, 0, self->size);
     self->owner = (PyObject *)self;
 
     return 0;
 }
 
-static PyGetSetDef pylv_disp_buf_t_getset[] = {
-    {"buf1", (getter) struct_get_blob, (setter) struct_set_blob, "void buf1", (void*)offsetof(lv_disp_buf_t, buf1)},
-    {"buf2", (getter) struct_get_blob, (setter) struct_set_blob, "void buf2", (void*)offsetof(lv_disp_buf_t, buf2)},
-    {"buf_act", (getter) struct_get_blob, (setter) struct_set_blob, "void buf_act", (void*)offsetof(lv_disp_buf_t, buf_act)},
-    {"size", (getter) struct_get_uint32, (setter) struct_set_uint32, "uint32_t size", (void*)offsetof(lv_disp_buf_t, size)},
-    {"area", (getter) struct_get_blob, (setter) struct_set_blob, "lv_area_t area", (void*)offsetof(lv_disp_buf_t, area)},
-    {"flushing", (getter) NULL, (setter) NULL, "uint32_t flushing", NULL},
 
+
+static PyObject *
+get_struct_bitfield_disp_buf_t_flushing(StructObject *self, void *closure)
+{
+    return PyLong_FromLong(((lv_disp_buf_t*)(self->data))->flushing );
+}
+
+static int
+set_struct_bitfield_disp_buf_t_flushing(StructObject *self, PyObject *value, void *closure)
+{
+    long v;
+    if (long_to_int(value, &v, 0, 1)) return -1;
+    ((lv_disp_buf_t*)(self->data))->flushing = v;
+    return 0;
+}
+
+static PyGetSetDef pylv_disp_buf_t_getset[] = {
+    {"buf1", (getter) struct_get_struct, (setter) struct_set_struct, "void buf1", & ((struct_closure_t){ &Blob_Type, offsetof(lv_disp_buf_t, buf1), sizeof(((lv_disp_buf_t *)0)->buf1)})},
+    {"buf2", (getter) struct_get_struct, (setter) struct_set_struct, "void buf2", & ((struct_closure_t){ &Blob_Type, offsetof(lv_disp_buf_t, buf2), sizeof(((lv_disp_buf_t *)0)->buf2)})},
+    {"buf_act", (getter) struct_get_struct, (setter) struct_set_struct, "void buf_act", & ((struct_closure_t){ &Blob_Type, offsetof(lv_disp_buf_t, buf_act), sizeof(((lv_disp_buf_t *)0)->buf_act)})},
+    {"size", (getter) struct_get_uint32, (setter) struct_set_uint32, "uint32_t size", (void*)offsetof(lv_disp_buf_t, size)},
+    {"area", (getter) struct_get_struct, (setter) struct_set_struct, "lv_area_t area", & ((struct_closure_t){ &pylv_area_t_Type, offsetof(lv_disp_buf_t, area), sizeof(lv_area_t)})},
+    {"flushing", (getter) get_struct_bitfield_disp_buf_t_flushing, (setter) set_struct_bitfield_disp_buf_t_flushing, "uint32_t:1 flushing", NULL},
     {NULL}
 };
+
 
 static PyTypeObject pylv_disp_buf_t_Type = {
     PyVarObject_HEAD_INIT(NULL, 0)
@@ -1155,8 +1269,8 @@ static PyTypeObject pylv_disp_buf_t_Type = {
     .tp_init = (initproc) pylv_disp_buf_t_init,
     .tp_dealloc = (destructor) Struct_dealloc,
     .tp_getset = pylv_disp_buf_t_getset,
-    .tp_repr = (reprfunc) Struct_repr
-
+    .tp_repr = (reprfunc) Struct_repr,
+    .tp_as_buffer = &Struct_bufferprocs
 };
 
 
@@ -1164,11 +1278,11 @@ static PyTypeObject pylv_disp_buf_t_Type = {
 static int
 pylv_disp_drv_t_init(StructObject *self, PyObject *args, PyObject *kwds) 
 {
-
-    self->data = PyMem_Malloc(sizeof(lv_disp_drv_t));
+    self->size = sizeof(lv_disp_drv_t);
+    self->data = PyMem_Malloc(self->size);
     if (!self->data) return -1;
     
-    memset(self->data, 0, sizeof(lv_disp_drv_t));
+    memset(self->data, 0, self->size);
     self->owner = (PyObject *)self;
 
     return 0;
@@ -1177,17 +1291,17 @@ pylv_disp_drv_t_init(StructObject *self, PyObject *args, PyObject *kwds)
 static PyGetSetDef pylv_disp_drv_t_getset[] = {
     {"hor_res", (getter) struct_get_int16, (setter) struct_set_int16, "lv_coord_t hor_res", (void*)offsetof(lv_disp_drv_t, hor_res)},
     {"ver_res", (getter) struct_get_int16, (setter) struct_set_int16, "lv_coord_t ver_res", (void*)offsetof(lv_disp_drv_t, ver_res)},
-    {"buffer", (getter) struct_get_blob, (setter) struct_set_blob, "lv_disp_buf_t buffer", (void*)offsetof(lv_disp_drv_t, buffer)},
-    {"flush_cb", (getter) struct_get_blob, (setter) struct_set_blob, "void flush_cb(struct _disp_drv_t *disp_drv, const lv_area_t *area, lv_color_t *color_p) flush_cb", (void*)offsetof(lv_disp_drv_t, flush_cb)},
-    {"rounder_cb", (getter) struct_get_blob, (setter) struct_set_blob, "void rounder_cb(struct _disp_drv_t *disp_drv, lv_area_t *area) rounder_cb", (void*)offsetof(lv_disp_drv_t, rounder_cb)},
-    {"set_px_cb", (getter) struct_get_blob, (setter) struct_set_blob, "void set_px_cb(struct _disp_drv_t *disp_drv, uint8_t *buf, lv_coord_t buf_w, lv_coord_t x, lv_coord_t y, lv_color_t color, lv_opa_t opa) set_px_cb", (void*)offsetof(lv_disp_drv_t, set_px_cb)},
-    {"monitor_cb", (getter) struct_get_blob, (setter) struct_set_blob, "void monitor_cb(struct _disp_drv_t *disp_drv, uint32_t time, uint32_t px) monitor_cb", (void*)offsetof(lv_disp_drv_t, monitor_cb)},
-    {"user_data", (getter) struct_get_blob, (setter) struct_set_blob, "lv_disp_drv_user_data_t user_data", (void*)offsetof(lv_disp_drv_t, user_data)},
-    {"mem_blend", (getter) struct_get_blob, (setter) struct_set_blob, "void mem_blend(lv_color_t *dest, const lv_color_t *src, uint32_t length, lv_opa_t opa) mem_blend", (void*)offsetof(lv_disp_drv_t, mem_blend)},
-    {"mem_fill", (getter) struct_get_blob, (setter) struct_set_blob, "void mem_fill(lv_color_t *dest, uint32_t length, lv_color_t color) mem_fill", (void*)offsetof(lv_disp_drv_t, mem_fill)},
-
+    {"buffer", (getter) struct_get_struct, (setter) struct_set_struct, "lv_disp_buf_t buffer", & ((struct_closure_t){ &Blob_Type, offsetof(lv_disp_drv_t, buffer), sizeof(((lv_disp_drv_t *)0)->buffer)})},
+    {"flush_cb", (getter) struct_get_struct, (setter) struct_set_struct, "void flush_cb(struct _disp_drv_t *disp_drv, const lv_area_t *area, lv_color_t *color_p) flush_cb", & ((struct_closure_t){ &Blob_Type, offsetof(lv_disp_drv_t, flush_cb), sizeof(((lv_disp_drv_t *)0)->flush_cb)})},
+    {"rounder_cb", (getter) struct_get_struct, (setter) struct_set_struct, "void rounder_cb(struct _disp_drv_t *disp_drv, lv_area_t *area) rounder_cb", & ((struct_closure_t){ &Blob_Type, offsetof(lv_disp_drv_t, rounder_cb), sizeof(((lv_disp_drv_t *)0)->rounder_cb)})},
+    {"set_px_cb", (getter) struct_get_struct, (setter) struct_set_struct, "void set_px_cb(struct _disp_drv_t *disp_drv, uint8_t *buf, lv_coord_t buf_w, lv_coord_t x, lv_coord_t y, lv_color_t color, lv_opa_t opa) set_px_cb", & ((struct_closure_t){ &Blob_Type, offsetof(lv_disp_drv_t, set_px_cb), sizeof(((lv_disp_drv_t *)0)->set_px_cb)})},
+    {"monitor_cb", (getter) struct_get_struct, (setter) struct_set_struct, "void monitor_cb(struct _disp_drv_t *disp_drv, uint32_t time, uint32_t px) monitor_cb", & ((struct_closure_t){ &Blob_Type, offsetof(lv_disp_drv_t, monitor_cb), sizeof(((lv_disp_drv_t *)0)->monitor_cb)})},
+    {"user_data", (getter) struct_get_struct, (setter) struct_set_struct, "lv_disp_drv_user_data_t user_data", & ((struct_closure_t){ &Blob_Type, offsetof(lv_disp_drv_t, user_data), sizeof(((lv_disp_drv_t *)0)->user_data)})},
+    {"mem_blend", (getter) struct_get_struct, (setter) struct_set_struct, "void mem_blend(lv_color_t *dest, const lv_color_t *src, uint32_t length, lv_opa_t opa) mem_blend", & ((struct_closure_t){ &Blob_Type, offsetof(lv_disp_drv_t, mem_blend), sizeof(((lv_disp_drv_t *)0)->mem_blend)})},
+    {"mem_fill", (getter) struct_get_struct, (setter) struct_set_struct, "void mem_fill(lv_color_t *dest, uint32_t length, lv_color_t color) mem_fill", & ((struct_closure_t){ &Blob_Type, offsetof(lv_disp_drv_t, mem_fill), sizeof(((lv_disp_drv_t *)0)->mem_fill)})},
     {NULL}
 };
+
 
 static PyTypeObject pylv_disp_drv_t_Type = {
     PyVarObject_HEAD_INIT(NULL, 0)
@@ -1200,8 +1314,8 @@ static PyTypeObject pylv_disp_drv_t_Type = {
     .tp_init = (initproc) pylv_disp_drv_t_init,
     .tp_dealloc = (destructor) Struct_dealloc,
     .tp_getset = pylv_disp_drv_t_getset,
-    .tp_repr = (reprfunc) Struct_repr
-
+    .tp_repr = (reprfunc) Struct_repr,
+    .tp_as_buffer = &Struct_bufferprocs
 };
 
 
@@ -1209,28 +1323,45 @@ static PyTypeObject pylv_disp_drv_t_Type = {
 static int
 pylv_disp_t_init(StructObject *self, PyObject *args, PyObject *kwds) 
 {
-
-    self->data = PyMem_Malloc(sizeof(lv_disp_t));
+    self->size = sizeof(lv_disp_t);
+    self->data = PyMem_Malloc(self->size);
     if (!self->data) return -1;
     
-    memset(self->data, 0, sizeof(lv_disp_t));
+    memset(self->data, 0, self->size);
     self->owner = (PyObject *)self;
 
     return 0;
 }
 
-static PyGetSetDef pylv_disp_t_getset[] = {
-    {"driver", (getter) struct_get_blob, (setter) struct_set_blob, "lv_disp_drv_t driver", (void*)offsetof(lv_disp_t, driver)},
-    {"scr_ll", (getter) struct_get_blob, (setter) struct_set_blob, "lv_ll_t scr_ll", (void*)offsetof(lv_disp_t, scr_ll)},
-    {"act_scr", (getter) struct_get_blob, (setter) struct_set_blob, "struct _lv_obj_t act_scr", (void*)offsetof(lv_disp_t, act_scr)},
-    {"top_layer", (getter) struct_get_blob, (setter) struct_set_blob, "struct _lv_obj_t top_layer", (void*)offsetof(lv_disp_t, top_layer)},
-    {"sys_layer", (getter) struct_get_blob, (setter) struct_set_blob, "struct _lv_obj_t sys_layer", (void*)offsetof(lv_disp_t, sys_layer)},
-    {"inv_areas", (getter) struct_get_blob, (setter) struct_set_blob, "lv_area_t32 inv_areas", (void*)offsetof(lv_disp_t, inv_areas)},
-    {"inv_area_joined", (getter) struct_get_blob, (setter) struct_set_blob, "uint8_t32 inv_area_joined", (void*)offsetof(lv_disp_t, inv_area_joined)},
-    {"inv_p", (getter) NULL, (setter) NULL, "uint32_t inv_p", NULL},
 
+
+static PyObject *
+get_struct_bitfield_disp_t_inv_p(StructObject *self, void *closure)
+{
+    return PyLong_FromLong(((lv_disp_t*)(self->data))->inv_p );
+}
+
+static int
+set_struct_bitfield_disp_t_inv_p(StructObject *self, PyObject *value, void *closure)
+{
+    long v;
+    if (long_to_int(value, &v, 0, 1023)) return -1;
+    ((lv_disp_t*)(self->data))->inv_p = v;
+    return 0;
+}
+
+static PyGetSetDef pylv_disp_t_getset[] = {
+    {"driver", (getter) struct_get_struct, (setter) struct_set_struct, "lv_disp_drv_t driver", & ((struct_closure_t){ &pylv_disp_drv_t_Type, offsetof(lv_disp_t, driver), sizeof(lv_disp_drv_t)})},
+    {"scr_ll", (getter) struct_get_struct, (setter) struct_set_struct, "lv_ll_t scr_ll", & ((struct_closure_t){ &pylv_ll_t_Type, offsetof(lv_disp_t, scr_ll), sizeof(lv_ll_t)})},
+    {"act_scr", (getter) struct_get_struct, (setter) struct_set_struct, "struct _lv_obj_t act_scr", & ((struct_closure_t){ &Blob_Type, offsetof(lv_disp_t, act_scr), sizeof(((lv_disp_t *)0)->act_scr)})},
+    {"top_layer", (getter) struct_get_struct, (setter) struct_set_struct, "struct _lv_obj_t top_layer", & ((struct_closure_t){ &Blob_Type, offsetof(lv_disp_t, top_layer), sizeof(((lv_disp_t *)0)->top_layer)})},
+    {"sys_layer", (getter) struct_get_struct, (setter) struct_set_struct, "struct _lv_obj_t sys_layer", & ((struct_closure_t){ &Blob_Type, offsetof(lv_disp_t, sys_layer), sizeof(((lv_disp_t *)0)->sys_layer)})},
+    {"inv_areas", (getter) struct_get_struct, (setter) struct_set_struct, "lv_area_t32 inv_areas", & ((struct_closure_t){ &Blob_Type, offsetof(lv_disp_t, inv_areas), sizeof(((lv_disp_t *)0)->inv_areas)})},
+    {"inv_area_joined", (getter) struct_get_struct, (setter) struct_set_struct, "uint8_t32 inv_area_joined", & ((struct_closure_t){ &Blob_Type, offsetof(lv_disp_t, inv_area_joined), sizeof(((lv_disp_t *)0)->inv_area_joined)})},
+    {"inv_p", (getter) get_struct_bitfield_disp_t_inv_p, (setter) set_struct_bitfield_disp_t_inv_p, "uint32_t:10 inv_p", NULL},
     {NULL}
 };
+
 
 static PyTypeObject pylv_disp_t_Type = {
     PyVarObject_HEAD_INIT(NULL, 0)
@@ -1243,8 +1374,8 @@ static PyTypeObject pylv_disp_t_Type = {
     .tp_init = (initproc) pylv_disp_t_init,
     .tp_dealloc = (destructor) Struct_dealloc,
     .tp_getset = pylv_disp_t_getset,
-    .tp_repr = (reprfunc) Struct_repr
-
+    .tp_repr = (reprfunc) Struct_repr,
+    .tp_as_buffer = &Struct_bufferprocs
 };
 
 
@@ -1252,25 +1383,25 @@ static PyTypeObject pylv_disp_t_Type = {
 static int
 pylv_indev_data_t_init(StructObject *self, PyObject *args, PyObject *kwds) 
 {
-
-    self->data = PyMem_Malloc(sizeof(lv_indev_data_t));
+    self->size = sizeof(lv_indev_data_t);
+    self->data = PyMem_Malloc(self->size);
     if (!self->data) return -1;
     
-    memset(self->data, 0, sizeof(lv_indev_data_t));
+    memset(self->data, 0, self->size);
     self->owner = (PyObject *)self;
 
     return 0;
 }
 
 static PyGetSetDef pylv_indev_data_t_getset[] = {
-    {"point", (getter) struct_get_blob, (setter) struct_set_blob, "lv_point_t point", (void*)offsetof(lv_indev_data_t, point)},
+    {"point", (getter) struct_get_struct, (setter) struct_set_struct, "lv_point_t point", & ((struct_closure_t){ &pylv_point_t_Type, offsetof(lv_indev_data_t, point), sizeof(lv_point_t)})},
     {"key", (getter) struct_get_uint32, (setter) struct_set_uint32, "uint32_t key", (void*)offsetof(lv_indev_data_t, key)},
     {"btn_id", (getter) struct_get_uint32, (setter) struct_set_uint32, "uint32_t btn_id", (void*)offsetof(lv_indev_data_t, btn_id)},
     {"enc_diff", (getter) struct_get_int16, (setter) struct_set_int16, "int16_t enc_diff", (void*)offsetof(lv_indev_data_t, enc_diff)},
     {"state", (getter) struct_get_uint8, (setter) struct_set_uint8, "lv_indev_state_t state", (void*)offsetof(lv_indev_data_t, state)},
-
     {NULL}
 };
+
 
 static PyTypeObject pylv_indev_data_t_Type = {
     PyVarObject_HEAD_INIT(NULL, 0)
@@ -1283,8 +1414,8 @@ static PyTypeObject pylv_indev_data_t_Type = {
     .tp_init = (initproc) pylv_indev_data_t_init,
     .tp_dealloc = (destructor) Struct_dealloc,
     .tp_getset = pylv_indev_data_t_getset,
-    .tp_repr = (reprfunc) Struct_repr
-
+    .tp_repr = (reprfunc) Struct_repr,
+    .tp_as_buffer = &Struct_bufferprocs
 };
 
 
@@ -1292,11 +1423,11 @@ static PyTypeObject pylv_indev_data_t_Type = {
 static int
 pylv_indev_drv_t_init(StructObject *self, PyObject *args, PyObject *kwds) 
 {
-
-    self->data = PyMem_Malloc(sizeof(lv_indev_drv_t));
+    self->size = sizeof(lv_indev_drv_t);
+    self->data = PyMem_Malloc(self->size);
     if (!self->data) return -1;
     
-    memset(self->data, 0, sizeof(lv_indev_drv_t));
+    memset(self->data, 0, self->size);
     self->owner = (PyObject *)self;
 
     return 0;
@@ -1304,12 +1435,12 @@ pylv_indev_drv_t_init(StructObject *self, PyObject *args, PyObject *kwds)
 
 static PyGetSetDef pylv_indev_drv_t_getset[] = {
     {"type", (getter) struct_get_uint8, (setter) struct_set_uint8, "lv_hal_indev_type_t type", (void*)offsetof(lv_indev_drv_t, type)},
-    {"read_cb", (getter) struct_get_blob, (setter) struct_set_blob, "bool read_cb(struct _lv_indev_drv_t *indev_drv, lv_indev_data_t *data) read_cb", (void*)offsetof(lv_indev_drv_t, read_cb)},
-    {"user_data", (getter) struct_get_blob, (setter) struct_set_blob, "lv_indev_drv_user_data_t user_data", (void*)offsetof(lv_indev_drv_t, user_data)},
-    {"disp", (getter) struct_get_blob, (setter) struct_set_blob, "struct _disp_t disp", (void*)offsetof(lv_indev_drv_t, disp)},
-
+    {"read_cb", (getter) struct_get_struct, (setter) struct_set_struct, "bool read_cb(struct _lv_indev_drv_t *indev_drv, lv_indev_data_t *data) read_cb", & ((struct_closure_t){ &Blob_Type, offsetof(lv_indev_drv_t, read_cb), sizeof(((lv_indev_drv_t *)0)->read_cb)})},
+    {"user_data", (getter) struct_get_struct, (setter) struct_set_struct, "lv_indev_drv_user_data_t user_data", & ((struct_closure_t){ &Blob_Type, offsetof(lv_indev_drv_t, user_data), sizeof(((lv_indev_drv_t *)0)->user_data)})},
+    {"disp", (getter) struct_get_struct, (setter) struct_set_struct, "struct _disp_t disp", & ((struct_closure_t){ &Blob_Type, offsetof(lv_indev_drv_t, disp), sizeof(((lv_indev_drv_t *)0)->disp)})},
     {NULL}
 };
+
 
 static PyTypeObject pylv_indev_drv_t_Type = {
     PyVarObject_HEAD_INIT(NULL, 0)
@@ -1322,8 +1453,8 @@ static PyTypeObject pylv_indev_drv_t_Type = {
     .tp_init = (initproc) pylv_indev_drv_t_init,
     .tp_dealloc = (destructor) Struct_dealloc,
     .tp_getset = pylv_indev_drv_t_getset,
-    .tp_repr = (reprfunc) Struct_repr
-
+    .tp_repr = (reprfunc) Struct_repr,
+    .tp_as_buffer = &Struct_bufferprocs
 };
 
 
@@ -1331,13 +1462,64 @@ static PyTypeObject pylv_indev_drv_t_Type = {
 static int
 pylv_indev_proc_t_init(StructObject *self, PyObject *args, PyObject *kwds) 
 {
-
-    self->data = PyMem_Malloc(sizeof(lv_indev_proc_t));
+    self->size = sizeof(lv_indev_proc_t);
+    self->data = PyMem_Malloc(self->size);
     if (!self->data) return -1;
     
-    memset(self->data, 0, sizeof(lv_indev_proc_t));
+    memset(self->data, 0, self->size);
     self->owner = (PyObject *)self;
 
+    return 0;
+}
+
+
+
+static PyObject *
+get_struct_bitfield_indev_proc_t_long_pr_sent(StructObject *self, void *closure)
+{
+    return PyLong_FromLong(((lv_indev_proc_t*)(self->data))->long_pr_sent );
+}
+
+static int
+set_struct_bitfield_indev_proc_t_long_pr_sent(StructObject *self, PyObject *value, void *closure)
+{
+    long v;
+    if (long_to_int(value, &v, 0, 1)) return -1;
+    ((lv_indev_proc_t*)(self->data))->long_pr_sent = v;
+    return 0;
+}
+
+
+
+static PyObject *
+get_struct_bitfield_indev_proc_t_reset_query(StructObject *self, void *closure)
+{
+    return PyLong_FromLong(((lv_indev_proc_t*)(self->data))->reset_query );
+}
+
+static int
+set_struct_bitfield_indev_proc_t_reset_query(StructObject *self, PyObject *value, void *closure)
+{
+    long v;
+    if (long_to_int(value, &v, 0, 1)) return -1;
+    ((lv_indev_proc_t*)(self->data))->reset_query = v;
+    return 0;
+}
+
+
+
+static PyObject *
+get_struct_bitfield_indev_proc_t_disabled(StructObject *self, void *closure)
+{
+    return PyLong_FromLong(((lv_indev_proc_t*)(self->data))->disabled );
+}
+
+static int
+set_struct_bitfield_indev_proc_t_disabled(StructObject *self, PyObject *value, void *closure)
+{
+    long v;
+    if (long_to_int(value, &v, 0, 1)) return -1;
+    ((lv_indev_proc_t*)(self->data))->disabled = v;
     return 0;
 }
 
@@ -1346,12 +1528,12 @@ static PyGetSetDef pylv_indev_proc_t_getset[] = {
     {"types", (getter) struct_get_struct, (setter) struct_set_struct, "union  {   struct    {     lv_point_t act_point;     lv_point_t last_point;     lv_point_t vect;     lv_point_t drag_sum;     lv_point_t drag_throw_vect;     struct _lv_obj_t *act_obj;     struct _lv_obj_t *last_obj;     struct _lv_obj_t *last_pressed;     uint8_t drag_limit_out : 1;     uint8_t drag_in_prog : 1;     uint8_t wait_until_release : 1;   } pointer;   struct    {     lv_indev_state_t last_state;     uint32_t last_key;   } keypad; } types", & ((struct_closure_t){ &pylv_indev_proc_t_types_Type, offsetof(lv_indev_proc_t, types), sizeof(((lv_indev_proc_t *)0)->types)})},
     {"pr_timestamp", (getter) struct_get_uint32, (setter) struct_set_uint32, "uint32_t pr_timestamp", (void*)offsetof(lv_indev_proc_t, pr_timestamp)},
     {"longpr_rep_timestamp", (getter) struct_get_uint32, (setter) struct_set_uint32, "uint32_t longpr_rep_timestamp", (void*)offsetof(lv_indev_proc_t, longpr_rep_timestamp)},
-    {"long_pr_sent", (getter) NULL, (setter) NULL, "uint8_t long_pr_sent", NULL},
-    {"reset_query", (getter) NULL, (setter) NULL, "uint8_t reset_query", NULL},
-    {"disabled", (getter) NULL, (setter) NULL, "uint8_t disabled", NULL},
-
+    {"long_pr_sent", (getter) get_struct_bitfield_indev_proc_t_long_pr_sent, (setter) set_struct_bitfield_indev_proc_t_long_pr_sent, "uint8_t:1 long_pr_sent", NULL},
+    {"reset_query", (getter) get_struct_bitfield_indev_proc_t_reset_query, (setter) set_struct_bitfield_indev_proc_t_reset_query, "uint8_t:1 reset_query", NULL},
+    {"disabled", (getter) get_struct_bitfield_indev_proc_t_disabled, (setter) set_struct_bitfield_indev_proc_t_disabled, "uint8_t:1 disabled", NULL},
     {NULL}
 };
+
 
 static PyTypeObject pylv_indev_proc_t_Type = {
     PyVarObject_HEAD_INIT(NULL, 0)
@@ -1364,8 +1546,8 @@ static PyTypeObject pylv_indev_proc_t_Type = {
     .tp_init = (initproc) pylv_indev_proc_t_init,
     .tp_dealloc = (destructor) Struct_dealloc,
     .tp_getset = pylv_indev_proc_t_getset,
-    .tp_repr = (reprfunc) Struct_repr
-
+    .tp_repr = (reprfunc) Struct_repr,
+    .tp_as_buffer = &Struct_bufferprocs
 };
 
 
@@ -1373,27 +1555,27 @@ static PyTypeObject pylv_indev_proc_t_Type = {
 static int
 pylv_indev_t_init(StructObject *self, PyObject *args, PyObject *kwds) 
 {
-
-    self->data = PyMem_Malloc(sizeof(lv_indev_t));
+    self->size = sizeof(lv_indev_t);
+    self->data = PyMem_Malloc(self->size);
     if (!self->data) return -1;
     
-    memset(self->data, 0, sizeof(lv_indev_t));
+    memset(self->data, 0, self->size);
     self->owner = (PyObject *)self;
 
     return 0;
 }
 
 static PyGetSetDef pylv_indev_t_getset[] = {
-    {"driver", (getter) struct_get_blob, (setter) struct_set_blob, "lv_indev_drv_t driver", (void*)offsetof(lv_indev_t, driver)},
-    {"proc", (getter) struct_get_blob, (setter) struct_set_blob, "lv_indev_proc_t proc", (void*)offsetof(lv_indev_t, proc)},
-    {"feedback", (getter) struct_get_blob, (setter) struct_set_blob, "lv_indev_feedback_t feedback", (void*)offsetof(lv_indev_t, feedback)},
+    {"driver", (getter) struct_get_struct, (setter) struct_set_struct, "lv_indev_drv_t driver", & ((struct_closure_t){ &pylv_indev_drv_t_Type, offsetof(lv_indev_t, driver), sizeof(lv_indev_drv_t)})},
+    {"proc", (getter) struct_get_struct, (setter) struct_set_struct, "lv_indev_proc_t proc", & ((struct_closure_t){ &pylv_indev_proc_t_Type, offsetof(lv_indev_t, proc), sizeof(lv_indev_proc_t)})},
+    {"feedback", (getter) struct_get_struct, (setter) struct_set_struct, "lv_indev_feedback_t feedback", & ((struct_closure_t){ &Blob_Type, offsetof(lv_indev_t, feedback), sizeof(((lv_indev_t *)0)->feedback)})},
     {"last_activity_time", (getter) struct_get_uint32, (setter) struct_set_uint32, "uint32_t last_activity_time", (void*)offsetof(lv_indev_t, last_activity_time)},
-    {"cursor", (getter) struct_get_blob, (setter) struct_set_blob, "struct _lv_obj_t cursor", (void*)offsetof(lv_indev_t, cursor)},
-    {"group", (getter) struct_get_blob, (setter) struct_set_blob, "struct _lv_group_t group", (void*)offsetof(lv_indev_t, group)},
-    {"btn_points", (getter) struct_get_blob, (setter) struct_set_blob, "lv_point_t btn_points", (void*)offsetof(lv_indev_t, btn_points)},
-
+    {"cursor", (getter) struct_get_struct, (setter) struct_set_struct, "struct _lv_obj_t cursor", & ((struct_closure_t){ &Blob_Type, offsetof(lv_indev_t, cursor), sizeof(((lv_indev_t *)0)->cursor)})},
+    {"group", (getter) struct_get_struct, (setter) struct_set_struct, "struct _lv_group_t group", & ((struct_closure_t){ &Blob_Type, offsetof(lv_indev_t, group), sizeof(((lv_indev_t *)0)->group)})},
+    {"btn_points", (getter) struct_get_struct, (setter) struct_set_struct, "lv_point_t btn_points", & ((struct_closure_t){ &Blob_Type, offsetof(lv_indev_t, btn_points), sizeof(((lv_indev_t *)0)->btn_points)})},
     {NULL}
 };
+
 
 static PyTypeObject pylv_indev_t_Type = {
     PyVarObject_HEAD_INIT(NULL, 0)
@@ -1406,8 +1588,8 @@ static PyTypeObject pylv_indev_t_Type = {
     .tp_init = (initproc) pylv_indev_t_init,
     .tp_dealloc = (destructor) Struct_dealloc,
     .tp_getset = pylv_indev_t_getset,
-    .tp_repr = (reprfunc) Struct_repr
-
+    .tp_repr = (reprfunc) Struct_repr,
+    .tp_as_buffer = &Struct_bufferprocs
 };
 
 
@@ -1415,22 +1597,56 @@ static PyTypeObject pylv_indev_t_Type = {
 static int
 pylv_font_glyph_dsc_t_init(StructObject *self, PyObject *args, PyObject *kwds) 
 {
-
-    self->data = PyMem_Malloc(sizeof(lv_font_glyph_dsc_t));
+    self->size = sizeof(lv_font_glyph_dsc_t);
+    self->data = PyMem_Malloc(self->size);
     if (!self->data) return -1;
     
-    memset(self->data, 0, sizeof(lv_font_glyph_dsc_t));
+    memset(self->data, 0, self->size);
     self->owner = (PyObject *)self;
 
     return 0;
 }
 
-static PyGetSetDef pylv_font_glyph_dsc_t_getset[] = {
-    {"w_px", (getter) NULL, (setter) NULL, "uint32_t w_px", NULL},
-    {"glyph_index", (getter) NULL, (setter) NULL, "uint32_t glyph_index", NULL},
 
+
+static PyObject *
+get_struct_bitfield_font_glyph_dsc_t_w_px(StructObject *self, void *closure)
+{
+    return PyLong_FromLong(((lv_font_glyph_dsc_t*)(self->data))->w_px );
+}
+
+static int
+set_struct_bitfield_font_glyph_dsc_t_w_px(StructObject *self, PyObject *value, void *closure)
+{
+    long v;
+    if (long_to_int(value, &v, 0, 255)) return -1;
+    ((lv_font_glyph_dsc_t*)(self->data))->w_px = v;
+    return 0;
+}
+
+
+
+static PyObject *
+get_struct_bitfield_font_glyph_dsc_t_glyph_index(StructObject *self, void *closure)
+{
+    return PyLong_FromLong(((lv_font_glyph_dsc_t*)(self->data))->glyph_index );
+}
+
+static int
+set_struct_bitfield_font_glyph_dsc_t_glyph_index(StructObject *self, PyObject *value, void *closure)
+{
+    long v;
+    if (long_to_int(value, &v, 0, 16777215)) return -1;
+    ((lv_font_glyph_dsc_t*)(self->data))->glyph_index = v;
+    return 0;
+}
+
+static PyGetSetDef pylv_font_glyph_dsc_t_getset[] = {
+    {"w_px", (getter) get_struct_bitfield_font_glyph_dsc_t_w_px, (setter) set_struct_bitfield_font_glyph_dsc_t_w_px, "uint32_t:8 w_px", NULL},
+    {"glyph_index", (getter) get_struct_bitfield_font_glyph_dsc_t_glyph_index, (setter) set_struct_bitfield_font_glyph_dsc_t_glyph_index, "uint32_t:24 glyph_index", NULL},
     {NULL}
 };
+
 
 static PyTypeObject pylv_font_glyph_dsc_t_Type = {
     PyVarObject_HEAD_INIT(NULL, 0)
@@ -1443,8 +1659,8 @@ static PyTypeObject pylv_font_glyph_dsc_t_Type = {
     .tp_init = (initproc) pylv_font_glyph_dsc_t_init,
     .tp_dealloc = (destructor) Struct_dealloc,
     .tp_getset = pylv_font_glyph_dsc_t_getset,
-    .tp_repr = (reprfunc) Struct_repr
-
+    .tp_repr = (reprfunc) Struct_repr,
+    .tp_as_buffer = &Struct_bufferprocs
 };
 
 
@@ -1452,22 +1668,56 @@ static PyTypeObject pylv_font_glyph_dsc_t_Type = {
 static int
 pylv_font_unicode_map_t_init(StructObject *self, PyObject *args, PyObject *kwds) 
 {
-
-    self->data = PyMem_Malloc(sizeof(lv_font_unicode_map_t));
+    self->size = sizeof(lv_font_unicode_map_t);
+    self->data = PyMem_Malloc(self->size);
     if (!self->data) return -1;
     
-    memset(self->data, 0, sizeof(lv_font_unicode_map_t));
+    memset(self->data, 0, self->size);
     self->owner = (PyObject *)self;
 
     return 0;
 }
 
-static PyGetSetDef pylv_font_unicode_map_t_getset[] = {
-    {"unicode", (getter) NULL, (setter) NULL, "uint32_t unicode", NULL},
-    {"glyph_dsc_index", (getter) NULL, (setter) NULL, "uint32_t glyph_dsc_index", NULL},
 
+
+static PyObject *
+get_struct_bitfield_font_unicode_map_t_unicode(StructObject *self, void *closure)
+{
+    return PyLong_FromLong(((lv_font_unicode_map_t*)(self->data))->unicode );
+}
+
+static int
+set_struct_bitfield_font_unicode_map_t_unicode(StructObject *self, PyObject *value, void *closure)
+{
+    long v;
+    if (long_to_int(value, &v, 0, 2097151)) return -1;
+    ((lv_font_unicode_map_t*)(self->data))->unicode = v;
+    return 0;
+}
+
+
+
+static PyObject *
+get_struct_bitfield_font_unicode_map_t_glyph_dsc_index(StructObject *self, void *closure)
+{
+    return PyLong_FromLong(((lv_font_unicode_map_t*)(self->data))->glyph_dsc_index );
+}
+
+static int
+set_struct_bitfield_font_unicode_map_t_glyph_dsc_index(StructObject *self, PyObject *value, void *closure)
+{
+    long v;
+    if (long_to_int(value, &v, 0, 2047)) return -1;
+    ((lv_font_unicode_map_t*)(self->data))->glyph_dsc_index = v;
+    return 0;
+}
+
+static PyGetSetDef pylv_font_unicode_map_t_getset[] = {
+    {"unicode", (getter) get_struct_bitfield_font_unicode_map_t_unicode, (setter) set_struct_bitfield_font_unicode_map_t_unicode, "uint32_t:21 unicode", NULL},
+    {"glyph_dsc_index", (getter) get_struct_bitfield_font_unicode_map_t_glyph_dsc_index, (setter) set_struct_bitfield_font_unicode_map_t_glyph_dsc_index, "uint32_t:11 glyph_dsc_index", NULL},
     {NULL}
 };
+
 
 static PyTypeObject pylv_font_unicode_map_t_Type = {
     PyVarObject_HEAD_INIT(NULL, 0)
@@ -1480,8 +1730,8 @@ static PyTypeObject pylv_font_unicode_map_t_Type = {
     .tp_init = (initproc) pylv_font_unicode_map_t_init,
     .tp_dealloc = (destructor) Struct_dealloc,
     .tp_getset = pylv_font_unicode_map_t_getset,
-    .tp_repr = (reprfunc) Struct_repr
-
+    .tp_repr = (reprfunc) Struct_repr,
+    .tp_as_buffer = &Struct_bufferprocs
 };
 
 
@@ -1489,32 +1739,83 @@ static PyTypeObject pylv_font_unicode_map_t_Type = {
 static int
 pylv_font_t_init(StructObject *self, PyObject *args, PyObject *kwds) 
 {
-
-    self->data = PyMem_Malloc(sizeof(lv_font_t));
+    self->size = sizeof(lv_font_t);
+    self->data = PyMem_Malloc(self->size);
     if (!self->data) return -1;
     
-    memset(self->data, 0, sizeof(lv_font_t));
+    memset(self->data, 0, self->size);
     self->owner = (PyObject *)self;
 
+    return 0;
+}
+
+
+
+static PyObject *
+get_struct_bitfield_font_t_h_px(StructObject *self, void *closure)
+{
+    return PyLong_FromLong(((lv_font_t*)(self->data))->h_px );
+}
+
+static int
+set_struct_bitfield_font_t_h_px(StructObject *self, PyObject *value, void *closure)
+{
+    long v;
+    if (long_to_int(value, &v, 0, 255)) return -1;
+    ((lv_font_t*)(self->data))->h_px = v;
+    return 0;
+}
+
+
+
+static PyObject *
+get_struct_bitfield_font_t_bpp(StructObject *self, void *closure)
+{
+    return PyLong_FromLong(((lv_font_t*)(self->data))->bpp );
+}
+
+static int
+set_struct_bitfield_font_t_bpp(StructObject *self, PyObject *value, void *closure)
+{
+    long v;
+    if (long_to_int(value, &v, 0, 15)) return -1;
+    ((lv_font_t*)(self->data))->bpp = v;
+    return 0;
+}
+
+
+
+static PyObject *
+get_struct_bitfield_font_t_monospace(StructObject *self, void *closure)
+{
+    return PyLong_FromLong(((lv_font_t*)(self->data))->monospace );
+}
+
+static int
+set_struct_bitfield_font_t_monospace(StructObject *self, PyObject *value, void *closure)
+{
+    long v;
+    if (long_to_int(value, &v, 0, 255)) return -1;
+    ((lv_font_t*)(self->data))->monospace = v;
     return 0;
 }
 
 static PyGetSetDef pylv_font_t_getset[] = {
     {"unicode_first", (getter) struct_get_uint32, (setter) struct_set_uint32, "uint32_t unicode_first", (void*)offsetof(lv_font_t, unicode_first)},
     {"unicode_last", (getter) struct_get_uint32, (setter) struct_set_uint32, "uint32_t unicode_last", (void*)offsetof(lv_font_t, unicode_last)},
-    {"glyph_bitmap", (getter) struct_get_blob, (setter) struct_set_blob, "uint8_t glyph_bitmap", (void*)offsetof(lv_font_t, glyph_bitmap)},
-    {"glyph_dsc", (getter) struct_get_blob, (setter) struct_set_blob, "lv_font_glyph_dsc_t glyph_dsc", (void*)offsetof(lv_font_t, glyph_dsc)},
-    {"unicode_list", (getter) struct_get_blob, (setter) struct_set_blob, "uint32_t unicode_list", (void*)offsetof(lv_font_t, unicode_list)},
-    {"get_bitmap", (getter) struct_get_blob, (setter) struct_set_blob, "const uint8_t *get_bitmap(const struct _lv_font_struct *, uint32_t) get_bitmap", (void*)offsetof(lv_font_t, get_bitmap)},
-    {"get_width", (getter) struct_get_blob, (setter) struct_set_blob, "int16_t get_width(const struct _lv_font_struct *, uint32_t) get_width", (void*)offsetof(lv_font_t, get_width)},
-    {"next_page", (getter) struct_get_blob, (setter) struct_set_blob, "struct _lv_font_struct next_page", (void*)offsetof(lv_font_t, next_page)},
-    {"h_px", (getter) NULL, (setter) NULL, "uint32_t h_px", NULL},
-    {"bpp", (getter) NULL, (setter) NULL, "uint32_t bpp", NULL},
-    {"monospace", (getter) NULL, (setter) NULL, "uint32_t monospace", NULL},
+    {"glyph_bitmap", (getter) struct_get_struct, (setter) struct_set_struct, "uint8_t glyph_bitmap", & ((struct_closure_t){ &Blob_Type, offsetof(lv_font_t, glyph_bitmap), sizeof(((lv_font_t *)0)->glyph_bitmap)})},
+    {"glyph_dsc", (getter) struct_get_struct, (setter) struct_set_struct, "lv_font_glyph_dsc_t glyph_dsc", & ((struct_closure_t){ &Blob_Type, offsetof(lv_font_t, glyph_dsc), sizeof(((lv_font_t *)0)->glyph_dsc)})},
+    {"unicode_list", (getter) struct_get_struct, (setter) struct_set_struct, "uint32_t unicode_list", & ((struct_closure_t){ &Blob_Type, offsetof(lv_font_t, unicode_list), sizeof(((lv_font_t *)0)->unicode_list)})},
+    {"get_bitmap", (getter) struct_get_struct, (setter) struct_set_struct, "const uint8_t *get_bitmap(const struct _lv_font_struct *, uint32_t) get_bitmap", & ((struct_closure_t){ &Blob_Type, offsetof(lv_font_t, get_bitmap), sizeof(((lv_font_t *)0)->get_bitmap)})},
+    {"get_width", (getter) struct_get_struct, (setter) struct_set_struct, "int16_t get_width(const struct _lv_font_struct *, uint32_t) get_width", & ((struct_closure_t){ &Blob_Type, offsetof(lv_font_t, get_width), sizeof(((lv_font_t *)0)->get_width)})},
+    {"next_page", (getter) struct_get_struct, (setter) struct_set_struct, "struct _lv_font_struct next_page", & ((struct_closure_t){ &Blob_Type, offsetof(lv_font_t, next_page), sizeof(((lv_font_t *)0)->next_page)})},
+    {"h_px", (getter) get_struct_bitfield_font_t_h_px, (setter) set_struct_bitfield_font_t_h_px, "uint32_t:8 h_px", NULL},
+    {"bpp", (getter) get_struct_bitfield_font_t_bpp, (setter) set_struct_bitfield_font_t_bpp, "uint32_t:4 bpp", NULL},
+    {"monospace", (getter) get_struct_bitfield_font_t_monospace, (setter) set_struct_bitfield_font_t_monospace, "uint32_t:8 monospace", NULL},
     {"glyph_cnt", (getter) struct_get_uint16, (setter) struct_set_uint16, "uint16_t glyph_cnt", (void*)offsetof(lv_font_t, glyph_cnt)},
-
     {NULL}
 };
+
 
 static PyTypeObject pylv_font_t_Type = {
     PyVarObject_HEAD_INIT(NULL, 0)
@@ -1527,8 +1828,8 @@ static PyTypeObject pylv_font_t_Type = {
     .tp_init = (initproc) pylv_font_t_init,
     .tp_dealloc = (destructor) Struct_dealloc,
     .tp_getset = pylv_font_t_getset,
-    .tp_repr = (reprfunc) Struct_repr
-
+    .tp_repr = (reprfunc) Struct_repr,
+    .tp_as_buffer = &Struct_bufferprocs
 };
 
 
@@ -1536,34 +1837,102 @@ static PyTypeObject pylv_font_t_Type = {
 static int
 pylv_anim_t_init(StructObject *self, PyObject *args, PyObject *kwds) 
 {
-
-    self->data = PyMem_Malloc(sizeof(lv_anim_t));
+    self->size = sizeof(lv_anim_t);
+    self->data = PyMem_Malloc(self->size);
     if (!self->data) return -1;
     
-    memset(self->data, 0, sizeof(lv_anim_t));
+    memset(self->data, 0, self->size);
     self->owner = (PyObject *)self;
 
     return 0;
 }
 
+
+
+static PyObject *
+get_struct_bitfield_anim_t_playback(StructObject *self, void *closure)
+{
+    return PyLong_FromLong(((lv_anim_t*)(self->data))->playback );
+}
+
+static int
+set_struct_bitfield_anim_t_playback(StructObject *self, PyObject *value, void *closure)
+{
+    long v;
+    if (long_to_int(value, &v, 0, 1)) return -1;
+    ((lv_anim_t*)(self->data))->playback = v;
+    return 0;
+}
+
+
+
+static PyObject *
+get_struct_bitfield_anim_t_repeat(StructObject *self, void *closure)
+{
+    return PyLong_FromLong(((lv_anim_t*)(self->data))->repeat );
+}
+
+static int
+set_struct_bitfield_anim_t_repeat(StructObject *self, PyObject *value, void *closure)
+{
+    long v;
+    if (long_to_int(value, &v, 0, 1)) return -1;
+    ((lv_anim_t*)(self->data))->repeat = v;
+    return 0;
+}
+
+
+
+static PyObject *
+get_struct_bitfield_anim_t_playback_now(StructObject *self, void *closure)
+{
+    return PyLong_FromLong(((lv_anim_t*)(self->data))->playback_now );
+}
+
+static int
+set_struct_bitfield_anim_t_playback_now(StructObject *self, PyObject *value, void *closure)
+{
+    long v;
+    if (long_to_int(value, &v, 0, 1)) return -1;
+    ((lv_anim_t*)(self->data))->playback_now = v;
+    return 0;
+}
+
+
+
+static PyObject *
+get_struct_bitfield_anim_t_has_run(StructObject *self, void *closure)
+{
+    return PyLong_FromLong(((lv_anim_t*)(self->data))->has_run );
+}
+
+static int
+set_struct_bitfield_anim_t_has_run(StructObject *self, PyObject *value, void *closure)
+{
+    long v;
+    if (long_to_int(value, &v, 0, 1)) return -1;
+    ((lv_anim_t*)(self->data))->has_run = v;
+    return 0;
+}
+
 static PyGetSetDef pylv_anim_t_getset[] = {
-    {"var", (getter) struct_get_blob, (setter) struct_set_blob, "void var", (void*)offsetof(lv_anim_t, var)},
-    {"fp", (getter) struct_get_blob, (setter) struct_set_blob, "lv_anim_fp_t fp", (void*)offsetof(lv_anim_t, fp)},
-    {"end_cb", (getter) struct_get_blob, (setter) struct_set_blob, "lv_anim_cb_t end_cb", (void*)offsetof(lv_anim_t, end_cb)},
-    {"path", (getter) struct_get_blob, (setter) struct_set_blob, "lv_anim_path_t path", (void*)offsetof(lv_anim_t, path)},
+    {"var", (getter) struct_get_struct, (setter) struct_set_struct, "void var", & ((struct_closure_t){ &Blob_Type, offsetof(lv_anim_t, var), sizeof(((lv_anim_t *)0)->var)})},
+    {"fp", (getter) struct_get_struct, (setter) struct_set_struct, "lv_anim_fp_t fp", & ((struct_closure_t){ &Blob_Type, offsetof(lv_anim_t, fp), sizeof(((lv_anim_t *)0)->fp)})},
+    {"end_cb", (getter) struct_get_struct, (setter) struct_set_struct, "lv_anim_cb_t end_cb", & ((struct_closure_t){ &Blob_Type, offsetof(lv_anim_t, end_cb), sizeof(((lv_anim_t *)0)->end_cb)})},
+    {"path", (getter) struct_get_struct, (setter) struct_set_struct, "lv_anim_path_t path", & ((struct_closure_t){ &Blob_Type, offsetof(lv_anim_t, path), sizeof(((lv_anim_t *)0)->path)})},
     {"start", (getter) struct_get_int32, (setter) struct_set_int32, "int32_t start", (void*)offsetof(lv_anim_t, start)},
     {"end", (getter) struct_get_int32, (setter) struct_set_int32, "int32_t end", (void*)offsetof(lv_anim_t, end)},
     {"time", (getter) struct_get_uint16, (setter) struct_set_uint16, "uint16_t time", (void*)offsetof(lv_anim_t, time)},
     {"act_time", (getter) struct_get_int16, (setter) struct_set_int16, "int16_t act_time", (void*)offsetof(lv_anim_t, act_time)},
     {"playback_pause", (getter) struct_get_uint16, (setter) struct_set_uint16, "uint16_t playback_pause", (void*)offsetof(lv_anim_t, playback_pause)},
     {"repeat_pause", (getter) struct_get_uint16, (setter) struct_set_uint16, "uint16_t repeat_pause", (void*)offsetof(lv_anim_t, repeat_pause)},
-    {"playback", (getter) NULL, (setter) NULL, "uint8_t playback", NULL},
-    {"repeat", (getter) NULL, (setter) NULL, "uint8_t repeat", NULL},
-    {"playback_now", (getter) NULL, (setter) NULL, "uint8_t playback_now", NULL},
-    {"has_run", (getter) NULL, (setter) NULL, "uint32_t has_run", NULL},
-
+    {"playback", (getter) get_struct_bitfield_anim_t_playback, (setter) set_struct_bitfield_anim_t_playback, "uint8_t:1 playback", NULL},
+    {"repeat", (getter) get_struct_bitfield_anim_t_repeat, (setter) set_struct_bitfield_anim_t_repeat, "uint8_t:1 repeat", NULL},
+    {"playback_now", (getter) get_struct_bitfield_anim_t_playback_now, (setter) set_struct_bitfield_anim_t_playback_now, "uint8_t:1 playback_now", NULL},
+    {"has_run", (getter) get_struct_bitfield_anim_t_has_run, (setter) set_struct_bitfield_anim_t_has_run, "uint32_t:1 has_run", NULL},
     {NULL}
 };
+
 
 static PyTypeObject pylv_anim_t_Type = {
     PyVarObject_HEAD_INIT(NULL, 0)
@@ -1576,8 +1945,8 @@ static PyTypeObject pylv_anim_t_Type = {
     .tp_init = (initproc) pylv_anim_t_init,
     .tp_dealloc = (destructor) Struct_dealloc,
     .tp_getset = pylv_anim_t_getset,
-    .tp_repr = (reprfunc) Struct_repr
-
+    .tp_repr = (reprfunc) Struct_repr,
+    .tp_as_buffer = &Struct_bufferprocs
 };
 
 
@@ -1585,25 +1954,42 @@ static PyTypeObject pylv_anim_t_Type = {
 static int
 pylv_style_t_init(StructObject *self, PyObject *args, PyObject *kwds) 
 {
-
-    self->data = PyMem_Malloc(sizeof(lv_style_t));
+    self->size = sizeof(lv_style_t);
+    self->data = PyMem_Malloc(self->size);
     if (!self->data) return -1;
     
-    memset(self->data, 0, sizeof(lv_style_t));
+    memset(self->data, 0, self->size);
     self->owner = (PyObject *)self;
 
     return 0;
 }
 
+
+
+static PyObject *
+get_struct_bitfield_style_t_glass(StructObject *self, void *closure)
+{
+    return PyLong_FromLong(((lv_style_t*)(self->data))->glass );
+}
+
+static int
+set_struct_bitfield_style_t_glass(StructObject *self, PyObject *value, void *closure)
+{
+    long v;
+    if (long_to_int(value, &v, 0, 1)) return -1;
+    ((lv_style_t*)(self->data))->glass = v;
+    return 0;
+}
+
 static PyGetSetDef pylv_style_t_getset[] = {
-    {"glass", (getter) NULL, (setter) NULL, "uint8_t glass", NULL},
+    {"glass", (getter) get_struct_bitfield_style_t_glass, (setter) set_struct_bitfield_style_t_glass, "uint8_t:1 glass", NULL},
     {"body", (getter) struct_get_struct, (setter) struct_set_struct, "struct  {   lv_color_t main_color;   lv_color_t grad_color;   lv_coord_t radius;   lv_opa_t opa;   struct    {     lv_color_t color;     lv_coord_t width;     lv_border_part_t part;     lv_opa_t opa;   } border;   struct    {     lv_color_t color;     lv_coord_t width;     lv_shadow_type_t type;   } shadow;   struct    {     lv_coord_t ver;     lv_coord_t hor;     lv_coord_t inner;   } padding; } body", & ((struct_closure_t){ &pylv_style_t_body_Type, offsetof(lv_style_t, body), sizeof(((lv_style_t *)0)->body)})},
     {"text", (getter) struct_get_struct, (setter) struct_set_struct, "struct  {   lv_color_t color;   const lv_font_t *font;   lv_coord_t letter_space;   lv_coord_t line_space;   lv_opa_t opa; } text", & ((struct_closure_t){ &pylv_style_t_text_Type, offsetof(lv_style_t, text), sizeof(((lv_style_t *)0)->text)})},
     {"image", (getter) struct_get_struct, (setter) struct_set_struct, "struct  {   lv_color_t color;   lv_opa_t intense;   lv_opa_t opa; } image", & ((struct_closure_t){ &pylv_style_t_image_Type, offsetof(lv_style_t, image), sizeof(((lv_style_t *)0)->image)})},
     {"line", (getter) struct_get_struct, (setter) struct_set_struct, "struct  {   lv_color_t color;   lv_coord_t width;   lv_opa_t opa;   uint8_t rounded : 1; } line", & ((struct_closure_t){ &pylv_style_t_line_Type, offsetof(lv_style_t, line), sizeof(((lv_style_t *)0)->line)})},
-
     {NULL}
 };
+
 
 static PyTypeObject pylv_style_t_Type = {
     PyVarObject_HEAD_INIT(NULL, 0)
@@ -1616,8 +2002,8 @@ static PyTypeObject pylv_style_t_Type = {
     .tp_init = (initproc) pylv_style_t_init,
     .tp_dealloc = (destructor) Struct_dealloc,
     .tp_getset = pylv_style_t_getset,
-    .tp_repr = (reprfunc) Struct_repr
-
+    .tp_repr = (reprfunc) Struct_repr,
+    .tp_as_buffer = &Struct_bufferprocs
 };
 
 
@@ -1625,30 +2011,64 @@ static PyTypeObject pylv_style_t_Type = {
 static int
 pylv_style_anim_t_init(StructObject *self, PyObject *args, PyObject *kwds) 
 {
-
-    self->data = PyMem_Malloc(sizeof(lv_style_anim_t));
+    self->size = sizeof(lv_style_anim_t);
+    self->data = PyMem_Malloc(self->size);
     if (!self->data) return -1;
     
-    memset(self->data, 0, sizeof(lv_style_anim_t));
+    memset(self->data, 0, self->size);
     self->owner = (PyObject *)self;
 
     return 0;
 }
 
+
+
+static PyObject *
+get_struct_bitfield_style_anim_t_playback(StructObject *self, void *closure)
+{
+    return PyLong_FromLong(((lv_style_anim_t*)(self->data))->playback );
+}
+
+static int
+set_struct_bitfield_style_anim_t_playback(StructObject *self, PyObject *value, void *closure)
+{
+    long v;
+    if (long_to_int(value, &v, 0, 1)) return -1;
+    ((lv_style_anim_t*)(self->data))->playback = v;
+    return 0;
+}
+
+
+
+static PyObject *
+get_struct_bitfield_style_anim_t_repeat(StructObject *self, void *closure)
+{
+    return PyLong_FromLong(((lv_style_anim_t*)(self->data))->repeat );
+}
+
+static int
+set_struct_bitfield_style_anim_t_repeat(StructObject *self, PyObject *value, void *closure)
+{
+    long v;
+    if (long_to_int(value, &v, 0, 1)) return -1;
+    ((lv_style_anim_t*)(self->data))->repeat = v;
+    return 0;
+}
+
 static PyGetSetDef pylv_style_anim_t_getset[] = {
-    {"style_start", (getter) struct_get_blob, (setter) struct_set_blob, "lv_style_t style_start", (void*)offsetof(lv_style_anim_t, style_start)},
-    {"style_end", (getter) struct_get_blob, (setter) struct_set_blob, "lv_style_t style_end", (void*)offsetof(lv_style_anim_t, style_end)},
-    {"style_anim", (getter) struct_get_blob, (setter) struct_set_blob, "lv_style_t style_anim", (void*)offsetof(lv_style_anim_t, style_anim)},
-    {"end_cb", (getter) struct_get_blob, (setter) struct_set_blob, "lv_anim_cb_t end_cb", (void*)offsetof(lv_style_anim_t, end_cb)},
+    {"style_start", (getter) struct_get_struct, (setter) struct_set_struct, "lv_style_t style_start", & ((struct_closure_t){ &Blob_Type, offsetof(lv_style_anim_t, style_start), sizeof(((lv_style_anim_t *)0)->style_start)})},
+    {"style_end", (getter) struct_get_struct, (setter) struct_set_struct, "lv_style_t style_end", & ((struct_closure_t){ &Blob_Type, offsetof(lv_style_anim_t, style_end), sizeof(((lv_style_anim_t *)0)->style_end)})},
+    {"style_anim", (getter) struct_get_struct, (setter) struct_set_struct, "lv_style_t style_anim", & ((struct_closure_t){ &Blob_Type, offsetof(lv_style_anim_t, style_anim), sizeof(((lv_style_anim_t *)0)->style_anim)})},
+    {"end_cb", (getter) struct_get_struct, (setter) struct_set_struct, "lv_anim_cb_t end_cb", & ((struct_closure_t){ &Blob_Type, offsetof(lv_style_anim_t, end_cb), sizeof(((lv_style_anim_t *)0)->end_cb)})},
     {"time", (getter) struct_get_int16, (setter) struct_set_int16, "int16_t time", (void*)offsetof(lv_style_anim_t, time)},
     {"act_time", (getter) struct_get_int16, (setter) struct_set_int16, "int16_t act_time", (void*)offsetof(lv_style_anim_t, act_time)},
     {"playback_pause", (getter) struct_get_uint16, (setter) struct_set_uint16, "uint16_t playback_pause", (void*)offsetof(lv_style_anim_t, playback_pause)},
     {"repeat_pause", (getter) struct_get_uint16, (setter) struct_set_uint16, "uint16_t repeat_pause", (void*)offsetof(lv_style_anim_t, repeat_pause)},
-    {"playback", (getter) NULL, (setter) NULL, "uint8_t playback", NULL},
-    {"repeat", (getter) NULL, (setter) NULL, "uint8_t repeat", NULL},
-
+    {"playback", (getter) get_struct_bitfield_style_anim_t_playback, (setter) set_struct_bitfield_style_anim_t_playback, "uint8_t:1 playback", NULL},
+    {"repeat", (getter) get_struct_bitfield_style_anim_t_repeat, (setter) set_struct_bitfield_style_anim_t_repeat, "uint8_t:1 repeat", NULL},
     {NULL}
 };
+
 
 static PyTypeObject pylv_style_anim_t_Type = {
     PyVarObject_HEAD_INIT(NULL, 0)
@@ -1661,8 +2081,8 @@ static PyTypeObject pylv_style_anim_t_Type = {
     .tp_init = (initproc) pylv_style_anim_t_init,
     .tp_dealloc = (destructor) Struct_dealloc,
     .tp_getset = pylv_style_anim_t_getset,
-    .tp_repr = (reprfunc) Struct_repr
-
+    .tp_repr = (reprfunc) Struct_repr,
+    .tp_as_buffer = &Struct_bufferprocs
 };
 
 
@@ -1670,41 +2090,177 @@ static PyTypeObject pylv_style_anim_t_Type = {
 static int
 pylv_obj_t_init(StructObject *self, PyObject *args, PyObject *kwds) 
 {
-
-    self->data = PyMem_Malloc(sizeof(lv_obj_t));
+    self->size = sizeof(lv_obj_t);
+    self->data = PyMem_Malloc(self->size);
     if (!self->data) return -1;
     
-    memset(self->data, 0, sizeof(lv_obj_t));
+    memset(self->data, 0, self->size);
     self->owner = (PyObject *)self;
 
     return 0;
 }
 
+
+
+static PyObject *
+get_struct_bitfield_obj_t_click(StructObject *self, void *closure)
+{
+    return PyLong_FromLong(((lv_obj_t*)(self->data))->click );
+}
+
+static int
+set_struct_bitfield_obj_t_click(StructObject *self, PyObject *value, void *closure)
+{
+    long v;
+    if (long_to_int(value, &v, 0, 1)) return -1;
+    ((lv_obj_t*)(self->data))->click = v;
+    return 0;
+}
+
+
+
+static PyObject *
+get_struct_bitfield_obj_t_drag(StructObject *self, void *closure)
+{
+    return PyLong_FromLong(((lv_obj_t*)(self->data))->drag );
+}
+
+static int
+set_struct_bitfield_obj_t_drag(StructObject *self, PyObject *value, void *closure)
+{
+    long v;
+    if (long_to_int(value, &v, 0, 1)) return -1;
+    ((lv_obj_t*)(self->data))->drag = v;
+    return 0;
+}
+
+
+
+static PyObject *
+get_struct_bitfield_obj_t_drag_throw(StructObject *self, void *closure)
+{
+    return PyLong_FromLong(((lv_obj_t*)(self->data))->drag_throw );
+}
+
+static int
+set_struct_bitfield_obj_t_drag_throw(StructObject *self, PyObject *value, void *closure)
+{
+    long v;
+    if (long_to_int(value, &v, 0, 1)) return -1;
+    ((lv_obj_t*)(self->data))->drag_throw = v;
+    return 0;
+}
+
+
+
+static PyObject *
+get_struct_bitfield_obj_t_drag_parent(StructObject *self, void *closure)
+{
+    return PyLong_FromLong(((lv_obj_t*)(self->data))->drag_parent );
+}
+
+static int
+set_struct_bitfield_obj_t_drag_parent(StructObject *self, PyObject *value, void *closure)
+{
+    long v;
+    if (long_to_int(value, &v, 0, 1)) return -1;
+    ((lv_obj_t*)(self->data))->drag_parent = v;
+    return 0;
+}
+
+
+
+static PyObject *
+get_struct_bitfield_obj_t_hidden(StructObject *self, void *closure)
+{
+    return PyLong_FromLong(((lv_obj_t*)(self->data))->hidden );
+}
+
+static int
+set_struct_bitfield_obj_t_hidden(StructObject *self, PyObject *value, void *closure)
+{
+    long v;
+    if (long_to_int(value, &v, 0, 1)) return -1;
+    ((lv_obj_t*)(self->data))->hidden = v;
+    return 0;
+}
+
+
+
+static PyObject *
+get_struct_bitfield_obj_t_top(StructObject *self, void *closure)
+{
+    return PyLong_FromLong(((lv_obj_t*)(self->data))->top );
+}
+
+static int
+set_struct_bitfield_obj_t_top(StructObject *self, PyObject *value, void *closure)
+{
+    long v;
+    if (long_to_int(value, &v, 0, 1)) return -1;
+    ((lv_obj_t*)(self->data))->top = v;
+    return 0;
+}
+
+
+
+static PyObject *
+get_struct_bitfield_obj_t_opa_scale_en(StructObject *self, void *closure)
+{
+    return PyLong_FromLong(((lv_obj_t*)(self->data))->opa_scale_en );
+}
+
+static int
+set_struct_bitfield_obj_t_opa_scale_en(StructObject *self, PyObject *value, void *closure)
+{
+    long v;
+    if (long_to_int(value, &v, 0, 1)) return -1;
+    ((lv_obj_t*)(self->data))->opa_scale_en = v;
+    return 0;
+}
+
+
+
+static PyObject *
+get_struct_bitfield_obj_t_parent_event(StructObject *self, void *closure)
+{
+    return PyLong_FromLong(((lv_obj_t*)(self->data))->parent_event );
+}
+
+static int
+set_struct_bitfield_obj_t_parent_event(StructObject *self, PyObject *value, void *closure)
+{
+    long v;
+    if (long_to_int(value, &v, 0, 1)) return -1;
+    ((lv_obj_t*)(self->data))->parent_event = v;
+    return 0;
+}
+
 static PyGetSetDef pylv_obj_t_getset[] = {
-    {"par", (getter) struct_get_blob, (setter) struct_set_blob, "struct _lv_obj_t par", (void*)offsetof(lv_obj_t, par)},
-    {"child_ll", (getter) struct_get_blob, (setter) struct_set_blob, "lv_ll_t child_ll", (void*)offsetof(lv_obj_t, child_ll)},
-    {"coords", (getter) struct_get_blob, (setter) struct_set_blob, "lv_area_t coords", (void*)offsetof(lv_obj_t, coords)},
-    {"event_cb", (getter) struct_get_blob, (setter) struct_set_blob, "lv_event_cb_t event_cb", (void*)offsetof(lv_obj_t, event_cb)},
-    {"signal_cb", (getter) struct_get_blob, (setter) struct_set_blob, "lv_signal_cb_t signal_cb", (void*)offsetof(lv_obj_t, signal_cb)},
-    {"design_cb", (getter) struct_get_blob, (setter) struct_set_blob, "lv_design_cb_t design_cb", (void*)offsetof(lv_obj_t, design_cb)},
-    {"ext_attr", (getter) struct_get_blob, (setter) struct_set_blob, "void ext_attr", (void*)offsetof(lv_obj_t, ext_attr)},
-    {"style_p", (getter) struct_get_blob, (setter) struct_set_blob, "lv_style_t style_p", (void*)offsetof(lv_obj_t, style_p)},
-    {"group_p", (getter) struct_get_blob, (setter) struct_set_blob, "void group_p", (void*)offsetof(lv_obj_t, group_p)},
-    {"click", (getter) NULL, (setter) NULL, "uint8_t click", NULL},
-    {"drag", (getter) NULL, (setter) NULL, "uint8_t drag", NULL},
-    {"drag_throw", (getter) NULL, (setter) NULL, "uint8_t drag_throw", NULL},
-    {"drag_parent", (getter) NULL, (setter) NULL, "uint8_t drag_parent", NULL},
-    {"hidden", (getter) NULL, (setter) NULL, "uint8_t hidden", NULL},
-    {"top", (getter) NULL, (setter) NULL, "uint8_t top", NULL},
-    {"opa_scale_en", (getter) NULL, (setter) NULL, "uint8_t opa_scale_en", NULL},
-    {"parent_event", (getter) NULL, (setter) NULL, "uint8_t parent_event", NULL},
+    {"par", (getter) struct_get_struct, (setter) struct_set_struct, "struct _lv_obj_t par", & ((struct_closure_t){ &Blob_Type, offsetof(lv_obj_t, par), sizeof(((lv_obj_t *)0)->par)})},
+    {"child_ll", (getter) struct_get_struct, (setter) struct_set_struct, "lv_ll_t child_ll", & ((struct_closure_t){ &pylv_ll_t_Type, offsetof(lv_obj_t, child_ll), sizeof(lv_ll_t)})},
+    {"coords", (getter) struct_get_struct, (setter) struct_set_struct, "lv_area_t coords", & ((struct_closure_t){ &pylv_area_t_Type, offsetof(lv_obj_t, coords), sizeof(lv_area_t)})},
+    {"event_cb", (getter) struct_get_struct, (setter) struct_set_struct, "lv_event_cb_t event_cb", & ((struct_closure_t){ &Blob_Type, offsetof(lv_obj_t, event_cb), sizeof(((lv_obj_t *)0)->event_cb)})},
+    {"signal_cb", (getter) struct_get_struct, (setter) struct_set_struct, "lv_signal_cb_t signal_cb", & ((struct_closure_t){ &Blob_Type, offsetof(lv_obj_t, signal_cb), sizeof(((lv_obj_t *)0)->signal_cb)})},
+    {"design_cb", (getter) struct_get_struct, (setter) struct_set_struct, "lv_design_cb_t design_cb", & ((struct_closure_t){ &Blob_Type, offsetof(lv_obj_t, design_cb), sizeof(((lv_obj_t *)0)->design_cb)})},
+    {"ext_attr", (getter) struct_get_struct, (setter) struct_set_struct, "void ext_attr", & ((struct_closure_t){ &Blob_Type, offsetof(lv_obj_t, ext_attr), sizeof(((lv_obj_t *)0)->ext_attr)})},
+    {"style_p", (getter) struct_get_struct, (setter) struct_set_struct, "lv_style_t style_p", & ((struct_closure_t){ &Blob_Type, offsetof(lv_obj_t, style_p), sizeof(((lv_obj_t *)0)->style_p)})},
+    {"group_p", (getter) struct_get_struct, (setter) struct_set_struct, "void group_p", & ((struct_closure_t){ &Blob_Type, offsetof(lv_obj_t, group_p), sizeof(((lv_obj_t *)0)->group_p)})},
+    {"click", (getter) get_struct_bitfield_obj_t_click, (setter) set_struct_bitfield_obj_t_click, "uint8_t:1 click", NULL},
+    {"drag", (getter) get_struct_bitfield_obj_t_drag, (setter) set_struct_bitfield_obj_t_drag, "uint8_t:1 drag", NULL},
+    {"drag_throw", (getter) get_struct_bitfield_obj_t_drag_throw, (setter) set_struct_bitfield_obj_t_drag_throw, "uint8_t:1 drag_throw", NULL},
+    {"drag_parent", (getter) get_struct_bitfield_obj_t_drag_parent, (setter) set_struct_bitfield_obj_t_drag_parent, "uint8_t:1 drag_parent", NULL},
+    {"hidden", (getter) get_struct_bitfield_obj_t_hidden, (setter) set_struct_bitfield_obj_t_hidden, "uint8_t:1 hidden", NULL},
+    {"top", (getter) get_struct_bitfield_obj_t_top, (setter) set_struct_bitfield_obj_t_top, "uint8_t:1 top", NULL},
+    {"opa_scale_en", (getter) get_struct_bitfield_obj_t_opa_scale_en, (setter) set_struct_bitfield_obj_t_opa_scale_en, "uint8_t:1 opa_scale_en", NULL},
+    {"parent_event", (getter) get_struct_bitfield_obj_t_parent_event, (setter) set_struct_bitfield_obj_t_parent_event, "uint8_t:1 parent_event", NULL},
     {"protect", (getter) struct_get_uint8, (setter) struct_set_uint8, "uint8_t protect", (void*)offsetof(lv_obj_t, protect)},
     {"opa_scale", (getter) struct_get_uint8, (setter) struct_set_uint8, "lv_opa_t opa_scale", (void*)offsetof(lv_obj_t, opa_scale)},
     {"ext_size", (getter) struct_get_int16, (setter) struct_set_int16, "lv_coord_t ext_size", (void*)offsetof(lv_obj_t, ext_size)},
-    {"user_data", (getter) struct_get_blob, (setter) struct_set_blob, "lv_obj_user_data_t user_data", (void*)offsetof(lv_obj_t, user_data)},
-
+    {"user_data", (getter) struct_get_struct, (setter) struct_set_struct, "lv_obj_user_data_t user_data", & ((struct_closure_t){ &Blob_Type, offsetof(lv_obj_t, user_data), sizeof(((lv_obj_t *)0)->user_data)})},
     {NULL}
 };
+
 
 static PyTypeObject pylv_obj_t_Type = {
     PyVarObject_HEAD_INIT(NULL, 0)
@@ -1717,8 +2273,8 @@ static PyTypeObject pylv_obj_t_Type = {
     .tp_init = (initproc) pylv_obj_t_init,
     .tp_dealloc = (destructor) Struct_dealloc,
     .tp_getset = pylv_obj_t_getset,
-    .tp_repr = (reprfunc) Struct_repr
-
+    .tp_repr = (reprfunc) Struct_repr,
+    .tp_as_buffer = &Struct_bufferprocs
 };
 
 
@@ -1726,21 +2282,21 @@ static PyTypeObject pylv_obj_t_Type = {
 static int
 pylv_obj_type_t_init(StructObject *self, PyObject *args, PyObject *kwds) 
 {
-
-    self->data = PyMem_Malloc(sizeof(lv_obj_type_t));
+    self->size = sizeof(lv_obj_type_t);
+    self->data = PyMem_Malloc(self->size);
     if (!self->data) return -1;
     
-    memset(self->data, 0, sizeof(lv_obj_type_t));
+    memset(self->data, 0, self->size);
     self->owner = (PyObject *)self;
 
     return 0;
 }
 
 static PyGetSetDef pylv_obj_type_t_getset[] = {
-    {"type", (getter) struct_get_blob, (setter) struct_set_blob, "char8 type", (void*)offsetof(lv_obj_type_t, type)},
-
+    {"type", (getter) struct_get_struct, (setter) struct_set_struct, "char8 type", & ((struct_closure_t){ &Blob_Type, offsetof(lv_obj_type_t, type), sizeof(((lv_obj_type_t *)0)->type)})},
     {NULL}
 };
+
 
 static PyTypeObject pylv_obj_type_t_Type = {
     PyVarObject_HEAD_INIT(NULL, 0)
@@ -1753,8 +2309,8 @@ static PyTypeObject pylv_obj_type_t_Type = {
     .tp_init = (initproc) pylv_obj_type_t_init,
     .tp_dealloc = (destructor) Struct_dealloc,
     .tp_getset = pylv_obj_type_t_getset,
-    .tp_repr = (reprfunc) Struct_repr
-
+    .tp_repr = (reprfunc) Struct_repr,
+    .tp_as_buffer = &Struct_bufferprocs
 };
 
 
@@ -1762,32 +2318,117 @@ static PyTypeObject pylv_obj_type_t_Type = {
 static int
 pylv_group_t_init(StructObject *self, PyObject *args, PyObject *kwds) 
 {
-
-    self->data = PyMem_Malloc(sizeof(lv_group_t));
+    self->size = sizeof(lv_group_t);
+    self->data = PyMem_Malloc(self->size);
     if (!self->data) return -1;
     
-    memset(self->data, 0, sizeof(lv_group_t));
+    memset(self->data, 0, self->size);
     self->owner = (PyObject *)self;
 
     return 0;
 }
 
-static PyGetSetDef pylv_group_t_getset[] = {
-    {"obj_ll", (getter) struct_get_blob, (setter) struct_set_blob, "lv_ll_t obj_ll", (void*)offsetof(lv_group_t, obj_ll)},
-    {"obj_focus", (getter) struct_get_blob, (setter) struct_set_blob, "lv_obj_t obj_focus", (void*)offsetof(lv_group_t, obj_focus)},
-    {"style_mod", (getter) struct_get_blob, (setter) struct_set_blob, "lv_group_style_mod_func_t style_mod", (void*)offsetof(lv_group_t, style_mod)},
-    {"style_mod_edit", (getter) struct_get_blob, (setter) struct_set_blob, "lv_group_style_mod_func_t style_mod_edit", (void*)offsetof(lv_group_t, style_mod_edit)},
-    {"focus_cb", (getter) struct_get_blob, (setter) struct_set_blob, "lv_group_focus_cb_t focus_cb", (void*)offsetof(lv_group_t, focus_cb)},
-    {"style_tmp", (getter) struct_get_blob, (setter) struct_set_blob, "lv_style_t style_tmp", (void*)offsetof(lv_group_t, style_tmp)},
-    {"user_data", (getter) struct_get_blob, (setter) struct_set_blob, "lv_group_user_data_t user_data", (void*)offsetof(lv_group_t, user_data)},
-    {"frozen", (getter) NULL, (setter) NULL, "uint8_t frozen", NULL},
-    {"editing", (getter) NULL, (setter) NULL, "uint8_t editing", NULL},
-    {"click_focus", (getter) NULL, (setter) NULL, "uint8_t click_focus", NULL},
-    {"refocus_policy", (getter) NULL, (setter) NULL, "uint8_t refocus_policy", NULL},
-    {"wrap", (getter) NULL, (setter) NULL, "uint8_t wrap", NULL},
 
+
+static PyObject *
+get_struct_bitfield_group_t_frozen(StructObject *self, void *closure)
+{
+    return PyLong_FromLong(((lv_group_t*)(self->data))->frozen );
+}
+
+static int
+set_struct_bitfield_group_t_frozen(StructObject *self, PyObject *value, void *closure)
+{
+    long v;
+    if (long_to_int(value, &v, 0, 1)) return -1;
+    ((lv_group_t*)(self->data))->frozen = v;
+    return 0;
+}
+
+
+
+static PyObject *
+get_struct_bitfield_group_t_editing(StructObject *self, void *closure)
+{
+    return PyLong_FromLong(((lv_group_t*)(self->data))->editing );
+}
+
+static int
+set_struct_bitfield_group_t_editing(StructObject *self, PyObject *value, void *closure)
+{
+    long v;
+    if (long_to_int(value, &v, 0, 1)) return -1;
+    ((lv_group_t*)(self->data))->editing = v;
+    return 0;
+}
+
+
+
+static PyObject *
+get_struct_bitfield_group_t_click_focus(StructObject *self, void *closure)
+{
+    return PyLong_FromLong(((lv_group_t*)(self->data))->click_focus );
+}
+
+static int
+set_struct_bitfield_group_t_click_focus(StructObject *self, PyObject *value, void *closure)
+{
+    long v;
+    if (long_to_int(value, &v, 0, 1)) return -1;
+    ((lv_group_t*)(self->data))->click_focus = v;
+    return 0;
+}
+
+
+
+static PyObject *
+get_struct_bitfield_group_t_refocus_policy(StructObject *self, void *closure)
+{
+    return PyLong_FromLong(((lv_group_t*)(self->data))->refocus_policy );
+}
+
+static int
+set_struct_bitfield_group_t_refocus_policy(StructObject *self, PyObject *value, void *closure)
+{
+    long v;
+    if (long_to_int(value, &v, 0, 1)) return -1;
+    ((lv_group_t*)(self->data))->refocus_policy = v;
+    return 0;
+}
+
+
+
+static PyObject *
+get_struct_bitfield_group_t_wrap(StructObject *self, void *closure)
+{
+    return PyLong_FromLong(((lv_group_t*)(self->data))->wrap );
+}
+
+static int
+set_struct_bitfield_group_t_wrap(StructObject *self, PyObject *value, void *closure)
+{
+    long v;
+    if (long_to_int(value, &v, 0, 1)) return -1;
+    ((lv_group_t*)(self->data))->wrap = v;
+    return 0;
+}
+
+static PyGetSetDef pylv_group_t_getset[] = {
+    {"obj_ll", (getter) struct_get_struct, (setter) struct_set_struct, "lv_ll_t obj_ll", & ((struct_closure_t){ &pylv_ll_t_Type, offsetof(lv_group_t, obj_ll), sizeof(lv_ll_t)})},
+    {"obj_focus", (getter) struct_get_struct, (setter) struct_set_struct, "lv_obj_t obj_focus", & ((struct_closure_t){ &Blob_Type, offsetof(lv_group_t, obj_focus), sizeof(((lv_group_t *)0)->obj_focus)})},
+    {"style_mod", (getter) struct_get_struct, (setter) struct_set_struct, "lv_group_style_mod_func_t style_mod", & ((struct_closure_t){ &Blob_Type, offsetof(lv_group_t, style_mod), sizeof(((lv_group_t *)0)->style_mod)})},
+    {"style_mod_edit", (getter) struct_get_struct, (setter) struct_set_struct, "lv_group_style_mod_func_t style_mod_edit", & ((struct_closure_t){ &Blob_Type, offsetof(lv_group_t, style_mod_edit), sizeof(((lv_group_t *)0)->style_mod_edit)})},
+    {"focus_cb", (getter) struct_get_struct, (setter) struct_set_struct, "lv_group_focus_cb_t focus_cb", & ((struct_closure_t){ &Blob_Type, offsetof(lv_group_t, focus_cb), sizeof(((lv_group_t *)0)->focus_cb)})},
+    {"style_tmp", (getter) struct_get_struct, (setter) struct_set_struct, "lv_style_t style_tmp", & ((struct_closure_t){ &pylv_style_t_Type, offsetof(lv_group_t, style_tmp), sizeof(lv_style_t)})},
+    {"user_data", (getter) struct_get_struct, (setter) struct_set_struct, "lv_group_user_data_t user_data", & ((struct_closure_t){ &Blob_Type, offsetof(lv_group_t, user_data), sizeof(((lv_group_t *)0)->user_data)})},
+    {"frozen", (getter) get_struct_bitfield_group_t_frozen, (setter) set_struct_bitfield_group_t_frozen, "uint8_t:1 frozen", NULL},
+    {"editing", (getter) get_struct_bitfield_group_t_editing, (setter) set_struct_bitfield_group_t_editing, "uint8_t:1 editing", NULL},
+    {"click_focus", (getter) get_struct_bitfield_group_t_click_focus, (setter) set_struct_bitfield_group_t_click_focus, "uint8_t:1 click_focus", NULL},
+    {"refocus_policy", (getter) get_struct_bitfield_group_t_refocus_policy, (setter) set_struct_bitfield_group_t_refocus_policy, "uint8_t:1 refocus_policy", NULL},
+    {"wrap", (getter) get_struct_bitfield_group_t_wrap, (setter) set_struct_bitfield_group_t_wrap, "uint8_t:1 wrap", NULL},
     {NULL}
 };
+
 
 static PyTypeObject pylv_group_t_Type = {
     PyVarObject_HEAD_INIT(NULL, 0)
@@ -1800,8 +2441,8 @@ static PyTypeObject pylv_group_t_Type = {
     .tp_init = (initproc) pylv_group_t_init,
     .tp_dealloc = (destructor) Struct_dealloc,
     .tp_getset = pylv_group_t_getset,
-    .tp_repr = (reprfunc) Struct_repr
-
+    .tp_repr = (reprfunc) Struct_repr,
+    .tp_as_buffer = &Struct_bufferprocs
 };
 
 
@@ -1809,11 +2450,11 @@ static PyTypeObject pylv_group_t_Type = {
 static int
 pylv_theme_t_init(StructObject *self, PyObject *args, PyObject *kwds) 
 {
-
-    self->data = PyMem_Malloc(sizeof(lv_theme_t));
+    self->size = sizeof(lv_theme_t);
+    self->data = PyMem_Malloc(self->size);
     if (!self->data) return -1;
     
-    memset(self->data, 0, sizeof(lv_theme_t));
+    memset(self->data, 0, self->size);
     self->owner = (PyObject *)self;
 
     return 0;
@@ -1822,9 +2463,9 @@ pylv_theme_t_init(StructObject *self, PyObject *args, PyObject *kwds)
 static PyGetSetDef pylv_theme_t_getset[] = {
     {"style", (getter) struct_get_struct, (setter) struct_set_struct, "struct  {   lv_style_t *bg;   lv_style_t *panel;   lv_style_t *cont;   struct    {     lv_style_t *rel;     lv_style_t *pr;     lv_style_t *tgl_rel;     lv_style_t *tgl_pr;     lv_style_t *ina;   } btn;   struct    {     lv_style_t *rel;     lv_style_t *pr;     lv_style_t *tgl_rel;     lv_style_t *tgl_pr;     lv_style_t *ina;   } imgbtn;   struct    {     lv_style_t *prim;     lv_style_t *sec;     lv_style_t *hint;   } label;   struct    {     lv_style_t *light;     lv_style_t *dark;   } img;   struct    {     lv_style_t *decor;   } line;   lv_style_t *led;   struct    {     lv_style_t *bg;     lv_style_t *indic;   } bar;   struct    {     lv_style_t *bg;     lv_style_t *indic;     lv_style_t *knob;   } slider;   lv_style_t *lmeter;   lv_style_t *gauge;   lv_style_t *arc;   lv_style_t *preload;   struct    {     lv_style_t *bg;     lv_style_t *indic;     lv_style_t *knob_off;     lv_style_t *knob_on;   } sw;   lv_style_t *chart;   struct    {     lv_style_t *bg;     struct      {       lv_style_t *rel;       lv_style_t *pr;       lv_style_t *tgl_rel;       lv_style_t *tgl_pr;       lv_style_t *ina;     } box;   } cb;   struct    {     lv_style_t *bg;     struct      {       lv_style_t *rel;       lv_style_t *pr;       lv_style_t *tgl_rel;       lv_style_t *tgl_pr;       lv_style_t *ina;     } btn;   } btnm;   struct    {     lv_style_t *bg;     struct      {       lv_style_t *rel;       lv_style_t *pr;       lv_style_t *tgl_rel;       lv_style_t *tgl_pr;       lv_style_t *ina;     } btn;   } kb;   struct    {     lv_style_t *bg;     struct      {       lv_style_t *bg;       lv_style_t *rel;       lv_style_t *pr;     } btn;   } mbox;   struct    {     lv_style_t *bg;     lv_style_t *scrl;     lv_style_t *sb;   } page;   struct    {     lv_style_t *area;     lv_style_t *oneline;     lv_style_t *cursor;     lv_style_t *sb;   } ta;   struct    {     lv_style_t *bg;     lv_style_t *cursor;     lv_style_t *sb;   } spinbox;   struct    {     lv_style_t *bg;     lv_style_t *scrl;     lv_style_t *sb;     struct      {       lv_style_t *rel;       lv_style_t *pr;       lv_style_t *tgl_rel;       lv_style_t *tgl_pr;       lv_style_t *ina;     } btn;   } list;   struct    {     lv_style_t *bg;     lv_style_t *sel;     lv_style_t *sb;   } ddlist;   struct    {     lv_style_t *bg;     lv_style_t *sel;   } roller;   struct    {     lv_style_t *bg;     lv_style_t *indic;     struct      {       lv_style_t *bg;       lv_style_t *rel;       lv_style_t *pr;       lv_style_t *tgl_rel;       lv_style_t *tgl_pr;     } btn;   } tabview;   struct    {     lv_style_t *bg;     lv_style_t *scrl;     lv_style_t *sb;   } tileview;   struct    {     lv_style_t *bg;     lv_style_t *cell;   } table;   struct    {     lv_style_t *bg;     lv_style_t *sb;     lv_style_t *header;     struct      {       lv_style_t *bg;       lv_style_t *scrl;     } content;     struct      {       lv_style_t *rel;       lv_style_t *pr;     } btn;   } win; } style", & ((struct_closure_t){ &pylv_theme_t_style_Type, offsetof(lv_theme_t, style), sizeof(((lv_theme_t *)0)->style)})},
     {"group", (getter) struct_get_struct, (setter) struct_set_struct, "struct  {   lv_group_style_mod_func_t style_mod;   lv_group_style_mod_func_t style_mod_edit; } group", & ((struct_closure_t){ &pylv_theme_t_group_Type, offsetof(lv_theme_t, group), sizeof(((lv_theme_t *)0)->group)})},
-
     {NULL}
 };
+
 
 static PyTypeObject pylv_theme_t_Type = {
     PyVarObject_HEAD_INIT(NULL, 0)
@@ -1837,8 +2478,8 @@ static PyTypeObject pylv_theme_t_Type = {
     .tp_init = (initproc) pylv_theme_t_init,
     .tp_dealloc = (destructor) Struct_dealloc,
     .tp_getset = pylv_theme_t_getset,
-    .tp_repr = (reprfunc) Struct_repr
-
+    .tp_repr = (reprfunc) Struct_repr,
+    .tp_as_buffer = &Struct_bufferprocs
 };
 
 
@@ -1846,25 +2487,110 @@ static PyTypeObject pylv_theme_t_Type = {
 static int
 pylv_cont_ext_t_init(StructObject *self, PyObject *args, PyObject *kwds) 
 {
-
-    self->data = PyMem_Malloc(sizeof(lv_cont_ext_t));
+    self->size = sizeof(lv_cont_ext_t);
+    self->data = PyMem_Malloc(self->size);
     if (!self->data) return -1;
     
-    memset(self->data, 0, sizeof(lv_cont_ext_t));
+    memset(self->data, 0, self->size);
     self->owner = (PyObject *)self;
 
     return 0;
 }
 
-static PyGetSetDef pylv_cont_ext_t_getset[] = {
-    {"layout", (getter) NULL, (setter) NULL, "uint8_t layout", NULL},
-    {"fit_left", (getter) NULL, (setter) NULL, "uint8_t fit_left", NULL},
-    {"fit_right", (getter) NULL, (setter) NULL, "uint8_t fit_right", NULL},
-    {"fit_top", (getter) NULL, (setter) NULL, "uint8_t fit_top", NULL},
-    {"fit_bottom", (getter) NULL, (setter) NULL, "uint8_t fit_bottom", NULL},
 
+
+static PyObject *
+get_struct_bitfield_cont_ext_t_layout(StructObject *self, void *closure)
+{
+    return PyLong_FromLong(((lv_cont_ext_t*)(self->data))->layout );
+}
+
+static int
+set_struct_bitfield_cont_ext_t_layout(StructObject *self, PyObject *value, void *closure)
+{
+    long v;
+    if (long_to_int(value, &v, 0, 15)) return -1;
+    ((lv_cont_ext_t*)(self->data))->layout = v;
+    return 0;
+}
+
+
+
+static PyObject *
+get_struct_bitfield_cont_ext_t_fit_left(StructObject *self, void *closure)
+{
+    return PyLong_FromLong(((lv_cont_ext_t*)(self->data))->fit_left );
+}
+
+static int
+set_struct_bitfield_cont_ext_t_fit_left(StructObject *self, PyObject *value, void *closure)
+{
+    long v;
+    if (long_to_int(value, &v, 0, 3)) return -1;
+    ((lv_cont_ext_t*)(self->data))->fit_left = v;
+    return 0;
+}
+
+
+
+static PyObject *
+get_struct_bitfield_cont_ext_t_fit_right(StructObject *self, void *closure)
+{
+    return PyLong_FromLong(((lv_cont_ext_t*)(self->data))->fit_right );
+}
+
+static int
+set_struct_bitfield_cont_ext_t_fit_right(StructObject *self, PyObject *value, void *closure)
+{
+    long v;
+    if (long_to_int(value, &v, 0, 3)) return -1;
+    ((lv_cont_ext_t*)(self->data))->fit_right = v;
+    return 0;
+}
+
+
+
+static PyObject *
+get_struct_bitfield_cont_ext_t_fit_top(StructObject *self, void *closure)
+{
+    return PyLong_FromLong(((lv_cont_ext_t*)(self->data))->fit_top );
+}
+
+static int
+set_struct_bitfield_cont_ext_t_fit_top(StructObject *self, PyObject *value, void *closure)
+{
+    long v;
+    if (long_to_int(value, &v, 0, 3)) return -1;
+    ((lv_cont_ext_t*)(self->data))->fit_top = v;
+    return 0;
+}
+
+
+
+static PyObject *
+get_struct_bitfield_cont_ext_t_fit_bottom(StructObject *self, void *closure)
+{
+    return PyLong_FromLong(((lv_cont_ext_t*)(self->data))->fit_bottom );
+}
+
+static int
+set_struct_bitfield_cont_ext_t_fit_bottom(StructObject *self, PyObject *value, void *closure)
+{
+    long v;
+    if (long_to_int(value, &v, 0, 3)) return -1;
+    ((lv_cont_ext_t*)(self->data))->fit_bottom = v;
+    return 0;
+}
+
+static PyGetSetDef pylv_cont_ext_t_getset[] = {
+    {"layout", (getter) get_struct_bitfield_cont_ext_t_layout, (setter) set_struct_bitfield_cont_ext_t_layout, "uint8_t:4 layout", NULL},
+    {"fit_left", (getter) get_struct_bitfield_cont_ext_t_fit_left, (setter) set_struct_bitfield_cont_ext_t_fit_left, "uint8_t:2 fit_left", NULL},
+    {"fit_right", (getter) get_struct_bitfield_cont_ext_t_fit_right, (setter) set_struct_bitfield_cont_ext_t_fit_right, "uint8_t:2 fit_right", NULL},
+    {"fit_top", (getter) get_struct_bitfield_cont_ext_t_fit_top, (setter) set_struct_bitfield_cont_ext_t_fit_top, "uint8_t:2 fit_top", NULL},
+    {"fit_bottom", (getter) get_struct_bitfield_cont_ext_t_fit_bottom, (setter) set_struct_bitfield_cont_ext_t_fit_bottom, "uint8_t:2 fit_bottom", NULL},
     {NULL}
 };
+
 
 static PyTypeObject pylv_cont_ext_t_Type = {
     PyVarObject_HEAD_INIT(NULL, 0)
@@ -1877,8 +2603,8 @@ static PyTypeObject pylv_cont_ext_t_Type = {
     .tp_init = (initproc) pylv_cont_ext_t_init,
     .tp_dealloc = (destructor) Struct_dealloc,
     .tp_getset = pylv_cont_ext_t_getset,
-    .tp_repr = (reprfunc) Struct_repr
-
+    .tp_repr = (reprfunc) Struct_repr,
+    .tp_as_buffer = &Struct_bufferprocs
 };
 
 
@@ -1886,27 +2612,44 @@ static PyTypeObject pylv_cont_ext_t_Type = {
 static int
 pylv_btn_ext_t_init(StructObject *self, PyObject *args, PyObject *kwds) 
 {
-
-    self->data = PyMem_Malloc(sizeof(lv_btn_ext_t));
+    self->size = sizeof(lv_btn_ext_t);
+    self->data = PyMem_Malloc(self->size);
     if (!self->data) return -1;
     
-    memset(self->data, 0, sizeof(lv_btn_ext_t));
+    memset(self->data, 0, self->size);
     self->owner = (PyObject *)self;
 
     return 0;
 }
 
+
+
+static PyObject *
+get_struct_bitfield_btn_ext_t_toggle(StructObject *self, void *closure)
+{
+    return PyLong_FromLong(((lv_btn_ext_t*)(self->data))->toggle );
+}
+
+static int
+set_struct_bitfield_btn_ext_t_toggle(StructObject *self, PyObject *value, void *closure)
+{
+    long v;
+    if (long_to_int(value, &v, 0, 1)) return -1;
+    ((lv_btn_ext_t*)(self->data))->toggle = v;
+    return 0;
+}
+
 static PyGetSetDef pylv_btn_ext_t_getset[] = {
-    {"cont", (getter) struct_get_blob, (setter) struct_set_blob, "lv_cont_ext_t cont", (void*)offsetof(lv_btn_ext_t, cont)},
-    {"styles", (getter) struct_get_blob, (setter) struct_set_blob, "lv_style_tLV_BTN_STATE_NUM styles", (void*)offsetof(lv_btn_ext_t, styles)},
+    {"cont", (getter) struct_get_struct, (setter) struct_set_struct, "lv_cont_ext_t cont", & ((struct_closure_t){ &pylv_cont_ext_t_Type, offsetof(lv_btn_ext_t, cont), sizeof(lv_cont_ext_t)})},
+    {"styles", (getter) struct_get_struct, (setter) struct_set_struct, "lv_style_tLV_BTN_STATE_NUM styles", & ((struct_closure_t){ &Blob_Type, offsetof(lv_btn_ext_t, styles), sizeof(((lv_btn_ext_t *)0)->styles)})},
     {"state", (getter) struct_get_uint8, (setter) struct_set_uint8, "lv_btn_state_t state", (void*)offsetof(lv_btn_ext_t, state)},
     {"ink_in_time", (getter) struct_get_uint16, (setter) struct_set_uint16, "uint16_t ink_in_time", (void*)offsetof(lv_btn_ext_t, ink_in_time)},
     {"ink_wait_time", (getter) struct_get_uint16, (setter) struct_set_uint16, "uint16_t ink_wait_time", (void*)offsetof(lv_btn_ext_t, ink_wait_time)},
     {"ink_out_time", (getter) struct_get_uint16, (setter) struct_set_uint16, "uint16_t ink_out_time", (void*)offsetof(lv_btn_ext_t, ink_out_time)},
-    {"toggle", (getter) NULL, (setter) NULL, "uint8_t toggle", NULL},
-
+    {"toggle", (getter) get_struct_bitfield_btn_ext_t_toggle, (setter) set_struct_bitfield_btn_ext_t_toggle, "uint8_t:1 toggle", NULL},
     {NULL}
 };
+
 
 static PyTypeObject pylv_btn_ext_t_Type = {
     PyVarObject_HEAD_INIT(NULL, 0)
@@ -1919,8 +2662,8 @@ static PyTypeObject pylv_btn_ext_t_Type = {
     .tp_init = (initproc) pylv_btn_ext_t_init,
     .tp_dealloc = (destructor) Struct_dealloc,
     .tp_getset = pylv_btn_ext_t_getset,
-    .tp_repr = (reprfunc) Struct_repr
-
+    .tp_repr = (reprfunc) Struct_repr,
+    .tp_as_buffer = &Struct_bufferprocs
 };
 
 
@@ -1928,25 +2671,110 @@ static PyTypeObject pylv_btn_ext_t_Type = {
 static int
 pylv_img_header_t_init(StructObject *self, PyObject *args, PyObject *kwds) 
 {
-
-    self->data = PyMem_Malloc(sizeof(lv_img_header_t));
+    self->size = sizeof(lv_img_header_t);
+    self->data = PyMem_Malloc(self->size);
     if (!self->data) return -1;
     
-    memset(self->data, 0, sizeof(lv_img_header_t));
+    memset(self->data, 0, self->size);
     self->owner = (PyObject *)self;
 
     return 0;
 }
 
-static PyGetSetDef pylv_img_header_t_getset[] = {
-    {"cf", (getter) NULL, (setter) NULL, "uint32_t cf", NULL},
-    {"always_zero", (getter) NULL, (setter) NULL, "uint32_t always_zero", NULL},
-    {"reserved", (getter) NULL, (setter) NULL, "uint32_t reserved", NULL},
-    {"w", (getter) NULL, (setter) NULL, "uint32_t w", NULL},
-    {"h", (getter) NULL, (setter) NULL, "uint32_t h", NULL},
 
+
+static PyObject *
+get_struct_bitfield_img_header_t_cf(StructObject *self, void *closure)
+{
+    return PyLong_FromLong(((lv_img_header_t*)(self->data))->cf );
+}
+
+static int
+set_struct_bitfield_img_header_t_cf(StructObject *self, PyObject *value, void *closure)
+{
+    long v;
+    if (long_to_int(value, &v, 0, 31)) return -1;
+    ((lv_img_header_t*)(self->data))->cf = v;
+    return 0;
+}
+
+
+
+static PyObject *
+get_struct_bitfield_img_header_t_always_zero(StructObject *self, void *closure)
+{
+    return PyLong_FromLong(((lv_img_header_t*)(self->data))->always_zero );
+}
+
+static int
+set_struct_bitfield_img_header_t_always_zero(StructObject *self, PyObject *value, void *closure)
+{
+    long v;
+    if (long_to_int(value, &v, 0, 7)) return -1;
+    ((lv_img_header_t*)(self->data))->always_zero = v;
+    return 0;
+}
+
+
+
+static PyObject *
+get_struct_bitfield_img_header_t_reserved(StructObject *self, void *closure)
+{
+    return PyLong_FromLong(((lv_img_header_t*)(self->data))->reserved );
+}
+
+static int
+set_struct_bitfield_img_header_t_reserved(StructObject *self, PyObject *value, void *closure)
+{
+    long v;
+    if (long_to_int(value, &v, 0, 3)) return -1;
+    ((lv_img_header_t*)(self->data))->reserved = v;
+    return 0;
+}
+
+
+
+static PyObject *
+get_struct_bitfield_img_header_t_w(StructObject *self, void *closure)
+{
+    return PyLong_FromLong(((lv_img_header_t*)(self->data))->w );
+}
+
+static int
+set_struct_bitfield_img_header_t_w(StructObject *self, PyObject *value, void *closure)
+{
+    long v;
+    if (long_to_int(value, &v, 0, 2047)) return -1;
+    ((lv_img_header_t*)(self->data))->w = v;
+    return 0;
+}
+
+
+
+static PyObject *
+get_struct_bitfield_img_header_t_h(StructObject *self, void *closure)
+{
+    return PyLong_FromLong(((lv_img_header_t*)(self->data))->h );
+}
+
+static int
+set_struct_bitfield_img_header_t_h(StructObject *self, PyObject *value, void *closure)
+{
+    long v;
+    if (long_to_int(value, &v, 0, 2047)) return -1;
+    ((lv_img_header_t*)(self->data))->h = v;
+    return 0;
+}
+
+static PyGetSetDef pylv_img_header_t_getset[] = {
+    {"cf", (getter) get_struct_bitfield_img_header_t_cf, (setter) set_struct_bitfield_img_header_t_cf, "uint32_t:5 cf", NULL},
+    {"always_zero", (getter) get_struct_bitfield_img_header_t_always_zero, (setter) set_struct_bitfield_img_header_t_always_zero, "uint32_t:3 always_zero", NULL},
+    {"reserved", (getter) get_struct_bitfield_img_header_t_reserved, (setter) set_struct_bitfield_img_header_t_reserved, "uint32_t:2 reserved", NULL},
+    {"w", (getter) get_struct_bitfield_img_header_t_w, (setter) set_struct_bitfield_img_header_t_w, "uint32_t:11 w", NULL},
+    {"h", (getter) get_struct_bitfield_img_header_t_h, (setter) set_struct_bitfield_img_header_t_h, "uint32_t:11 h", NULL},
     {NULL}
 };
+
 
 static PyTypeObject pylv_img_header_t_Type = {
     PyVarObject_HEAD_INIT(NULL, 0)
@@ -1959,8 +2787,8 @@ static PyTypeObject pylv_img_header_t_Type = {
     .tp_init = (initproc) pylv_img_header_t_init,
     .tp_dealloc = (destructor) Struct_dealloc,
     .tp_getset = pylv_img_header_t_getset,
-    .tp_repr = (reprfunc) Struct_repr
-
+    .tp_repr = (reprfunc) Struct_repr,
+    .tp_as_buffer = &Struct_bufferprocs
 };
 
 
@@ -1968,23 +2796,23 @@ static PyTypeObject pylv_img_header_t_Type = {
 static int
 pylv_img_dsc_t_init(StructObject *self, PyObject *args, PyObject *kwds) 
 {
-
-    self->data = PyMem_Malloc(sizeof(lv_img_dsc_t));
+    self->size = sizeof(lv_img_dsc_t);
+    self->data = PyMem_Malloc(self->size);
     if (!self->data) return -1;
     
-    memset(self->data, 0, sizeof(lv_img_dsc_t));
+    memset(self->data, 0, self->size);
     self->owner = (PyObject *)self;
 
     return 0;
 }
 
 static PyGetSetDef pylv_img_dsc_t_getset[] = {
-    {"header", (getter) struct_get_blob, (setter) struct_set_blob, "lv_img_header_t header", (void*)offsetof(lv_img_dsc_t, header)},
+    {"header", (getter) struct_get_struct, (setter) struct_set_struct, "lv_img_header_t header", & ((struct_closure_t){ &pylv_img_header_t_Type, offsetof(lv_img_dsc_t, header), sizeof(lv_img_header_t)})},
     {"data_size", (getter) struct_get_uint32, (setter) struct_set_uint32, "uint32_t data_size", (void*)offsetof(lv_img_dsc_t, data_size)},
-    {"data", (getter) struct_get_blob, (setter) struct_set_blob, "uint8_t data", (void*)offsetof(lv_img_dsc_t, data)},
-
+    {"data", (getter) struct_get_struct, (setter) struct_set_struct, "uint8_t data", & ((struct_closure_t){ &Blob_Type, offsetof(lv_img_dsc_t, data), sizeof(((lv_img_dsc_t *)0)->data)})},
     {NULL}
 };
+
 
 static PyTypeObject pylv_img_dsc_t_Type = {
     PyVarObject_HEAD_INIT(NULL, 0)
@@ -1997,8 +2825,8 @@ static PyTypeObject pylv_img_dsc_t_Type = {
     .tp_init = (initproc) pylv_img_dsc_t_init,
     .tp_dealloc = (destructor) Struct_dealloc,
     .tp_getset = pylv_img_dsc_t_getset,
-    .tp_repr = (reprfunc) Struct_repr
-
+    .tp_repr = (reprfunc) Struct_repr,
+    .tp_as_buffer = &Struct_bufferprocs
 };
 
 
@@ -2006,23 +2834,23 @@ static PyTypeObject pylv_img_dsc_t_Type = {
 static int
 pylv_imgbtn_ext_t_init(StructObject *self, PyObject *args, PyObject *kwds) 
 {
-
-    self->data = PyMem_Malloc(sizeof(lv_imgbtn_ext_t));
+    self->size = sizeof(lv_imgbtn_ext_t);
+    self->data = PyMem_Malloc(self->size);
     if (!self->data) return -1;
     
-    memset(self->data, 0, sizeof(lv_imgbtn_ext_t));
+    memset(self->data, 0, self->size);
     self->owner = (PyObject *)self;
 
     return 0;
 }
 
 static PyGetSetDef pylv_imgbtn_ext_t_getset[] = {
-    {"btn", (getter) struct_get_blob, (setter) struct_set_blob, "lv_btn_ext_t btn", (void*)offsetof(lv_imgbtn_ext_t, btn)},
-    {"img_src", (getter) struct_get_blob, (setter) struct_set_blob, "voidLV_BTN_STATE_NUM img_src", (void*)offsetof(lv_imgbtn_ext_t, img_src)},
+    {"btn", (getter) struct_get_struct, (setter) struct_set_struct, "lv_btn_ext_t btn", & ((struct_closure_t){ &pylv_btn_ext_t_Type, offsetof(lv_imgbtn_ext_t, btn), sizeof(lv_btn_ext_t)})},
+    {"img_src", (getter) struct_get_struct, (setter) struct_set_struct, "voidLV_BTN_STATE_NUM img_src", & ((struct_closure_t){ &Blob_Type, offsetof(lv_imgbtn_ext_t, img_src), sizeof(((lv_imgbtn_ext_t *)0)->img_src)})},
     {"act_cf", (getter) struct_get_uint8, (setter) struct_set_uint8, "lv_img_cf_t act_cf", (void*)offsetof(lv_imgbtn_ext_t, act_cf)},
-
     {NULL}
 };
+
 
 static PyTypeObject pylv_imgbtn_ext_t_Type = {
     PyVarObject_HEAD_INIT(NULL, 0)
@@ -2035,8 +2863,8 @@ static PyTypeObject pylv_imgbtn_ext_t_Type = {
     .tp_init = (initproc) pylv_imgbtn_ext_t_init,
     .tp_dealloc = (destructor) Struct_dealloc,
     .tp_getset = pylv_imgbtn_ext_t_getset,
-    .tp_repr = (reprfunc) Struct_repr
-
+    .tp_repr = (reprfunc) Struct_repr,
+    .tp_as_buffer = &Struct_bufferprocs
 };
 
 
@@ -2044,22 +2872,22 @@ static PyTypeObject pylv_imgbtn_ext_t_Type = {
 static int
 pylv_fs_file_t_init(StructObject *self, PyObject *args, PyObject *kwds) 
 {
-
-    self->data = PyMem_Malloc(sizeof(lv_fs_file_t));
+    self->size = sizeof(lv_fs_file_t);
+    self->data = PyMem_Malloc(self->size);
     if (!self->data) return -1;
     
-    memset(self->data, 0, sizeof(lv_fs_file_t));
+    memset(self->data, 0, self->size);
     self->owner = (PyObject *)self;
 
     return 0;
 }
 
 static PyGetSetDef pylv_fs_file_t_getset[] = {
-    {"file_d", (getter) struct_get_blob, (setter) struct_set_blob, "void file_d", (void*)offsetof(lv_fs_file_t, file_d)},
-    {"drv", (getter) struct_get_blob, (setter) struct_set_blob, "struct __lv_fs_drv_t drv", (void*)offsetof(lv_fs_file_t, drv)},
-
+    {"file_d", (getter) struct_get_struct, (setter) struct_set_struct, "void file_d", & ((struct_closure_t){ &Blob_Type, offsetof(lv_fs_file_t, file_d), sizeof(((lv_fs_file_t *)0)->file_d)})},
+    {"drv", (getter) struct_get_struct, (setter) struct_set_struct, "struct __lv_fs_drv_t drv", & ((struct_closure_t){ &Blob_Type, offsetof(lv_fs_file_t, drv), sizeof(((lv_fs_file_t *)0)->drv)})},
     {NULL}
 };
+
 
 static PyTypeObject pylv_fs_file_t_Type = {
     PyVarObject_HEAD_INIT(NULL, 0)
@@ -2072,8 +2900,8 @@ static PyTypeObject pylv_fs_file_t_Type = {
     .tp_init = (initproc) pylv_fs_file_t_init,
     .tp_dealloc = (destructor) Struct_dealloc,
     .tp_getset = pylv_fs_file_t_getset,
-    .tp_repr = (reprfunc) Struct_repr
-
+    .tp_repr = (reprfunc) Struct_repr,
+    .tp_as_buffer = &Struct_bufferprocs
 };
 
 
@@ -2081,22 +2909,22 @@ static PyTypeObject pylv_fs_file_t_Type = {
 static int
 pylv_fs_dir_t_init(StructObject *self, PyObject *args, PyObject *kwds) 
 {
-
-    self->data = PyMem_Malloc(sizeof(lv_fs_dir_t));
+    self->size = sizeof(lv_fs_dir_t);
+    self->data = PyMem_Malloc(self->size);
     if (!self->data) return -1;
     
-    memset(self->data, 0, sizeof(lv_fs_dir_t));
+    memset(self->data, 0, self->size);
     self->owner = (PyObject *)self;
 
     return 0;
 }
 
 static PyGetSetDef pylv_fs_dir_t_getset[] = {
-    {"dir_d", (getter) struct_get_blob, (setter) struct_set_blob, "void dir_d", (void*)offsetof(lv_fs_dir_t, dir_d)},
-    {"drv", (getter) struct_get_blob, (setter) struct_set_blob, "struct __lv_fs_drv_t drv", (void*)offsetof(lv_fs_dir_t, drv)},
-
+    {"dir_d", (getter) struct_get_struct, (setter) struct_set_struct, "void dir_d", & ((struct_closure_t){ &Blob_Type, offsetof(lv_fs_dir_t, dir_d), sizeof(((lv_fs_dir_t *)0)->dir_d)})},
+    {"drv", (getter) struct_get_struct, (setter) struct_set_struct, "struct __lv_fs_drv_t drv", & ((struct_closure_t){ &Blob_Type, offsetof(lv_fs_dir_t, drv), sizeof(((lv_fs_dir_t *)0)->drv)})},
     {NULL}
 };
+
 
 static PyTypeObject pylv_fs_dir_t_Type = {
     PyVarObject_HEAD_INIT(NULL, 0)
@@ -2109,8 +2937,8 @@ static PyTypeObject pylv_fs_dir_t_Type = {
     .tp_init = (initproc) pylv_fs_dir_t_init,
     .tp_dealloc = (destructor) Struct_dealloc,
     .tp_getset = pylv_fs_dir_t_getset,
-    .tp_repr = (reprfunc) Struct_repr
-
+    .tp_repr = (reprfunc) Struct_repr,
+    .tp_as_buffer = &Struct_bufferprocs
 };
 
 
@@ -2118,38 +2946,38 @@ static PyTypeObject pylv_fs_dir_t_Type = {
 static int
 pylv_fs_drv_t_init(StructObject *self, PyObject *args, PyObject *kwds) 
 {
-
-    self->data = PyMem_Malloc(sizeof(lv_fs_drv_t));
+    self->size = sizeof(lv_fs_drv_t);
+    self->data = PyMem_Malloc(self->size);
     if (!self->data) return -1;
     
-    memset(self->data, 0, sizeof(lv_fs_drv_t));
+    memset(self->data, 0, self->size);
     self->owner = (PyObject *)self;
 
     return 0;
 }
 
 static PyGetSetDef pylv_fs_drv_t_getset[] = {
-    {"letter", (getter) struct_get_blob, (setter) struct_set_blob, "char letter", (void*)offsetof(lv_fs_drv_t, letter)},
+    {"letter", (getter) struct_get_struct, (setter) struct_set_struct, "char letter", & ((struct_closure_t){ &Blob_Type, offsetof(lv_fs_drv_t, letter), sizeof(((lv_fs_drv_t *)0)->letter)})},
     {"file_size", (getter) struct_get_uint16, (setter) struct_set_uint16, "uint16_t file_size", (void*)offsetof(lv_fs_drv_t, file_size)},
     {"rddir_size", (getter) struct_get_uint16, (setter) struct_set_uint16, "uint16_t rddir_size", (void*)offsetof(lv_fs_drv_t, rddir_size)},
-    {"ready", (getter) struct_get_blob, (setter) struct_set_blob, "bool ready(void) ready", (void*)offsetof(lv_fs_drv_t, ready)},
-    {"open", (getter) struct_get_blob, (setter) struct_set_blob, "lv_fs_res_t open(void *file_p, const char *path, lv_fs_mode_t mode) open", (void*)offsetof(lv_fs_drv_t, open)},
-    {"close", (getter) struct_get_blob, (setter) struct_set_blob, "lv_fs_res_t close(void *file_p) close", (void*)offsetof(lv_fs_drv_t, close)},
-    {"remove", (getter) struct_get_blob, (setter) struct_set_blob, "lv_fs_res_t remove(const char *fn) remove", (void*)offsetof(lv_fs_drv_t, remove)},
-    {"read", (getter) struct_get_blob, (setter) struct_set_blob, "lv_fs_res_t read(void *file_p, void *buf, uint32_t btr, uint32_t *br) read", (void*)offsetof(lv_fs_drv_t, read)},
-    {"write", (getter) struct_get_blob, (setter) struct_set_blob, "lv_fs_res_t write(void *file_p, const void *buf, uint32_t btw, uint32_t *bw) write", (void*)offsetof(lv_fs_drv_t, write)},
-    {"seek", (getter) struct_get_blob, (setter) struct_set_blob, "lv_fs_res_t seek(void *file_p, uint32_t pos) seek", (void*)offsetof(lv_fs_drv_t, seek)},
-    {"tell", (getter) struct_get_blob, (setter) struct_set_blob, "lv_fs_res_t tell(void *file_p, uint32_t *pos_p) tell", (void*)offsetof(lv_fs_drv_t, tell)},
-    {"trunc", (getter) struct_get_blob, (setter) struct_set_blob, "lv_fs_res_t trunc(void *file_p) trunc", (void*)offsetof(lv_fs_drv_t, trunc)},
-    {"size", (getter) struct_get_blob, (setter) struct_set_blob, "lv_fs_res_t size(void *file_p, uint32_t *size_p) size", (void*)offsetof(lv_fs_drv_t, size)},
-    {"rename", (getter) struct_get_blob, (setter) struct_set_blob, "lv_fs_res_t rename(const char *oldname, const char *newname) rename", (void*)offsetof(lv_fs_drv_t, rename)},
-    {"free_space", (getter) struct_get_blob, (setter) struct_set_blob, "lv_fs_res_t free_space(uint32_t *total_p, uint32_t *free_p) free_space", (void*)offsetof(lv_fs_drv_t, free_space)},
-    {"dir_open", (getter) struct_get_blob, (setter) struct_set_blob, "lv_fs_res_t dir_open(void *rddir_p, const char *path) dir_open", (void*)offsetof(lv_fs_drv_t, dir_open)},
-    {"dir_read", (getter) struct_get_blob, (setter) struct_set_blob, "lv_fs_res_t dir_read(void *rddir_p, char *fn) dir_read", (void*)offsetof(lv_fs_drv_t, dir_read)},
-    {"dir_close", (getter) struct_get_blob, (setter) struct_set_blob, "lv_fs_res_t dir_close(void *rddir_p) dir_close", (void*)offsetof(lv_fs_drv_t, dir_close)},
-
+    {"ready", (getter) struct_get_struct, (setter) struct_set_struct, "bool ready(void) ready", & ((struct_closure_t){ &Blob_Type, offsetof(lv_fs_drv_t, ready), sizeof(((lv_fs_drv_t *)0)->ready)})},
+    {"open", (getter) struct_get_struct, (setter) struct_set_struct, "lv_fs_res_t open(void *file_p, const char *path, lv_fs_mode_t mode) open", & ((struct_closure_t){ &Blob_Type, offsetof(lv_fs_drv_t, open), sizeof(((lv_fs_drv_t *)0)->open)})},
+    {"close", (getter) struct_get_struct, (setter) struct_set_struct, "lv_fs_res_t close(void *file_p) close", & ((struct_closure_t){ &Blob_Type, offsetof(lv_fs_drv_t, close), sizeof(((lv_fs_drv_t *)0)->close)})},
+    {"remove", (getter) struct_get_struct, (setter) struct_set_struct, "lv_fs_res_t remove(const char *fn) remove", & ((struct_closure_t){ &Blob_Type, offsetof(lv_fs_drv_t, remove), sizeof(((lv_fs_drv_t *)0)->remove)})},
+    {"read", (getter) struct_get_struct, (setter) struct_set_struct, "lv_fs_res_t read(void *file_p, void *buf, uint32_t btr, uint32_t *br) read", & ((struct_closure_t){ &Blob_Type, offsetof(lv_fs_drv_t, read), sizeof(((lv_fs_drv_t *)0)->read)})},
+    {"write", (getter) struct_get_struct, (setter) struct_set_struct, "lv_fs_res_t write(void *file_p, const void *buf, uint32_t btw, uint32_t *bw) write", & ((struct_closure_t){ &Blob_Type, offsetof(lv_fs_drv_t, write), sizeof(((lv_fs_drv_t *)0)->write)})},
+    {"seek", (getter) struct_get_struct, (setter) struct_set_struct, "lv_fs_res_t seek(void *file_p, uint32_t pos) seek", & ((struct_closure_t){ &Blob_Type, offsetof(lv_fs_drv_t, seek), sizeof(((lv_fs_drv_t *)0)->seek)})},
+    {"tell", (getter) struct_get_struct, (setter) struct_set_struct, "lv_fs_res_t tell(void *file_p, uint32_t *pos_p) tell", & ((struct_closure_t){ &Blob_Type, offsetof(lv_fs_drv_t, tell), sizeof(((lv_fs_drv_t *)0)->tell)})},
+    {"trunc", (getter) struct_get_struct, (setter) struct_set_struct, "lv_fs_res_t trunc(void *file_p) trunc", & ((struct_closure_t){ &Blob_Type, offsetof(lv_fs_drv_t, trunc), sizeof(((lv_fs_drv_t *)0)->trunc)})},
+    {"size", (getter) struct_get_struct, (setter) struct_set_struct, "lv_fs_res_t size(void *file_p, uint32_t *size_p) size", & ((struct_closure_t){ &Blob_Type, offsetof(lv_fs_drv_t, size), sizeof(((lv_fs_drv_t *)0)->size)})},
+    {"rename", (getter) struct_get_struct, (setter) struct_set_struct, "lv_fs_res_t rename(const char *oldname, const char *newname) rename", & ((struct_closure_t){ &Blob_Type, offsetof(lv_fs_drv_t, rename), sizeof(((lv_fs_drv_t *)0)->rename)})},
+    {"free_space", (getter) struct_get_struct, (setter) struct_set_struct, "lv_fs_res_t free_space(uint32_t *total_p, uint32_t *free_p) free_space", & ((struct_closure_t){ &Blob_Type, offsetof(lv_fs_drv_t, free_space), sizeof(((lv_fs_drv_t *)0)->free_space)})},
+    {"dir_open", (getter) struct_get_struct, (setter) struct_set_struct, "lv_fs_res_t dir_open(void *rddir_p, const char *path) dir_open", & ((struct_closure_t){ &Blob_Type, offsetof(lv_fs_drv_t, dir_open), sizeof(((lv_fs_drv_t *)0)->dir_open)})},
+    {"dir_read", (getter) struct_get_struct, (setter) struct_set_struct, "lv_fs_res_t dir_read(void *rddir_p, char *fn) dir_read", & ((struct_closure_t){ &Blob_Type, offsetof(lv_fs_drv_t, dir_read), sizeof(((lv_fs_drv_t *)0)->dir_read)})},
+    {"dir_close", (getter) struct_get_struct, (setter) struct_set_struct, "lv_fs_res_t dir_close(void *rddir_p) dir_close", & ((struct_closure_t){ &Blob_Type, offsetof(lv_fs_drv_t, dir_close), sizeof(((lv_fs_drv_t *)0)->dir_close)})},
     {NULL}
 };
+
 
 static PyTypeObject pylv_fs_drv_t_Type = {
     PyVarObject_HEAD_INIT(NULL, 0)
@@ -2162,8 +2990,8 @@ static PyTypeObject pylv_fs_drv_t_Type = {
     .tp_init = (initproc) pylv_fs_drv_t_init,
     .tp_dealloc = (destructor) Struct_dealloc,
     .tp_getset = pylv_fs_drv_t_getset,
-    .tp_repr = (reprfunc) Struct_repr
-
+    .tp_repr = (reprfunc) Struct_repr,
+    .tp_as_buffer = &Struct_bufferprocs
 };
 
 
@@ -2171,31 +2999,116 @@ static PyTypeObject pylv_fs_drv_t_Type = {
 static int
 pylv_label_ext_t_init(StructObject *self, PyObject *args, PyObject *kwds) 
 {
-
-    self->data = PyMem_Malloc(sizeof(lv_label_ext_t));
+    self->size = sizeof(lv_label_ext_t);
+    self->data = PyMem_Malloc(self->size);
     if (!self->data) return -1;
     
-    memset(self->data, 0, sizeof(lv_label_ext_t));
+    memset(self->data, 0, self->size);
     self->owner = (PyObject *)self;
 
     return 0;
 }
 
+
+
+static PyObject *
+get_struct_bitfield_label_ext_t_static_txt(StructObject *self, void *closure)
+{
+    return PyLong_FromLong(((lv_label_ext_t*)(self->data))->static_txt );
+}
+
+static int
+set_struct_bitfield_label_ext_t_static_txt(StructObject *self, PyObject *value, void *closure)
+{
+    long v;
+    if (long_to_int(value, &v, 0, 1)) return -1;
+    ((lv_label_ext_t*)(self->data))->static_txt = v;
+    return 0;
+}
+
+
+
+static PyObject *
+get_struct_bitfield_label_ext_t_align(StructObject *self, void *closure)
+{
+    return PyLong_FromLong(((lv_label_ext_t*)(self->data))->align );
+}
+
+static int
+set_struct_bitfield_label_ext_t_align(StructObject *self, PyObject *value, void *closure)
+{
+    long v;
+    if (long_to_int(value, &v, 0, 3)) return -1;
+    ((lv_label_ext_t*)(self->data))->align = v;
+    return 0;
+}
+
+
+
+static PyObject *
+get_struct_bitfield_label_ext_t_recolor(StructObject *self, void *closure)
+{
+    return PyLong_FromLong(((lv_label_ext_t*)(self->data))->recolor );
+}
+
+static int
+set_struct_bitfield_label_ext_t_recolor(StructObject *self, PyObject *value, void *closure)
+{
+    long v;
+    if (long_to_int(value, &v, 0, 1)) return -1;
+    ((lv_label_ext_t*)(self->data))->recolor = v;
+    return 0;
+}
+
+
+
+static PyObject *
+get_struct_bitfield_label_ext_t_expand(StructObject *self, void *closure)
+{
+    return PyLong_FromLong(((lv_label_ext_t*)(self->data))->expand );
+}
+
+static int
+set_struct_bitfield_label_ext_t_expand(StructObject *self, PyObject *value, void *closure)
+{
+    long v;
+    if (long_to_int(value, &v, 0, 1)) return -1;
+    ((lv_label_ext_t*)(self->data))->expand = v;
+    return 0;
+}
+
+
+
+static PyObject *
+get_struct_bitfield_label_ext_t_body_draw(StructObject *self, void *closure)
+{
+    return PyLong_FromLong(((lv_label_ext_t*)(self->data))->body_draw );
+}
+
+static int
+set_struct_bitfield_label_ext_t_body_draw(StructObject *self, PyObject *value, void *closure)
+{
+    long v;
+    if (long_to_int(value, &v, 0, 1)) return -1;
+    ((lv_label_ext_t*)(self->data))->body_draw = v;
+    return 0;
+}
+
 static PyGetSetDef pylv_label_ext_t_getset[] = {
-    {"text", (getter) struct_get_blob, (setter) struct_set_blob, "char text", (void*)offsetof(lv_label_ext_t, text)},
+    {"text", (getter) struct_get_struct, (setter) struct_set_struct, "char text", & ((struct_closure_t){ &Blob_Type, offsetof(lv_label_ext_t, text), sizeof(((lv_label_ext_t *)0)->text)})},
     {"long_mode", (getter) struct_get_uint8, (setter) struct_set_uint8, "lv_label_long_mode_t long_mode", (void*)offsetof(lv_label_ext_t, long_mode)},
-    {"dot_tmp", (getter) struct_get_blob, (setter) struct_set_blob, "char(3 * 4) + 1 dot_tmp", (void*)offsetof(lv_label_ext_t, dot_tmp)},
+    {"dot_tmp", (getter) struct_get_struct, (setter) struct_set_struct, "char(3 * 4) + 1 dot_tmp", & ((struct_closure_t){ &Blob_Type, offsetof(lv_label_ext_t, dot_tmp), sizeof(((lv_label_ext_t *)0)->dot_tmp)})},
     {"dot_end", (getter) struct_get_uint16, (setter) struct_set_uint16, "uint16_t dot_end", (void*)offsetof(lv_label_ext_t, dot_end)},
     {"anim_speed", (getter) struct_get_uint16, (setter) struct_set_uint16, "uint16_t anim_speed", (void*)offsetof(lv_label_ext_t, anim_speed)},
-    {"offset", (getter) struct_get_blob, (setter) struct_set_blob, "lv_point_t offset", (void*)offsetof(lv_label_ext_t, offset)},
-    {"static_txt", (getter) NULL, (setter) NULL, "uint8_t static_txt", NULL},
-    {"align", (getter) NULL, (setter) NULL, "uint8_t align", NULL},
-    {"recolor", (getter) NULL, (setter) NULL, "uint8_t recolor", NULL},
-    {"expand", (getter) NULL, (setter) NULL, "uint8_t expand", NULL},
-    {"body_draw", (getter) NULL, (setter) NULL, "uint8_t body_draw", NULL},
-
+    {"offset", (getter) struct_get_struct, (setter) struct_set_struct, "lv_point_t offset", & ((struct_closure_t){ &pylv_point_t_Type, offsetof(lv_label_ext_t, offset), sizeof(lv_point_t)})},
+    {"static_txt", (getter) get_struct_bitfield_label_ext_t_static_txt, (setter) set_struct_bitfield_label_ext_t_static_txt, "uint8_t:1 static_txt", NULL},
+    {"align", (getter) get_struct_bitfield_label_ext_t_align, (setter) set_struct_bitfield_label_ext_t_align, "uint8_t:2 align", NULL},
+    {"recolor", (getter) get_struct_bitfield_label_ext_t_recolor, (setter) set_struct_bitfield_label_ext_t_recolor, "uint8_t:1 recolor", NULL},
+    {"expand", (getter) get_struct_bitfield_label_ext_t_expand, (setter) set_struct_bitfield_label_ext_t_expand, "uint8_t:1 expand", NULL},
+    {"body_draw", (getter) get_struct_bitfield_label_ext_t_body_draw, (setter) set_struct_bitfield_label_ext_t_body_draw, "uint8_t:1 body_draw", NULL},
     {NULL}
 };
+
 
 static PyTypeObject pylv_label_ext_t_Type = {
     PyVarObject_HEAD_INIT(NULL, 0)
@@ -2208,8 +3121,8 @@ static PyTypeObject pylv_label_ext_t_Type = {
     .tp_init = (initproc) pylv_label_ext_t_init,
     .tp_dealloc = (destructor) Struct_dealloc,
     .tp_getset = pylv_label_ext_t_getset,
-    .tp_repr = (reprfunc) Struct_repr
-
+    .tp_repr = (reprfunc) Struct_repr,
+    .tp_as_buffer = &Struct_bufferprocs
 };
 
 
@@ -2217,27 +3130,78 @@ static PyTypeObject pylv_label_ext_t_Type = {
 static int
 pylv_img_ext_t_init(StructObject *self, PyObject *args, PyObject *kwds) 
 {
-
-    self->data = PyMem_Malloc(sizeof(lv_img_ext_t));
+    self->size = sizeof(lv_img_ext_t);
+    self->data = PyMem_Malloc(self->size);
     if (!self->data) return -1;
     
-    memset(self->data, 0, sizeof(lv_img_ext_t));
+    memset(self->data, 0, self->size);
     self->owner = (PyObject *)self;
 
     return 0;
 }
 
+
+
+static PyObject *
+get_struct_bitfield_img_ext_t_src_type(StructObject *self, void *closure)
+{
+    return PyLong_FromLong(((lv_img_ext_t*)(self->data))->src_type );
+}
+
+static int
+set_struct_bitfield_img_ext_t_src_type(StructObject *self, PyObject *value, void *closure)
+{
+    long v;
+    if (long_to_int(value, &v, 0, 3)) return -1;
+    ((lv_img_ext_t*)(self->data))->src_type = v;
+    return 0;
+}
+
+
+
+static PyObject *
+get_struct_bitfield_img_ext_t_auto_size(StructObject *self, void *closure)
+{
+    return PyLong_FromLong(((lv_img_ext_t*)(self->data))->auto_size );
+}
+
+static int
+set_struct_bitfield_img_ext_t_auto_size(StructObject *self, PyObject *value, void *closure)
+{
+    long v;
+    if (long_to_int(value, &v, 0, 1)) return -1;
+    ((lv_img_ext_t*)(self->data))->auto_size = v;
+    return 0;
+}
+
+
+
+static PyObject *
+get_struct_bitfield_img_ext_t_cf(StructObject *self, void *closure)
+{
+    return PyLong_FromLong(((lv_img_ext_t*)(self->data))->cf );
+}
+
+static int
+set_struct_bitfield_img_ext_t_cf(StructObject *self, PyObject *value, void *closure)
+{
+    long v;
+    if (long_to_int(value, &v, 0, 31)) return -1;
+    ((lv_img_ext_t*)(self->data))->cf = v;
+    return 0;
+}
+
 static PyGetSetDef pylv_img_ext_t_getset[] = {
-    {"src", (getter) struct_get_blob, (setter) struct_set_blob, "void src", (void*)offsetof(lv_img_ext_t, src)},
-    {"offset", (getter) struct_get_blob, (setter) struct_set_blob, "lv_point_t offset", (void*)offsetof(lv_img_ext_t, offset)},
+    {"src", (getter) struct_get_struct, (setter) struct_set_struct, "void src", & ((struct_closure_t){ &Blob_Type, offsetof(lv_img_ext_t, src), sizeof(((lv_img_ext_t *)0)->src)})},
+    {"offset", (getter) struct_get_struct, (setter) struct_set_struct, "lv_point_t offset", & ((struct_closure_t){ &pylv_point_t_Type, offsetof(lv_img_ext_t, offset), sizeof(lv_point_t)})},
     {"w", (getter) struct_get_int16, (setter) struct_set_int16, "lv_coord_t w", (void*)offsetof(lv_img_ext_t, w)},
     {"h", (getter) struct_get_int16, (setter) struct_set_int16, "lv_coord_t h", (void*)offsetof(lv_img_ext_t, h)},
-    {"src_type", (getter) NULL, (setter) NULL, "uint8_t src_type", NULL},
-    {"auto_size", (getter) NULL, (setter) NULL, "uint8_t auto_size", NULL},
-    {"cf", (getter) NULL, (setter) NULL, "uint8_t cf", NULL},
-
+    {"src_type", (getter) get_struct_bitfield_img_ext_t_src_type, (setter) set_struct_bitfield_img_ext_t_src_type, "uint8_t:2 src_type", NULL},
+    {"auto_size", (getter) get_struct_bitfield_img_ext_t_auto_size, (setter) set_struct_bitfield_img_ext_t_auto_size, "uint8_t:1 auto_size", NULL},
+    {"cf", (getter) get_struct_bitfield_img_ext_t_cf, (setter) set_struct_bitfield_img_ext_t_cf, "uint8_t:5 cf", NULL},
     {NULL}
 };
+
 
 static PyTypeObject pylv_img_ext_t_Type = {
     PyVarObject_HEAD_INIT(NULL, 0)
@@ -2250,8 +3214,8 @@ static PyTypeObject pylv_img_ext_t_Type = {
     .tp_init = (initproc) pylv_img_ext_t_init,
     .tp_dealloc = (destructor) Struct_dealloc,
     .tp_getset = pylv_img_ext_t_getset,
-    .tp_repr = (reprfunc) Struct_repr
-
+    .tp_repr = (reprfunc) Struct_repr,
+    .tp_as_buffer = &Struct_bufferprocs
 };
 
 
@@ -2259,24 +3223,58 @@ static PyTypeObject pylv_img_ext_t_Type = {
 static int
 pylv_line_ext_t_init(StructObject *self, PyObject *args, PyObject *kwds) 
 {
-
-    self->data = PyMem_Malloc(sizeof(lv_line_ext_t));
+    self->size = sizeof(lv_line_ext_t);
+    self->data = PyMem_Malloc(self->size);
     if (!self->data) return -1;
     
-    memset(self->data, 0, sizeof(lv_line_ext_t));
+    memset(self->data, 0, self->size);
     self->owner = (PyObject *)self;
 
     return 0;
 }
 
-static PyGetSetDef pylv_line_ext_t_getset[] = {
-    {"point_array", (getter) struct_get_blob, (setter) struct_set_blob, "lv_point_t point_array", (void*)offsetof(lv_line_ext_t, point_array)},
-    {"point_num", (getter) struct_get_uint16, (setter) struct_set_uint16, "uint16_t point_num", (void*)offsetof(lv_line_ext_t, point_num)},
-    {"auto_size", (getter) NULL, (setter) NULL, "uint8_t auto_size", NULL},
-    {"y_inv", (getter) NULL, (setter) NULL, "uint8_t y_inv", NULL},
 
+
+static PyObject *
+get_struct_bitfield_line_ext_t_auto_size(StructObject *self, void *closure)
+{
+    return PyLong_FromLong(((lv_line_ext_t*)(self->data))->auto_size );
+}
+
+static int
+set_struct_bitfield_line_ext_t_auto_size(StructObject *self, PyObject *value, void *closure)
+{
+    long v;
+    if (long_to_int(value, &v, 0, 1)) return -1;
+    ((lv_line_ext_t*)(self->data))->auto_size = v;
+    return 0;
+}
+
+
+
+static PyObject *
+get_struct_bitfield_line_ext_t_y_inv(StructObject *self, void *closure)
+{
+    return PyLong_FromLong(((lv_line_ext_t*)(self->data))->y_inv );
+}
+
+static int
+set_struct_bitfield_line_ext_t_y_inv(StructObject *self, PyObject *value, void *closure)
+{
+    long v;
+    if (long_to_int(value, &v, 0, 1)) return -1;
+    ((lv_line_ext_t*)(self->data))->y_inv = v;
+    return 0;
+}
+
+static PyGetSetDef pylv_line_ext_t_getset[] = {
+    {"point_array", (getter) struct_get_struct, (setter) struct_set_struct, "lv_point_t point_array", & ((struct_closure_t){ &Blob_Type, offsetof(lv_line_ext_t, point_array), sizeof(((lv_line_ext_t *)0)->point_array)})},
+    {"point_num", (getter) struct_get_uint16, (setter) struct_set_uint16, "uint16_t point_num", (void*)offsetof(lv_line_ext_t, point_num)},
+    {"auto_size", (getter) get_struct_bitfield_line_ext_t_auto_size, (setter) set_struct_bitfield_line_ext_t_auto_size, "uint8_t:1 auto_size", NULL},
+    {"y_inv", (getter) get_struct_bitfield_line_ext_t_y_inv, (setter) set_struct_bitfield_line_ext_t_y_inv, "uint8_t:1 y_inv", NULL},
     {NULL}
 };
+
 
 static PyTypeObject pylv_line_ext_t_Type = {
     PyVarObject_HEAD_INIT(NULL, 0)
@@ -2289,8 +3287,8 @@ static PyTypeObject pylv_line_ext_t_Type = {
     .tp_init = (initproc) pylv_line_ext_t_init,
     .tp_dealloc = (destructor) Struct_dealloc,
     .tp_getset = pylv_line_ext_t_getset,
-    .tp_repr = (reprfunc) Struct_repr
-
+    .tp_repr = (reprfunc) Struct_repr,
+    .tp_as_buffer = &Struct_bufferprocs
 };
 
 
@@ -2298,27 +3296,78 @@ static PyTypeObject pylv_line_ext_t_Type = {
 static int
 pylv_page_ext_t_init(StructObject *self, PyObject *args, PyObject *kwds) 
 {
-
-    self->data = PyMem_Malloc(sizeof(lv_page_ext_t));
+    self->size = sizeof(lv_page_ext_t);
+    self->data = PyMem_Malloc(self->size);
     if (!self->data) return -1;
     
-    memset(self->data, 0, sizeof(lv_page_ext_t));
+    memset(self->data, 0, self->size);
     self->owner = (PyObject *)self;
 
     return 0;
 }
 
+
+
+static PyObject *
+get_struct_bitfield_page_ext_t_arrow_scroll(StructObject *self, void *closure)
+{
+    return PyLong_FromLong(((lv_page_ext_t*)(self->data))->arrow_scroll );
+}
+
+static int
+set_struct_bitfield_page_ext_t_arrow_scroll(StructObject *self, PyObject *value, void *closure)
+{
+    long v;
+    if (long_to_int(value, &v, 0, 1)) return -1;
+    ((lv_page_ext_t*)(self->data))->arrow_scroll = v;
+    return 0;
+}
+
+
+
+static PyObject *
+get_struct_bitfield_page_ext_t_scroll_prop(StructObject *self, void *closure)
+{
+    return PyLong_FromLong(((lv_page_ext_t*)(self->data))->scroll_prop );
+}
+
+static int
+set_struct_bitfield_page_ext_t_scroll_prop(StructObject *self, PyObject *value, void *closure)
+{
+    long v;
+    if (long_to_int(value, &v, 0, 1)) return -1;
+    ((lv_page_ext_t*)(self->data))->scroll_prop = v;
+    return 0;
+}
+
+
+
+static PyObject *
+get_struct_bitfield_page_ext_t_scroll_prop_ip(StructObject *self, void *closure)
+{
+    return PyLong_FromLong(((lv_page_ext_t*)(self->data))->scroll_prop_ip );
+}
+
+static int
+set_struct_bitfield_page_ext_t_scroll_prop_ip(StructObject *self, PyObject *value, void *closure)
+{
+    long v;
+    if (long_to_int(value, &v, 0, 1)) return -1;
+    ((lv_page_ext_t*)(self->data))->scroll_prop_ip = v;
+    return 0;
+}
+
 static PyGetSetDef pylv_page_ext_t_getset[] = {
-    {"bg", (getter) struct_get_blob, (setter) struct_set_blob, "lv_cont_ext_t bg", (void*)offsetof(lv_page_ext_t, bg)},
-    {"scrl", (getter) struct_get_blob, (setter) struct_set_blob, "lv_obj_t scrl", (void*)offsetof(lv_page_ext_t, scrl)},
+    {"bg", (getter) struct_get_struct, (setter) struct_set_struct, "lv_cont_ext_t bg", & ((struct_closure_t){ &pylv_cont_ext_t_Type, offsetof(lv_page_ext_t, bg), sizeof(lv_cont_ext_t)})},
+    {"scrl", (getter) struct_get_struct, (setter) struct_set_struct, "lv_obj_t scrl", & ((struct_closure_t){ &Blob_Type, offsetof(lv_page_ext_t, scrl), sizeof(((lv_page_ext_t *)0)->scrl)})},
     {"sb", (getter) struct_get_struct, (setter) struct_set_struct, "struct  {   lv_style_t *style;   lv_area_t hor_area;   lv_area_t ver_area;   uint8_t hor_draw : 1;   uint8_t ver_draw : 1;   lv_sb_mode_t mode : 3; } sb", & ((struct_closure_t){ &pylv_page_ext_t_sb_Type, offsetof(lv_page_ext_t, sb), sizeof(((lv_page_ext_t *)0)->sb)})},
     {"edge_flash", (getter) struct_get_struct, (setter) struct_set_struct, "struct  {   uint16_t state;   lv_style_t *style;   uint8_t enabled : 1;   uint8_t top_ip : 1;   uint8_t bottom_ip : 1;   uint8_t right_ip : 1;   uint8_t left_ip : 1; } edge_flash", & ((struct_closure_t){ &pylv_page_ext_t_edge_flash_Type, offsetof(lv_page_ext_t, edge_flash), sizeof(((lv_page_ext_t *)0)->edge_flash)})},
-    {"arrow_scroll", (getter) NULL, (setter) NULL, "uint8_t arrow_scroll", NULL},
-    {"scroll_prop", (getter) NULL, (setter) NULL, "uint8_t scroll_prop", NULL},
-    {"scroll_prop_ip", (getter) NULL, (setter) NULL, "uint8_t scroll_prop_ip", NULL},
-
+    {"arrow_scroll", (getter) get_struct_bitfield_page_ext_t_arrow_scroll, (setter) set_struct_bitfield_page_ext_t_arrow_scroll, "uint8_t:1 arrow_scroll", NULL},
+    {"scroll_prop", (getter) get_struct_bitfield_page_ext_t_scroll_prop, (setter) set_struct_bitfield_page_ext_t_scroll_prop, "uint8_t:1 scroll_prop", NULL},
+    {"scroll_prop_ip", (getter) get_struct_bitfield_page_ext_t_scroll_prop_ip, (setter) set_struct_bitfield_page_ext_t_scroll_prop_ip, "uint8_t:1 scroll_prop_ip", NULL},
     {NULL}
 };
+
 
 static PyTypeObject pylv_page_ext_t_Type = {
     PyVarObject_HEAD_INIT(NULL, 0)
@@ -2331,8 +3380,8 @@ static PyTypeObject pylv_page_ext_t_Type = {
     .tp_init = (initproc) pylv_page_ext_t_init,
     .tp_dealloc = (destructor) Struct_dealloc,
     .tp_getset = pylv_page_ext_t_getset,
-    .tp_repr = (reprfunc) Struct_repr
-
+    .tp_repr = (reprfunc) Struct_repr,
+    .tp_as_buffer = &Struct_bufferprocs
 };
 
 
@@ -2340,28 +3389,28 @@ static PyTypeObject pylv_page_ext_t_Type = {
 static int
 pylv_list_ext_t_init(StructObject *self, PyObject *args, PyObject *kwds) 
 {
-
-    self->data = PyMem_Malloc(sizeof(lv_list_ext_t));
+    self->size = sizeof(lv_list_ext_t);
+    self->data = PyMem_Malloc(self->size);
     if (!self->data) return -1;
     
-    memset(self->data, 0, sizeof(lv_list_ext_t));
+    memset(self->data, 0, self->size);
     self->owner = (PyObject *)self;
 
     return 0;
 }
 
 static PyGetSetDef pylv_list_ext_t_getset[] = {
-    {"page", (getter) struct_get_blob, (setter) struct_set_blob, "lv_page_ext_t page", (void*)offsetof(lv_list_ext_t, page)},
+    {"page", (getter) struct_get_struct, (setter) struct_set_struct, "lv_page_ext_t page", & ((struct_closure_t){ &pylv_page_ext_t_Type, offsetof(lv_list_ext_t, page), sizeof(lv_page_ext_t)})},
     {"anim_time", (getter) struct_get_uint16, (setter) struct_set_uint16, "uint16_t anim_time", (void*)offsetof(lv_list_ext_t, anim_time)},
-    {"styles_btn", (getter) struct_get_blob, (setter) struct_set_blob, "lv_style_tLV_BTN_STATE_NUM styles_btn", (void*)offsetof(lv_list_ext_t, styles_btn)},
-    {"style_img", (getter) struct_get_blob, (setter) struct_set_blob, "lv_style_t style_img", (void*)offsetof(lv_list_ext_t, style_img)},
+    {"styles_btn", (getter) struct_get_struct, (setter) struct_set_struct, "lv_style_tLV_BTN_STATE_NUM styles_btn", & ((struct_closure_t){ &Blob_Type, offsetof(lv_list_ext_t, styles_btn), sizeof(((lv_list_ext_t *)0)->styles_btn)})},
+    {"style_img", (getter) struct_get_struct, (setter) struct_set_struct, "lv_style_t style_img", & ((struct_closure_t){ &Blob_Type, offsetof(lv_list_ext_t, style_img), sizeof(((lv_list_ext_t *)0)->style_img)})},
     {"size", (getter) struct_get_uint32, (setter) struct_set_uint32, "uint32_t size", (void*)offsetof(lv_list_ext_t, size)},
-    {"single_mode", (getter) struct_get_blob, (setter) struct_set_blob, "bool single_mode", (void*)offsetof(lv_list_ext_t, single_mode)},
-    {"last_sel", (getter) struct_get_blob, (setter) struct_set_blob, "lv_obj_t last_sel", (void*)offsetof(lv_list_ext_t, last_sel)},
-    {"selected_btn", (getter) struct_get_blob, (setter) struct_set_blob, "lv_obj_t selected_btn", (void*)offsetof(lv_list_ext_t, selected_btn)},
-
+    {"single_mode", (getter) struct_get_struct, (setter) struct_set_struct, "bool single_mode", & ((struct_closure_t){ &Blob_Type, offsetof(lv_list_ext_t, single_mode), sizeof(((lv_list_ext_t *)0)->single_mode)})},
+    {"last_sel", (getter) struct_get_struct, (setter) struct_set_struct, "lv_obj_t last_sel", & ((struct_closure_t){ &Blob_Type, offsetof(lv_list_ext_t, last_sel), sizeof(((lv_list_ext_t *)0)->last_sel)})},
+    {"selected_btn", (getter) struct_get_struct, (setter) struct_set_struct, "lv_obj_t selected_btn", & ((struct_closure_t){ &Blob_Type, offsetof(lv_list_ext_t, selected_btn), sizeof(((lv_list_ext_t *)0)->selected_btn)})},
     {NULL}
 };
+
 
 static PyTypeObject pylv_list_ext_t_Type = {
     PyVarObject_HEAD_INIT(NULL, 0)
@@ -2374,8 +3423,8 @@ static PyTypeObject pylv_list_ext_t_Type = {
     .tp_init = (initproc) pylv_list_ext_t_init,
     .tp_dealloc = (destructor) Struct_dealloc,
     .tp_getset = pylv_list_ext_t_getset,
-    .tp_repr = (reprfunc) Struct_repr
-
+    .tp_repr = (reprfunc) Struct_repr,
+    .tp_as_buffer = &Struct_bufferprocs
 };
 
 
@@ -2383,23 +3432,23 @@ static PyTypeObject pylv_list_ext_t_Type = {
 static int
 pylv_chart_series_t_init(StructObject *self, PyObject *args, PyObject *kwds) 
 {
-
-    self->data = PyMem_Malloc(sizeof(lv_chart_series_t));
+    self->size = sizeof(lv_chart_series_t);
+    self->data = PyMem_Malloc(self->size);
     if (!self->data) return -1;
     
-    memset(self->data, 0, sizeof(lv_chart_series_t));
+    memset(self->data, 0, self->size);
     self->owner = (PyObject *)self;
 
     return 0;
 }
 
 static PyGetSetDef pylv_chart_series_t_getset[] = {
-    {"points", (getter) struct_get_blob, (setter) struct_set_blob, "lv_coord_t points", (void*)offsetof(lv_chart_series_t, points)},
-    {"color", (getter) struct_get_blob, (setter) struct_set_blob, "lv_color_t color", (void*)offsetof(lv_chart_series_t, color)},
+    {"points", (getter) struct_get_struct, (setter) struct_set_struct, "lv_coord_t points", & ((struct_closure_t){ &Blob_Type, offsetof(lv_chart_series_t, points), sizeof(((lv_chart_series_t *)0)->points)})},
+    {"color", (getter) struct_get_struct, (setter) struct_set_struct, "lv_color_t color", & ((struct_closure_t){ &pylv_color16_t_Type, offsetof(lv_chart_series_t, color), sizeof(lv_color16_t)})},
     {"start_point", (getter) struct_get_uint16, (setter) struct_set_uint16, "uint16_t start_point", (void*)offsetof(lv_chart_series_t, start_point)},
-
     {NULL}
 };
+
 
 static PyTypeObject pylv_chart_series_t_Type = {
     PyVarObject_HEAD_INIT(NULL, 0)
@@ -2412,8 +3461,8 @@ static PyTypeObject pylv_chart_series_t_Type = {
     .tp_init = (initproc) pylv_chart_series_t_init,
     .tp_dealloc = (destructor) Struct_dealloc,
     .tp_getset = pylv_chart_series_t_getset,
-    .tp_repr = (reprfunc) Struct_repr
-
+    .tp_repr = (reprfunc) Struct_repr,
+    .tp_as_buffer = &Struct_bufferprocs
 };
 
 
@@ -2421,28 +3470,45 @@ static PyTypeObject pylv_chart_series_t_Type = {
 static int
 pylv_chart_ext_t_init(StructObject *self, PyObject *args, PyObject *kwds) 
 {
-
-    self->data = PyMem_Malloc(sizeof(lv_chart_ext_t));
+    self->size = sizeof(lv_chart_ext_t);
+    self->data = PyMem_Malloc(self->size);
     if (!self->data) return -1;
     
-    memset(self->data, 0, sizeof(lv_chart_ext_t));
+    memset(self->data, 0, self->size);
     self->owner = (PyObject *)self;
 
     return 0;
 }
 
+
+
+static PyObject *
+get_struct_bitfield_chart_ext_t_type(StructObject *self, void *closure)
+{
+    return PyLong_FromLong(((lv_chart_ext_t*)(self->data))->type );
+}
+
+static int
+set_struct_bitfield_chart_ext_t_type(StructObject *self, PyObject *value, void *closure)
+{
+    long v;
+    if (long_to_int(value, &v, 0, 15)) return -1;
+    ((lv_chart_ext_t*)(self->data))->type = v;
+    return 0;
+}
+
 static PyGetSetDef pylv_chart_ext_t_getset[] = {
-    {"series_ll", (getter) struct_get_blob, (setter) struct_set_blob, "lv_ll_t series_ll", (void*)offsetof(lv_chart_ext_t, series_ll)},
+    {"series_ll", (getter) struct_get_struct, (setter) struct_set_struct, "lv_ll_t series_ll", & ((struct_closure_t){ &pylv_ll_t_Type, offsetof(lv_chart_ext_t, series_ll), sizeof(lv_ll_t)})},
     {"ymin", (getter) struct_get_int16, (setter) struct_set_int16, "lv_coord_t ymin", (void*)offsetof(lv_chart_ext_t, ymin)},
     {"ymax", (getter) struct_get_int16, (setter) struct_set_int16, "lv_coord_t ymax", (void*)offsetof(lv_chart_ext_t, ymax)},
     {"hdiv_cnt", (getter) struct_get_uint8, (setter) struct_set_uint8, "uint8_t hdiv_cnt", (void*)offsetof(lv_chart_ext_t, hdiv_cnt)},
     {"vdiv_cnt", (getter) struct_get_uint8, (setter) struct_set_uint8, "uint8_t vdiv_cnt", (void*)offsetof(lv_chart_ext_t, vdiv_cnt)},
     {"point_cnt", (getter) struct_get_uint16, (setter) struct_set_uint16, "uint16_t point_cnt", (void*)offsetof(lv_chart_ext_t, point_cnt)},
-    {"type", (getter) NULL, (setter) NULL, "uint8_t type", NULL},
+    {"type", (getter) get_struct_bitfield_chart_ext_t_type, (setter) set_struct_bitfield_chart_ext_t_type, "uint8_t:4 type", NULL},
     {"series", (getter) struct_get_struct, (setter) struct_set_struct, "struct  {   lv_coord_t width;   uint8_t num;   lv_opa_t opa;   lv_opa_t dark; } series", & ((struct_closure_t){ &pylv_chart_ext_t_series_Type, offsetof(lv_chart_ext_t, series), sizeof(((lv_chart_ext_t *)0)->series)})},
-
     {NULL}
 };
+
 
 static PyTypeObject pylv_chart_ext_t_Type = {
     PyVarObject_HEAD_INIT(NULL, 0)
@@ -2455,8 +3521,8 @@ static PyTypeObject pylv_chart_ext_t_Type = {
     .tp_init = (initproc) pylv_chart_ext_t_init,
     .tp_dealloc = (destructor) Struct_dealloc,
     .tp_getset = pylv_chart_ext_t_getset,
-    .tp_repr = (reprfunc) Struct_repr
-
+    .tp_repr = (reprfunc) Struct_repr,
+    .tp_as_buffer = &Struct_bufferprocs
 };
 
 
@@ -2464,25 +3530,93 @@ static PyTypeObject pylv_chart_ext_t_Type = {
 static int
 pylv_table_cell_format_t_init(StructObject *self, PyObject *args, PyObject *kwds) 
 {
-
-    self->data = PyMem_Malloc(sizeof(lv_table_cell_format_t));
+    self->size = sizeof(lv_table_cell_format_t);
+    self->data = PyMem_Malloc(self->size);
     if (!self->data) return -1;
     
-    memset(self->data, 0, sizeof(lv_table_cell_format_t));
+    memset(self->data, 0, self->size);
     self->owner = (PyObject *)self;
 
     return 0;
 }
 
-static PyGetSetDef pylv_table_cell_format_t_getset[] = {
-    {"align", (getter) NULL, (setter) NULL, "uint8_t align", NULL},
-    {"right_merge", (getter) NULL, (setter) NULL, "uint8_t right_merge", NULL},
-    {"type", (getter) NULL, (setter) NULL, "uint8_t type", NULL},
-    {"crop", (getter) NULL, (setter) NULL, "uint8_t crop", NULL},
-    {"format_byte", (getter) struct_get_uint8, (setter) struct_set_uint8, "uint8_t format_byte", (void*)offsetof(lv_table_cell_format_t, format_byte)},
 
+
+static PyObject *
+get_struct_bitfield_table_cell_format_t_align(StructObject *self, void *closure)
+{
+    return PyLong_FromLong(((lv_table_cell_format_t*)(self->data))->align );
+}
+
+static int
+set_struct_bitfield_table_cell_format_t_align(StructObject *self, PyObject *value, void *closure)
+{
+    long v;
+    if (long_to_int(value, &v, 0, 3)) return -1;
+    ((lv_table_cell_format_t*)(self->data))->align = v;
+    return 0;
+}
+
+
+
+static PyObject *
+get_struct_bitfield_table_cell_format_t_right_merge(StructObject *self, void *closure)
+{
+    return PyLong_FromLong(((lv_table_cell_format_t*)(self->data))->right_merge );
+}
+
+static int
+set_struct_bitfield_table_cell_format_t_right_merge(StructObject *self, PyObject *value, void *closure)
+{
+    long v;
+    if (long_to_int(value, &v, 0, 1)) return -1;
+    ((lv_table_cell_format_t*)(self->data))->right_merge = v;
+    return 0;
+}
+
+
+
+static PyObject *
+get_struct_bitfield_table_cell_format_t_type(StructObject *self, void *closure)
+{
+    return PyLong_FromLong(((lv_table_cell_format_t*)(self->data))->type );
+}
+
+static int
+set_struct_bitfield_table_cell_format_t_type(StructObject *self, PyObject *value, void *closure)
+{
+    long v;
+    if (long_to_int(value, &v, 0, 3)) return -1;
+    ((lv_table_cell_format_t*)(self->data))->type = v;
+    return 0;
+}
+
+
+
+static PyObject *
+get_struct_bitfield_table_cell_format_t_crop(StructObject *self, void *closure)
+{
+    return PyLong_FromLong(((lv_table_cell_format_t*)(self->data))->crop );
+}
+
+static int
+set_struct_bitfield_table_cell_format_t_crop(StructObject *self, PyObject *value, void *closure)
+{
+    long v;
+    if (long_to_int(value, &v, 0, 1)) return -1;
+    ((lv_table_cell_format_t*)(self->data))->crop = v;
+    return 0;
+}
+
+static PyGetSetDef pylv_table_cell_format_t_getset[] = {
+    {"align", (getter) get_struct_bitfield_table_cell_format_t_align, (setter) set_struct_bitfield_table_cell_format_t_align, "uint8_t:2 align", NULL},
+    {"right_merge", (getter) get_struct_bitfield_table_cell_format_t_right_merge, (setter) set_struct_bitfield_table_cell_format_t_right_merge, "uint8_t:1 right_merge", NULL},
+    {"type", (getter) get_struct_bitfield_table_cell_format_t_type, (setter) set_struct_bitfield_table_cell_format_t_type, "uint8_t:2 type", NULL},
+    {"crop", (getter) get_struct_bitfield_table_cell_format_t_crop, (setter) set_struct_bitfield_table_cell_format_t_crop, "uint8_t:1 crop", NULL},
+    {"format_byte", (getter) struct_get_uint8, (setter) struct_set_uint8, "uint8_t format_byte", (void*)offsetof(lv_table_cell_format_t, format_byte)},
     {NULL}
 };
+
 
 static PyTypeObject pylv_table_cell_format_t_Type = {
     PyVarObject_HEAD_INIT(NULL, 0)
@@ -2495,8 +3629,8 @@ static PyTypeObject pylv_table_cell_format_t_Type = {
     .tp_init = (initproc) pylv_table_cell_format_t_init,
     .tp_dealloc = (destructor) Struct_dealloc,
     .tp_getset = pylv_table_cell_format_t_getset,
-    .tp_repr = (reprfunc) Struct_repr
-
+    .tp_repr = (reprfunc) Struct_repr,
+    .tp_as_buffer = &Struct_bufferprocs
 };
 
 
@@ -2504,11 +3638,11 @@ static PyTypeObject pylv_table_cell_format_t_Type = {
 static int
 pylv_table_ext_t_init(StructObject *self, PyObject *args, PyObject *kwds) 
 {
-
-    self->data = PyMem_Malloc(sizeof(lv_table_ext_t));
+    self->size = sizeof(lv_table_ext_t);
+    self->data = PyMem_Malloc(self->size);
     if (!self->data) return -1;
     
-    memset(self->data, 0, sizeof(lv_table_ext_t));
+    memset(self->data, 0, self->size);
     self->owner = (PyObject *)self;
 
     return 0;
@@ -2517,12 +3651,12 @@ pylv_table_ext_t_init(StructObject *self, PyObject *args, PyObject *kwds)
 static PyGetSetDef pylv_table_ext_t_getset[] = {
     {"col_cnt", (getter) struct_get_uint16, (setter) struct_set_uint16, "uint16_t col_cnt", (void*)offsetof(lv_table_ext_t, col_cnt)},
     {"row_cnt", (getter) struct_get_uint16, (setter) struct_set_uint16, "uint16_t row_cnt", (void*)offsetof(lv_table_ext_t, row_cnt)},
-    {"cell_data", (getter) struct_get_blob, (setter) struct_set_blob, "char cell_data", (void*)offsetof(lv_table_ext_t, cell_data)},
-    {"cell_style", (getter) struct_get_blob, (setter) struct_set_blob, "lv_style_t4 cell_style", (void*)offsetof(lv_table_ext_t, cell_style)},
-    {"col_w", (getter) struct_get_blob, (setter) struct_set_blob, "lv_coord_t12 col_w", (void*)offsetof(lv_table_ext_t, col_w)},
-
+    {"cell_data", (getter) struct_get_struct, (setter) struct_set_struct, "char cell_data", & ((struct_closure_t){ &Blob_Type, offsetof(lv_table_ext_t, cell_data), sizeof(((lv_table_ext_t *)0)->cell_data)})},
+    {"cell_style", (getter) struct_get_struct, (setter) struct_set_struct, "lv_style_t4 cell_style", & ((struct_closure_t){ &Blob_Type, offsetof(lv_table_ext_t, cell_style), sizeof(((lv_table_ext_t *)0)->cell_style)})},
+    {"col_w", (getter) struct_get_struct, (setter) struct_set_struct, "lv_coord_t12 col_w", & ((struct_closure_t){ &Blob_Type, offsetof(lv_table_ext_t, col_w), sizeof(((lv_table_ext_t *)0)->col_w)})},
     {NULL}
 };
+
 
 static PyTypeObject pylv_table_ext_t_Type = {
     PyVarObject_HEAD_INIT(NULL, 0)
@@ -2535,8 +3669,8 @@ static PyTypeObject pylv_table_ext_t_Type = {
     .tp_init = (initproc) pylv_table_ext_t_init,
     .tp_dealloc = (destructor) Struct_dealloc,
     .tp_getset = pylv_table_ext_t_getset,
-    .tp_repr = (reprfunc) Struct_repr
-
+    .tp_repr = (reprfunc) Struct_repr,
+    .tp_as_buffer = &Struct_bufferprocs
 };
 
 
@@ -2544,23 +3678,23 @@ static PyTypeObject pylv_table_ext_t_Type = {
 static int
 pylv_cb_ext_t_init(StructObject *self, PyObject *args, PyObject *kwds) 
 {
-
-    self->data = PyMem_Malloc(sizeof(lv_cb_ext_t));
+    self->size = sizeof(lv_cb_ext_t);
+    self->data = PyMem_Malloc(self->size);
     if (!self->data) return -1;
     
-    memset(self->data, 0, sizeof(lv_cb_ext_t));
+    memset(self->data, 0, self->size);
     self->owner = (PyObject *)self;
 
     return 0;
 }
 
 static PyGetSetDef pylv_cb_ext_t_getset[] = {
-    {"bg_btn", (getter) struct_get_blob, (setter) struct_set_blob, "lv_btn_ext_t bg_btn", (void*)offsetof(lv_cb_ext_t, bg_btn)},
-    {"bullet", (getter) struct_get_blob, (setter) struct_set_blob, "lv_obj_t bullet", (void*)offsetof(lv_cb_ext_t, bullet)},
-    {"label", (getter) struct_get_blob, (setter) struct_set_blob, "lv_obj_t label", (void*)offsetof(lv_cb_ext_t, label)},
-
+    {"bg_btn", (getter) struct_get_struct, (setter) struct_set_struct, "lv_btn_ext_t bg_btn", & ((struct_closure_t){ &pylv_btn_ext_t_Type, offsetof(lv_cb_ext_t, bg_btn), sizeof(lv_btn_ext_t)})},
+    {"bullet", (getter) struct_get_struct, (setter) struct_set_struct, "lv_obj_t bullet", & ((struct_closure_t){ &Blob_Type, offsetof(lv_cb_ext_t, bullet), sizeof(((lv_cb_ext_t *)0)->bullet)})},
+    {"label", (getter) struct_get_struct, (setter) struct_set_struct, "lv_obj_t label", & ((struct_closure_t){ &Blob_Type, offsetof(lv_cb_ext_t, label), sizeof(((lv_cb_ext_t *)0)->label)})},
     {NULL}
 };
+
 
 static PyTypeObject pylv_cb_ext_t_Type = {
     PyVarObject_HEAD_INIT(NULL, 0)
@@ -2573,8 +3707,8 @@ static PyTypeObject pylv_cb_ext_t_Type = {
     .tp_init = (initproc) pylv_cb_ext_t_init,
     .tp_dealloc = (destructor) Struct_dealloc,
     .tp_getset = pylv_cb_ext_t_getset,
-    .tp_repr = (reprfunc) Struct_repr
-
+    .tp_repr = (reprfunc) Struct_repr,
+    .tp_as_buffer = &Struct_bufferprocs
 };
 
 
@@ -2582,13 +3716,30 @@ static PyTypeObject pylv_cb_ext_t_Type = {
 static int
 pylv_bar_ext_t_init(StructObject *self, PyObject *args, PyObject *kwds) 
 {
-
-    self->data = PyMem_Malloc(sizeof(lv_bar_ext_t));
+    self->size = sizeof(lv_bar_ext_t);
+    self->data = PyMem_Malloc(self->size);
     if (!self->data) return -1;
     
-    memset(self->data, 0, sizeof(lv_bar_ext_t));
+    memset(self->data, 0, self->size);
     self->owner = (PyObject *)self;
 
+    return 0;
+}
+
+
+
+static PyObject *
+get_struct_bitfield_bar_ext_t_sym(StructObject *self, void *closure)
+{
+    return PyLong_FromLong(((lv_bar_ext_t*)(self->data))->sym );
+}
+
+static int
+set_struct_bitfield_bar_ext_t_sym(StructObject *self, PyObject *value, void *closure)
+{
+    long v;
+    if (long_to_int(value, &v, 0, 1)) return -1;
+    ((lv_bar_ext_t*)(self->data))->sym = v;
     return 0;
 }
 
@@ -2600,11 +3751,11 @@ static PyGetSetDef pylv_bar_ext_t_getset[] = {
     {"anim_end", (getter) struct_get_int16, (setter) struct_set_int16, "int16_t anim_end", (void*)offsetof(lv_bar_ext_t, anim_end)},
     {"anim_state", (getter) struct_get_int16, (setter) struct_set_int16, "int16_t anim_state", (void*)offsetof(lv_bar_ext_t, anim_state)},
     {"anim_time", (getter) struct_get_uint16, (setter) struct_set_uint16, "uint16_t anim_time", (void*)offsetof(lv_bar_ext_t, anim_time)},
-    {"sym", (getter) NULL, (setter) NULL, "uint8_t sym", NULL},
-    {"style_indic", (getter) struct_get_blob, (setter) struct_set_blob, "lv_style_t style_indic", (void*)offsetof(lv_bar_ext_t, style_indic)},
-
+    {"sym", (getter) get_struct_bitfield_bar_ext_t_sym, (setter) set_struct_bitfield_bar_ext_t_sym, "uint8_t:1 sym", NULL},
+    {"style_indic", (getter) struct_get_struct, (setter) struct_set_struct, "lv_style_t style_indic", & ((struct_closure_t){ &Blob_Type, offsetof(lv_bar_ext_t, style_indic), sizeof(((lv_bar_ext_t *)0)->style_indic)})},
     {NULL}
 };
+
 
 static PyTypeObject pylv_bar_ext_t_Type = {
     PyVarObject_HEAD_INIT(NULL, 0)
@@ -2617,8 +3768,8 @@ static PyTypeObject pylv_bar_ext_t_Type = {
     .tp_init = (initproc) pylv_bar_ext_t_init,
     .tp_dealloc = (destructor) Struct_dealloc,
     .tp_getset = pylv_bar_ext_t_getset,
-    .tp_repr = (reprfunc) Struct_repr
-
+    .tp_repr = (reprfunc) Struct_repr,
+    .tp_as_buffer = &Struct_bufferprocs
 };
 
 
@@ -2626,24 +3777,41 @@ static PyTypeObject pylv_bar_ext_t_Type = {
 static int
 pylv_slider_ext_t_init(StructObject *self, PyObject *args, PyObject *kwds) 
 {
-
-    self->data = PyMem_Malloc(sizeof(lv_slider_ext_t));
+    self->size = sizeof(lv_slider_ext_t);
+    self->data = PyMem_Malloc(self->size);
     if (!self->data) return -1;
     
-    memset(self->data, 0, sizeof(lv_slider_ext_t));
+    memset(self->data, 0, self->size);
     self->owner = (PyObject *)self;
 
     return 0;
 }
 
-static PyGetSetDef pylv_slider_ext_t_getset[] = {
-    {"bar", (getter) struct_get_blob, (setter) struct_set_blob, "lv_bar_ext_t bar", (void*)offsetof(lv_slider_ext_t, bar)},
-    {"style_knob", (getter) struct_get_blob, (setter) struct_set_blob, "lv_style_t style_knob", (void*)offsetof(lv_slider_ext_t, style_knob)},
-    {"drag_value", (getter) struct_get_int16, (setter) struct_set_int16, "int16_t drag_value", (void*)offsetof(lv_slider_ext_t, drag_value)},
-    {"knob_in", (getter) NULL, (setter) NULL, "uint8_t knob_in", NULL},
 
+
+static PyObject *
+get_struct_bitfield_slider_ext_t_knob_in(StructObject *self, void *closure)
+{
+    return PyLong_FromLong(((lv_slider_ext_t*)(self->data))->knob_in );
+}
+
+static int
+set_struct_bitfield_slider_ext_t_knob_in(StructObject *self, PyObject *value, void *closure)
+{
+    long v;
+    if (long_to_int(value, &v, 0, 1)) return -1;
+    ((lv_slider_ext_t*)(self->data))->knob_in = v;
+    return 0;
+}
+
+static PyGetSetDef pylv_slider_ext_t_getset[] = {
+    {"bar", (getter) struct_get_struct, (setter) struct_set_struct, "lv_bar_ext_t bar", & ((struct_closure_t){ &pylv_bar_ext_t_Type, offsetof(lv_slider_ext_t, bar), sizeof(lv_bar_ext_t)})},
+    {"style_knob", (getter) struct_get_struct, (setter) struct_set_struct, "lv_style_t style_knob", & ((struct_closure_t){ &Blob_Type, offsetof(lv_slider_ext_t, style_knob), sizeof(((lv_slider_ext_t *)0)->style_knob)})},
+    {"drag_value", (getter) struct_get_int16, (setter) struct_set_int16, "int16_t drag_value", (void*)offsetof(lv_slider_ext_t, drag_value)},
+    {"knob_in", (getter) get_struct_bitfield_slider_ext_t_knob_in, (setter) set_struct_bitfield_slider_ext_t_knob_in, "uint8_t:1 knob_in", NULL},
     {NULL}
 };
+
 
 static PyTypeObject pylv_slider_ext_t_Type = {
     PyVarObject_HEAD_INIT(NULL, 0)
@@ -2656,8 +3824,8 @@ static PyTypeObject pylv_slider_ext_t_Type = {
     .tp_init = (initproc) pylv_slider_ext_t_init,
     .tp_dealloc = (destructor) Struct_dealloc,
     .tp_getset = pylv_slider_ext_t_getset,
-    .tp_repr = (reprfunc) Struct_repr
-
+    .tp_repr = (reprfunc) Struct_repr,
+    .tp_as_buffer = &Struct_bufferprocs
 };
 
 
@@ -2665,11 +3833,11 @@ static PyTypeObject pylv_slider_ext_t_Type = {
 static int
 pylv_led_ext_t_init(StructObject *self, PyObject *args, PyObject *kwds) 
 {
-
-    self->data = PyMem_Malloc(sizeof(lv_led_ext_t));
+    self->size = sizeof(lv_led_ext_t);
+    self->data = PyMem_Malloc(self->size);
     if (!self->data) return -1;
     
-    memset(self->data, 0, sizeof(lv_led_ext_t));
+    memset(self->data, 0, self->size);
     self->owner = (PyObject *)self;
 
     return 0;
@@ -2677,9 +3845,9 @@ pylv_led_ext_t_init(StructObject *self, PyObject *args, PyObject *kwds)
 
 static PyGetSetDef pylv_led_ext_t_getset[] = {
     {"bright", (getter) struct_get_uint8, (setter) struct_set_uint8, "uint8_t bright", (void*)offsetof(lv_led_ext_t, bright)},
-
     {NULL}
 };
+
 
 static PyTypeObject pylv_led_ext_t_Type = {
     PyVarObject_HEAD_INIT(NULL, 0)
@@ -2692,8 +3860,8 @@ static PyTypeObject pylv_led_ext_t_Type = {
     .tp_init = (initproc) pylv_led_ext_t_init,
     .tp_dealloc = (destructor) Struct_dealloc,
     .tp_getset = pylv_led_ext_t_getset,
-    .tp_repr = (reprfunc) Struct_repr
-
+    .tp_repr = (reprfunc) Struct_repr,
+    .tp_as_buffer = &Struct_bufferprocs
 };
 
 
@@ -2701,28 +3869,45 @@ static PyTypeObject pylv_led_ext_t_Type = {
 static int
 pylv_btnm_ext_t_init(StructObject *self, PyObject *args, PyObject *kwds) 
 {
-
-    self->data = PyMem_Malloc(sizeof(lv_btnm_ext_t));
+    self->size = sizeof(lv_btnm_ext_t);
+    self->data = PyMem_Malloc(self->size);
     if (!self->data) return -1;
     
-    memset(self->data, 0, sizeof(lv_btnm_ext_t));
+    memset(self->data, 0, self->size);
     self->owner = (PyObject *)self;
 
     return 0;
 }
 
+
+
+static PyObject *
+get_struct_bitfield_btnm_ext_t_recolor(StructObject *self, void *closure)
+{
+    return PyLong_FromLong(((lv_btnm_ext_t*)(self->data))->recolor );
+}
+
+static int
+set_struct_bitfield_btnm_ext_t_recolor(StructObject *self, PyObject *value, void *closure)
+{
+    long v;
+    if (long_to_int(value, &v, 0, 1)) return -1;
+    ((lv_btnm_ext_t*)(self->data))->recolor = v;
+    return 0;
+}
+
 static PyGetSetDef pylv_btnm_ext_t_getset[] = {
-    {"map_p", (getter) struct_get_blob, (setter) struct_set_blob, "char map_p", (void*)offsetof(lv_btnm_ext_t, map_p)},
-    {"button_areas", (getter) struct_get_blob, (setter) struct_set_blob, "lv_area_t button_areas", (void*)offsetof(lv_btnm_ext_t, button_areas)},
-    {"ctrl_bits", (getter) struct_get_blob, (setter) struct_set_blob, "lv_btnm_ctrl_t ctrl_bits", (void*)offsetof(lv_btnm_ext_t, ctrl_bits)},
-    {"styles_btn", (getter) struct_get_blob, (setter) struct_set_blob, "lv_style_tLV_BTN_STATE_NUM styles_btn", (void*)offsetof(lv_btnm_ext_t, styles_btn)},
+    {"map_p", (getter) struct_get_struct, (setter) struct_set_struct, "char map_p", & ((struct_closure_t){ &Blob_Type, offsetof(lv_btnm_ext_t, map_p), sizeof(((lv_btnm_ext_t *)0)->map_p)})},
+    {"button_areas", (getter) struct_get_struct, (setter) struct_set_struct, "lv_area_t button_areas", & ((struct_closure_t){ &Blob_Type, offsetof(lv_btnm_ext_t, button_areas), sizeof(((lv_btnm_ext_t *)0)->button_areas)})},
+    {"ctrl_bits", (getter) struct_get_struct, (setter) struct_set_struct, "lv_btnm_ctrl_t ctrl_bits", & ((struct_closure_t){ &Blob_Type, offsetof(lv_btnm_ext_t, ctrl_bits), sizeof(((lv_btnm_ext_t *)0)->ctrl_bits)})},
+    {"styles_btn", (getter) struct_get_struct, (setter) struct_set_struct, "lv_style_tLV_BTN_STATE_NUM styles_btn", & ((struct_closure_t){ &Blob_Type, offsetof(lv_btnm_ext_t, styles_btn), sizeof(((lv_btnm_ext_t *)0)->styles_btn)})},
     {"btn_cnt", (getter) struct_get_uint16, (setter) struct_set_uint16, "uint16_t btn_cnt", (void*)offsetof(lv_btnm_ext_t, btn_cnt)},
     {"btn_id_pr", (getter) struct_get_uint16, (setter) struct_set_uint16, "uint16_t btn_id_pr", (void*)offsetof(lv_btnm_ext_t, btn_id_pr)},
     {"btn_id_act", (getter) struct_get_uint16, (setter) struct_set_uint16, "uint16_t btn_id_act", (void*)offsetof(lv_btnm_ext_t, btn_id_act)},
-    {"recolor", (getter) NULL, (setter) NULL, "uint8_t recolor", NULL},
-
+    {"recolor", (getter) get_struct_bitfield_btnm_ext_t_recolor, (setter) set_struct_bitfield_btnm_ext_t_recolor, "uint8_t:1 recolor", NULL},
     {NULL}
 };
+
 
 static PyTypeObject pylv_btnm_ext_t_Type = {
     PyVarObject_HEAD_INIT(NULL, 0)
@@ -2735,8 +3920,8 @@ static PyTypeObject pylv_btnm_ext_t_Type = {
     .tp_init = (initproc) pylv_btnm_ext_t_init,
     .tp_dealloc = (destructor) Struct_dealloc,
     .tp_getset = pylv_btnm_ext_t_getset,
-    .tp_repr = (reprfunc) Struct_repr
-
+    .tp_repr = (reprfunc) Struct_repr,
+    .tp_as_buffer = &Struct_bufferprocs
 };
 
 
@@ -2744,24 +3929,41 @@ static PyTypeObject pylv_btnm_ext_t_Type = {
 static int
 pylv_kb_ext_t_init(StructObject *self, PyObject *args, PyObject *kwds) 
 {
-
-    self->data = PyMem_Malloc(sizeof(lv_kb_ext_t));
+    self->size = sizeof(lv_kb_ext_t);
+    self->data = PyMem_Malloc(self->size);
     if (!self->data) return -1;
     
-    memset(self->data, 0, sizeof(lv_kb_ext_t));
+    memset(self->data, 0, self->size);
     self->owner = (PyObject *)self;
 
     return 0;
 }
 
-static PyGetSetDef pylv_kb_ext_t_getset[] = {
-    {"btnm", (getter) struct_get_blob, (setter) struct_set_blob, "lv_btnm_ext_t btnm", (void*)offsetof(lv_kb_ext_t, btnm)},
-    {"ta", (getter) struct_get_blob, (setter) struct_set_blob, "lv_obj_t ta", (void*)offsetof(lv_kb_ext_t, ta)},
-    {"mode", (getter) struct_get_uint8, (setter) struct_set_uint8, "lv_kb_mode_t mode", (void*)offsetof(lv_kb_ext_t, mode)},
-    {"cursor_mng", (getter) NULL, (setter) NULL, "uint8_t cursor_mng", NULL},
 
+
+static PyObject *
+get_struct_bitfield_kb_ext_t_cursor_mng(StructObject *self, void *closure)
+{
+    return PyLong_FromLong(((lv_kb_ext_t*)(self->data))->cursor_mng );
+}
+
+static int
+set_struct_bitfield_kb_ext_t_cursor_mng(StructObject *self, PyObject *value, void *closure)
+{
+    long v;
+    if (long_to_int(value, &v, 0, 1)) return -1;
+    ((lv_kb_ext_t*)(self->data))->cursor_mng = v;
+    return 0;
+}
+
+static PyGetSetDef pylv_kb_ext_t_getset[] = {
+    {"btnm", (getter) struct_get_struct, (setter) struct_set_struct, "lv_btnm_ext_t btnm", & ((struct_closure_t){ &pylv_btnm_ext_t_Type, offsetof(lv_kb_ext_t, btnm), sizeof(lv_btnm_ext_t)})},
+    {"ta", (getter) struct_get_struct, (setter) struct_set_struct, "lv_obj_t ta", & ((struct_closure_t){ &Blob_Type, offsetof(lv_kb_ext_t, ta), sizeof(((lv_kb_ext_t *)0)->ta)})},
+    {"mode", (getter) struct_get_uint8, (setter) struct_set_uint8, "lv_kb_mode_t mode", (void*)offsetof(lv_kb_ext_t, mode)},
+    {"cursor_mng", (getter) get_struct_bitfield_kb_ext_t_cursor_mng, (setter) set_struct_bitfield_kb_ext_t_cursor_mng, "uint8_t:1 cursor_mng", NULL},
     {NULL}
 };
+
 
 static PyTypeObject pylv_kb_ext_t_Type = {
     PyVarObject_HEAD_INIT(NULL, 0)
@@ -2774,8 +3976,8 @@ static PyTypeObject pylv_kb_ext_t_Type = {
     .tp_init = (initproc) pylv_kb_ext_t_init,
     .tp_dealloc = (destructor) Struct_dealloc,
     .tp_getset = pylv_kb_ext_t_getset,
-    .tp_repr = (reprfunc) Struct_repr
-
+    .tp_repr = (reprfunc) Struct_repr,
+    .tp_as_buffer = &Struct_bufferprocs
 };
 
 
@@ -2783,31 +3985,82 @@ static PyTypeObject pylv_kb_ext_t_Type = {
 static int
 pylv_ddlist_ext_t_init(StructObject *self, PyObject *args, PyObject *kwds) 
 {
-
-    self->data = PyMem_Malloc(sizeof(lv_ddlist_ext_t));
+    self->size = sizeof(lv_ddlist_ext_t);
+    self->data = PyMem_Malloc(self->size);
     if (!self->data) return -1;
     
-    memset(self->data, 0, sizeof(lv_ddlist_ext_t));
+    memset(self->data, 0, self->size);
     self->owner = (PyObject *)self;
 
     return 0;
 }
 
+
+
+static PyObject *
+get_struct_bitfield_ddlist_ext_t_opened(StructObject *self, void *closure)
+{
+    return PyLong_FromLong(((lv_ddlist_ext_t*)(self->data))->opened );
+}
+
+static int
+set_struct_bitfield_ddlist_ext_t_opened(StructObject *self, PyObject *value, void *closure)
+{
+    long v;
+    if (long_to_int(value, &v, 0, 1)) return -1;
+    ((lv_ddlist_ext_t*)(self->data))->opened = v;
+    return 0;
+}
+
+
+
+static PyObject *
+get_struct_bitfield_ddlist_ext_t_draw_arrow(StructObject *self, void *closure)
+{
+    return PyLong_FromLong(((lv_ddlist_ext_t*)(self->data))->draw_arrow );
+}
+
+static int
+set_struct_bitfield_ddlist_ext_t_draw_arrow(StructObject *self, PyObject *value, void *closure)
+{
+    long v;
+    if (long_to_int(value, &v, 0, 1)) return -1;
+    ((lv_ddlist_ext_t*)(self->data))->draw_arrow = v;
+    return 0;
+}
+
+
+
+static PyObject *
+get_struct_bitfield_ddlist_ext_t_stay_open(StructObject *self, void *closure)
+{
+    return PyLong_FromLong(((lv_ddlist_ext_t*)(self->data))->stay_open );
+}
+
+static int
+set_struct_bitfield_ddlist_ext_t_stay_open(StructObject *self, PyObject *value, void *closure)
+{
+    long v;
+    if (long_to_int(value, &v, 0, 1)) return -1;
+    ((lv_ddlist_ext_t*)(self->data))->stay_open = v;
+    return 0;
+}
+
 static PyGetSetDef pylv_ddlist_ext_t_getset[] = {
-    {"page", (getter) struct_get_blob, (setter) struct_set_blob, "lv_page_ext_t page", (void*)offsetof(lv_ddlist_ext_t, page)},
-    {"label", (getter) struct_get_blob, (setter) struct_set_blob, "lv_obj_t label", (void*)offsetof(lv_ddlist_ext_t, label)},
-    {"sel_style", (getter) struct_get_blob, (setter) struct_set_blob, "lv_style_t sel_style", (void*)offsetof(lv_ddlist_ext_t, sel_style)},
+    {"page", (getter) struct_get_struct, (setter) struct_set_struct, "lv_page_ext_t page", & ((struct_closure_t){ &pylv_page_ext_t_Type, offsetof(lv_ddlist_ext_t, page), sizeof(lv_page_ext_t)})},
+    {"label", (getter) struct_get_struct, (setter) struct_set_struct, "lv_obj_t label", & ((struct_closure_t){ &Blob_Type, offsetof(lv_ddlist_ext_t, label), sizeof(((lv_ddlist_ext_t *)0)->label)})},
+    {"sel_style", (getter) struct_get_struct, (setter) struct_set_struct, "lv_style_t sel_style", & ((struct_closure_t){ &Blob_Type, offsetof(lv_ddlist_ext_t, sel_style), sizeof(((lv_ddlist_ext_t *)0)->sel_style)})},
     {"option_cnt", (getter) struct_get_uint16, (setter) struct_set_uint16, "uint16_t option_cnt", (void*)offsetof(lv_ddlist_ext_t, option_cnt)},
     {"sel_opt_id", (getter) struct_get_uint16, (setter) struct_set_uint16, "uint16_t sel_opt_id", (void*)offsetof(lv_ddlist_ext_t, sel_opt_id)},
     {"sel_opt_id_ori", (getter) struct_get_uint16, (setter) struct_set_uint16, "uint16_t sel_opt_id_ori", (void*)offsetof(lv_ddlist_ext_t, sel_opt_id_ori)},
     {"anim_time", (getter) struct_get_uint16, (setter) struct_set_uint16, "uint16_t anim_time", (void*)offsetof(lv_ddlist_ext_t, anim_time)},
-    {"opened", (getter) NULL, (setter) NULL, "uint8_t opened", NULL},
-    {"draw_arrow", (getter) NULL, (setter) NULL, "uint8_t draw_arrow", NULL},
-    {"stay_open", (getter) NULL, (setter) NULL, "uint8_t stay_open", NULL},
+    {"opened", (getter) get_struct_bitfield_ddlist_ext_t_opened, (setter) set_struct_bitfield_ddlist_ext_t_opened, "uint8_t:1 opened", NULL},
+    {"draw_arrow", (getter) get_struct_bitfield_ddlist_ext_t_draw_arrow, (setter) set_struct_bitfield_ddlist_ext_t_draw_arrow, "uint8_t:1 draw_arrow", NULL},
+    {"stay_open", (getter) get_struct_bitfield_ddlist_ext_t_stay_open, (setter) set_struct_bitfield_ddlist_ext_t_stay_open, "uint8_t:1 stay_open", NULL},
     {"fix_height", (getter) struct_get_int16, (setter) struct_set_int16, "lv_coord_t fix_height", (void*)offsetof(lv_ddlist_ext_t, fix_height)},
-
     {NULL}
 };
+
 
 static PyTypeObject pylv_ddlist_ext_t_Type = {
     PyVarObject_HEAD_INIT(NULL, 0)
@@ -2820,8 +4073,8 @@ static PyTypeObject pylv_ddlist_ext_t_Type = {
     .tp_init = (initproc) pylv_ddlist_ext_t_init,
     .tp_dealloc = (destructor) Struct_dealloc,
     .tp_getset = pylv_ddlist_ext_t_getset,
-    .tp_repr = (reprfunc) Struct_repr
-
+    .tp_repr = (reprfunc) Struct_repr,
+    .tp_as_buffer = &Struct_bufferprocs
 };
 
 
@@ -2829,21 +4082,21 @@ static PyTypeObject pylv_ddlist_ext_t_Type = {
 static int
 pylv_roller_ext_t_init(StructObject *self, PyObject *args, PyObject *kwds) 
 {
-
-    self->data = PyMem_Malloc(sizeof(lv_roller_ext_t));
+    self->size = sizeof(lv_roller_ext_t);
+    self->data = PyMem_Malloc(self->size);
     if (!self->data) return -1;
     
-    memset(self->data, 0, sizeof(lv_roller_ext_t));
+    memset(self->data, 0, self->size);
     self->owner = (PyObject *)self;
 
     return 0;
 }
 
 static PyGetSetDef pylv_roller_ext_t_getset[] = {
-    {"ddlist", (getter) struct_get_blob, (setter) struct_set_blob, "lv_ddlist_ext_t ddlist", (void*)offsetof(lv_roller_ext_t, ddlist)},
-
+    {"ddlist", (getter) struct_get_struct, (setter) struct_set_struct, "lv_ddlist_ext_t ddlist", & ((struct_closure_t){ &pylv_ddlist_ext_t_Type, offsetof(lv_roller_ext_t, ddlist), sizeof(lv_ddlist_ext_t)})},
     {NULL}
 };
+
 
 static PyTypeObject pylv_roller_ext_t_Type = {
     PyVarObject_HEAD_INIT(NULL, 0)
@@ -2856,8 +4109,8 @@ static PyTypeObject pylv_roller_ext_t_Type = {
     .tp_init = (initproc) pylv_roller_ext_t_init,
     .tp_dealloc = (destructor) Struct_dealloc,
     .tp_getset = pylv_roller_ext_t_getset,
-    .tp_repr = (reprfunc) Struct_repr
-
+    .tp_repr = (reprfunc) Struct_repr,
+    .tp_as_buffer = &Struct_bufferprocs
 };
 
 
@@ -2865,29 +4118,63 @@ static PyTypeObject pylv_roller_ext_t_Type = {
 static int
 pylv_ta_ext_t_init(StructObject *self, PyObject *args, PyObject *kwds) 
 {
-
-    self->data = PyMem_Malloc(sizeof(lv_ta_ext_t));
+    self->size = sizeof(lv_ta_ext_t);
+    self->data = PyMem_Malloc(self->size);
     if (!self->data) return -1;
     
-    memset(self->data, 0, sizeof(lv_ta_ext_t));
+    memset(self->data, 0, self->size);
     self->owner = (PyObject *)self;
 
     return 0;
 }
 
-static PyGetSetDef pylv_ta_ext_t_getset[] = {
-    {"page", (getter) struct_get_blob, (setter) struct_set_blob, "lv_page_ext_t page", (void*)offsetof(lv_ta_ext_t, page)},
-    {"label", (getter) struct_get_blob, (setter) struct_set_blob, "lv_obj_t label", (void*)offsetof(lv_ta_ext_t, label)},
-    {"placeholder", (getter) struct_get_blob, (setter) struct_set_blob, "lv_obj_t placeholder", (void*)offsetof(lv_ta_ext_t, placeholder)},
-    {"pwd_tmp", (getter) struct_get_blob, (setter) struct_set_blob, "char pwd_tmp", (void*)offsetof(lv_ta_ext_t, pwd_tmp)},
-    {"accapted_chars", (getter) struct_get_blob, (setter) struct_set_blob, "char accapted_chars", (void*)offsetof(lv_ta_ext_t, accapted_chars)},
-    {"max_length", (getter) struct_get_uint16, (setter) struct_set_uint16, "uint16_t max_length", (void*)offsetof(lv_ta_ext_t, max_length)},
-    {"pwd_mode", (getter) NULL, (setter) NULL, "uint8_t pwd_mode", NULL},
-    {"one_line", (getter) NULL, (setter) NULL, "uint8_t one_line", NULL},
-    {"cursor", (getter) struct_get_struct, (setter) struct_set_struct, "struct  {   lv_style_t *style;   lv_coord_t valid_x;   uint16_t pos;   lv_area_t area;   uint16_t txt_byte_pos;   lv_cursor_type_t type : 4;   uint8_t state : 1; } cursor", & ((struct_closure_t){ &pylv_ta_ext_t_cursor_Type, offsetof(lv_ta_ext_t, cursor), sizeof(((lv_ta_ext_t *)0)->cursor)})},
 
+
+static PyObject *
+get_struct_bitfield_ta_ext_t_pwd_mode(StructObject *self, void *closure)
+{
+    return PyLong_FromLong(((lv_ta_ext_t*)(self->data))->pwd_mode );
+}
+
+static int
+set_struct_bitfield_ta_ext_t_pwd_mode(StructObject *self, PyObject *value, void *closure)
+{
+    long v;
+    if (long_to_int(value, &v, 0, 1)) return -1;
+    ((lv_ta_ext_t*)(self->data))->pwd_mode = v;
+    return 0;
+}
+
+
+
+static PyObject *
+get_struct_bitfield_ta_ext_t_one_line(StructObject *self, void *closure)
+{
+    return PyLong_FromLong(((lv_ta_ext_t*)(self->data))->one_line );
+}
+
+static int
+set_struct_bitfield_ta_ext_t_one_line(StructObject *self, PyObject *value, void *closure)
+{
+    long v;
+    if (long_to_int(value, &v, 0, 1)) return -1;
+    ((lv_ta_ext_t*)(self->data))->one_line = v;
+    return 0;
+}
+
+static PyGetSetDef pylv_ta_ext_t_getset[] = {
+    {"page", (getter) struct_get_struct, (setter) struct_set_struct, "lv_page_ext_t page", & ((struct_closure_t){ &pylv_page_ext_t_Type, offsetof(lv_ta_ext_t, page), sizeof(lv_page_ext_t)})},
+    {"label", (getter) struct_get_struct, (setter) struct_set_struct, "lv_obj_t label", & ((struct_closure_t){ &Blob_Type, offsetof(lv_ta_ext_t, label), sizeof(((lv_ta_ext_t *)0)->label)})},
+    {"placeholder", (getter) struct_get_struct, (setter) struct_set_struct, "lv_obj_t placeholder", & ((struct_closure_t){ &Blob_Type, offsetof(lv_ta_ext_t, placeholder), sizeof(((lv_ta_ext_t *)0)->placeholder)})},
+    {"pwd_tmp", (getter) struct_get_struct, (setter) struct_set_struct, "char pwd_tmp", & ((struct_closure_t){ &Blob_Type, offsetof(lv_ta_ext_t, pwd_tmp), sizeof(((lv_ta_ext_t *)0)->pwd_tmp)})},
+    {"accapted_chars", (getter) struct_get_struct, (setter) struct_set_struct, "char accapted_chars", & ((struct_closure_t){ &Blob_Type, offsetof(lv_ta_ext_t, accapted_chars), sizeof(((lv_ta_ext_t *)0)->accapted_chars)})},
+    {"max_length", (getter) struct_get_uint16, (setter) struct_set_uint16, "uint16_t max_length", (void*)offsetof(lv_ta_ext_t, max_length)},
+    {"pwd_mode", (getter) get_struct_bitfield_ta_ext_t_pwd_mode, (setter) set_struct_bitfield_ta_ext_t_pwd_mode, "uint8_t:1 pwd_mode", NULL},
+    {"one_line", (getter) get_struct_bitfield_ta_ext_t_one_line, (setter) set_struct_bitfield_ta_ext_t_one_line, "uint8_t:1 one_line", NULL},
+    {"cursor", (getter) struct_get_struct, (setter) struct_set_struct, "struct  {   lv_style_t *style;   lv_coord_t valid_x;   uint16_t pos;   lv_area_t area;   uint16_t txt_byte_pos;   lv_cursor_type_t type : 4;   uint8_t state : 1; } cursor", & ((struct_closure_t){ &pylv_ta_ext_t_cursor_Type, offsetof(lv_ta_ext_t, cursor), sizeof(((lv_ta_ext_t *)0)->cursor)})},
     {NULL}
 };
+
 
 static PyTypeObject pylv_ta_ext_t_Type = {
     PyVarObject_HEAD_INIT(NULL, 0)
@@ -2900,8 +4187,8 @@ static PyTypeObject pylv_ta_ext_t_Type = {
     .tp_init = (initproc) pylv_ta_ext_t_init,
     .tp_dealloc = (destructor) Struct_dealloc,
     .tp_getset = pylv_ta_ext_t_getset,
-    .tp_repr = (reprfunc) Struct_repr
-
+    .tp_repr = (reprfunc) Struct_repr,
+    .tp_as_buffer = &Struct_bufferprocs
 };
 
 
@@ -2909,22 +4196,22 @@ static PyTypeObject pylv_ta_ext_t_Type = {
 static int
 pylv_canvas_ext_t_init(StructObject *self, PyObject *args, PyObject *kwds) 
 {
-
-    self->data = PyMem_Malloc(sizeof(lv_canvas_ext_t));
+    self->size = sizeof(lv_canvas_ext_t);
+    self->data = PyMem_Malloc(self->size);
     if (!self->data) return -1;
     
-    memset(self->data, 0, sizeof(lv_canvas_ext_t));
+    memset(self->data, 0, self->size);
     self->owner = (PyObject *)self;
 
     return 0;
 }
 
 static PyGetSetDef pylv_canvas_ext_t_getset[] = {
-    {"img", (getter) struct_get_blob, (setter) struct_set_blob, "lv_img_ext_t img", (void*)offsetof(lv_canvas_ext_t, img)},
-    {"dsc", (getter) struct_get_blob, (setter) struct_set_blob, "lv_img_dsc_t dsc", (void*)offsetof(lv_canvas_ext_t, dsc)},
-
+    {"img", (getter) struct_get_struct, (setter) struct_set_struct, "lv_img_ext_t img", & ((struct_closure_t){ &pylv_img_ext_t_Type, offsetof(lv_canvas_ext_t, img), sizeof(lv_img_ext_t)})},
+    {"dsc", (getter) struct_get_struct, (setter) struct_set_struct, "lv_img_dsc_t dsc", & ((struct_closure_t){ &pylv_img_dsc_t_Type, offsetof(lv_canvas_ext_t, dsc), sizeof(lv_img_dsc_t)})},
     {NULL}
 };
+
 
 static PyTypeObject pylv_canvas_ext_t_Type = {
     PyVarObject_HEAD_INIT(NULL, 0)
@@ -2937,8 +4224,8 @@ static PyTypeObject pylv_canvas_ext_t_Type = {
     .tp_init = (initproc) pylv_canvas_ext_t_init,
     .tp_dealloc = (destructor) Struct_dealloc,
     .tp_getset = pylv_canvas_ext_t_getset,
-    .tp_repr = (reprfunc) Struct_repr
-
+    .tp_repr = (reprfunc) Struct_repr,
+    .tp_as_buffer = &Struct_bufferprocs
 };
 
 
@@ -2946,27 +4233,27 @@ static PyTypeObject pylv_canvas_ext_t_Type = {
 static int
 pylv_win_ext_t_init(StructObject *self, PyObject *args, PyObject *kwds) 
 {
-
-    self->data = PyMem_Malloc(sizeof(lv_win_ext_t));
+    self->size = sizeof(lv_win_ext_t);
+    self->data = PyMem_Malloc(self->size);
     if (!self->data) return -1;
     
-    memset(self->data, 0, sizeof(lv_win_ext_t));
+    memset(self->data, 0, self->size);
     self->owner = (PyObject *)self;
 
     return 0;
 }
 
 static PyGetSetDef pylv_win_ext_t_getset[] = {
-    {"page", (getter) struct_get_blob, (setter) struct_set_blob, "lv_obj_t page", (void*)offsetof(lv_win_ext_t, page)},
-    {"header", (getter) struct_get_blob, (setter) struct_set_blob, "lv_obj_t header", (void*)offsetof(lv_win_ext_t, header)},
-    {"title", (getter) struct_get_blob, (setter) struct_set_blob, "lv_obj_t title", (void*)offsetof(lv_win_ext_t, title)},
-    {"style_header", (getter) struct_get_blob, (setter) struct_set_blob, "lv_style_t style_header", (void*)offsetof(lv_win_ext_t, style_header)},
-    {"style_btn_rel", (getter) struct_get_blob, (setter) struct_set_blob, "lv_style_t style_btn_rel", (void*)offsetof(lv_win_ext_t, style_btn_rel)},
-    {"style_btn_pr", (getter) struct_get_blob, (setter) struct_set_blob, "lv_style_t style_btn_pr", (void*)offsetof(lv_win_ext_t, style_btn_pr)},
+    {"page", (getter) struct_get_struct, (setter) struct_set_struct, "lv_obj_t page", & ((struct_closure_t){ &Blob_Type, offsetof(lv_win_ext_t, page), sizeof(((lv_win_ext_t *)0)->page)})},
+    {"header", (getter) struct_get_struct, (setter) struct_set_struct, "lv_obj_t header", & ((struct_closure_t){ &Blob_Type, offsetof(lv_win_ext_t, header), sizeof(((lv_win_ext_t *)0)->header)})},
+    {"title", (getter) struct_get_struct, (setter) struct_set_struct, "lv_obj_t title", & ((struct_closure_t){ &Blob_Type, offsetof(lv_win_ext_t, title), sizeof(((lv_win_ext_t *)0)->title)})},
+    {"style_header", (getter) struct_get_struct, (setter) struct_set_struct, "lv_style_t style_header", & ((struct_closure_t){ &Blob_Type, offsetof(lv_win_ext_t, style_header), sizeof(((lv_win_ext_t *)0)->style_header)})},
+    {"style_btn_rel", (getter) struct_get_struct, (setter) struct_set_struct, "lv_style_t style_btn_rel", & ((struct_closure_t){ &Blob_Type, offsetof(lv_win_ext_t, style_btn_rel), sizeof(((lv_win_ext_t *)0)->style_btn_rel)})},
+    {"style_btn_pr", (getter) struct_get_struct, (setter) struct_set_struct, "lv_style_t style_btn_pr", & ((struct_closure_t){ &Blob_Type, offsetof(lv_win_ext_t, style_btn_pr), sizeof(((lv_win_ext_t *)0)->style_btn_pr)})},
     {"btn_size", (getter) struct_get_int16, (setter) struct_set_int16, "lv_coord_t btn_size", (void*)offsetof(lv_win_ext_t, btn_size)},
-
     {NULL}
 };
+
 
 static PyTypeObject pylv_win_ext_t_Type = {
     PyVarObject_HEAD_INIT(NULL, 0)
@@ -2979,8 +4266,8 @@ static PyTypeObject pylv_win_ext_t_Type = {
     .tp_init = (initproc) pylv_win_ext_t_init,
     .tp_dealloc = (destructor) Struct_dealloc,
     .tp_getset = pylv_win_ext_t_getset,
-    .tp_repr = (reprfunc) Struct_repr
-
+    .tp_repr = (reprfunc) Struct_repr,
+    .tp_as_buffer = &Struct_bufferprocs
 };
 
 
@@ -2988,33 +4275,118 @@ static PyTypeObject pylv_win_ext_t_Type = {
 static int
 pylv_tabview_ext_t_init(StructObject *self, PyObject *args, PyObject *kwds) 
 {
-
-    self->data = PyMem_Malloc(sizeof(lv_tabview_ext_t));
+    self->size = sizeof(lv_tabview_ext_t);
+    self->data = PyMem_Malloc(self->size);
     if (!self->data) return -1;
     
-    memset(self->data, 0, sizeof(lv_tabview_ext_t));
+    memset(self->data, 0, self->size);
     self->owner = (PyObject *)self;
 
     return 0;
 }
 
+
+
+static PyObject *
+get_struct_bitfield_tabview_ext_t_slide_enable(StructObject *self, void *closure)
+{
+    return PyLong_FromLong(((lv_tabview_ext_t*)(self->data))->slide_enable );
+}
+
+static int
+set_struct_bitfield_tabview_ext_t_slide_enable(StructObject *self, PyObject *value, void *closure)
+{
+    long v;
+    if (long_to_int(value, &v, 0, 1)) return -1;
+    ((lv_tabview_ext_t*)(self->data))->slide_enable = v;
+    return 0;
+}
+
+
+
+static PyObject *
+get_struct_bitfield_tabview_ext_t_draging(StructObject *self, void *closure)
+{
+    return PyLong_FromLong(((lv_tabview_ext_t*)(self->data))->draging );
+}
+
+static int
+set_struct_bitfield_tabview_ext_t_draging(StructObject *self, PyObject *value, void *closure)
+{
+    long v;
+    if (long_to_int(value, &v, 0, 1)) return -1;
+    ((lv_tabview_ext_t*)(self->data))->draging = v;
+    return 0;
+}
+
+
+
+static PyObject *
+get_struct_bitfield_tabview_ext_t_drag_hor(StructObject *self, void *closure)
+{
+    return PyLong_FromLong(((lv_tabview_ext_t*)(self->data))->drag_hor );
+}
+
+static int
+set_struct_bitfield_tabview_ext_t_drag_hor(StructObject *self, PyObject *value, void *closure)
+{
+    long v;
+    if (long_to_int(value, &v, 0, 1)) return -1;
+    ((lv_tabview_ext_t*)(self->data))->drag_hor = v;
+    return 0;
+}
+
+
+
+static PyObject *
+get_struct_bitfield_tabview_ext_t_btns_hide(StructObject *self, void *closure)
+{
+    return PyLong_FromLong(((lv_tabview_ext_t*)(self->data))->btns_hide );
+}
+
+static int
+set_struct_bitfield_tabview_ext_t_btns_hide(StructObject *self, PyObject *value, void *closure)
+{
+    long v;
+    if (long_to_int(value, &v, 0, 1)) return -1;
+    ((lv_tabview_ext_t*)(self->data))->btns_hide = v;
+    return 0;
+}
+
+
+
+static PyObject *
+get_struct_bitfield_tabview_ext_t_btns_pos(StructObject *self, void *closure)
+{
+    return PyLong_FromLong(((lv_tabview_ext_t*)(self->data))->btns_pos );
+}
+
+static int
+set_struct_bitfield_tabview_ext_t_btns_pos(StructObject *self, PyObject *value, void *closure)
+{
+    long v;
+    if (long_to_int(value, &v, 0, 1)) return -1;
+    ((lv_tabview_ext_t*)(self->data))->btns_pos = v;
+    return 0;
+}
+
 static PyGetSetDef pylv_tabview_ext_t_getset[] = {
-    {"btns", (getter) struct_get_blob, (setter) struct_set_blob, "lv_obj_t btns", (void*)offsetof(lv_tabview_ext_t, btns)},
-    {"indic", (getter) struct_get_blob, (setter) struct_set_blob, "lv_obj_t indic", (void*)offsetof(lv_tabview_ext_t, indic)},
-    {"content", (getter) struct_get_blob, (setter) struct_set_blob, "lv_obj_t content", (void*)offsetof(lv_tabview_ext_t, content)},
-    {"tab_name_ptr", (getter) struct_get_blob, (setter) struct_set_blob, "char tab_name_ptr", (void*)offsetof(lv_tabview_ext_t, tab_name_ptr)},
-    {"point_last", (getter) struct_get_blob, (setter) struct_set_blob, "lv_point_t point_last", (void*)offsetof(lv_tabview_ext_t, point_last)},
+    {"btns", (getter) struct_get_struct, (setter) struct_set_struct, "lv_obj_t btns", & ((struct_closure_t){ &Blob_Type, offsetof(lv_tabview_ext_t, btns), sizeof(((lv_tabview_ext_t *)0)->btns)})},
+    {"indic", (getter) struct_get_struct, (setter) struct_set_struct, "lv_obj_t indic", & ((struct_closure_t){ &Blob_Type, offsetof(lv_tabview_ext_t, indic), sizeof(((lv_tabview_ext_t *)0)->indic)})},
+    {"content", (getter) struct_get_struct, (setter) struct_set_struct, "lv_obj_t content", & ((struct_closure_t){ &Blob_Type, offsetof(lv_tabview_ext_t, content), sizeof(((lv_tabview_ext_t *)0)->content)})},
+    {"tab_name_ptr", (getter) struct_get_struct, (setter) struct_set_struct, "char tab_name_ptr", & ((struct_closure_t){ &Blob_Type, offsetof(lv_tabview_ext_t, tab_name_ptr), sizeof(((lv_tabview_ext_t *)0)->tab_name_ptr)})},
+    {"point_last", (getter) struct_get_struct, (setter) struct_set_struct, "lv_point_t point_last", & ((struct_closure_t){ &pylv_point_t_Type, offsetof(lv_tabview_ext_t, point_last), sizeof(lv_point_t)})},
     {"tab_cur", (getter) struct_get_uint16, (setter) struct_set_uint16, "uint16_t tab_cur", (void*)offsetof(lv_tabview_ext_t, tab_cur)},
     {"tab_cnt", (getter) struct_get_uint16, (setter) struct_set_uint16, "uint16_t tab_cnt", (void*)offsetof(lv_tabview_ext_t, tab_cnt)},
     {"anim_time", (getter) struct_get_uint16, (setter) struct_set_uint16, "uint16_t anim_time", (void*)offsetof(lv_tabview_ext_t, anim_time)},
-    {"slide_enable", (getter) NULL, (setter) NULL, "uint8_t slide_enable", NULL},
-    {"draging", (getter) NULL, (setter) NULL, "uint8_t draging", NULL},
-    {"drag_hor", (getter) NULL, (setter) NULL, "uint8_t drag_hor", NULL},
-    {"btns_hide", (getter) NULL, (setter) NULL, "uint8_t btns_hide", NULL},
-    {"btns_pos", (getter) NULL, (setter) NULL, "lv_tabview_btns_pos_t btns_pos", NULL},
-
+    {"slide_enable", (getter) get_struct_bitfield_tabview_ext_t_slide_enable, (setter) set_struct_bitfield_tabview_ext_t_slide_enable, "uint8_t:1 slide_enable", NULL},
+    {"draging", (getter) get_struct_bitfield_tabview_ext_t_draging, (setter) set_struct_bitfield_tabview_ext_t_draging, "uint8_t:1 draging", NULL},
+    {"drag_hor", (getter) get_struct_bitfield_tabview_ext_t_drag_hor, (setter) set_struct_bitfield_tabview_ext_t_drag_hor, "uint8_t:1 drag_hor", NULL},
+    {"btns_hide", (getter) get_struct_bitfield_tabview_ext_t_btns_hide, (setter) set_struct_bitfield_tabview_ext_t_btns_hide, "uint8_t:1 btns_hide", NULL},
+    {"btns_pos", (getter) get_struct_bitfield_tabview_ext_t_btns_pos, (setter) set_struct_bitfield_tabview_ext_t_btns_pos, "lv_tabview_btns_pos_t:1 btns_pos", NULL},
     {NULL}
 };
+
 
 static PyTypeObject pylv_tabview_ext_t_Type = {
     PyVarObject_HEAD_INIT(NULL, 0)
@@ -3027,8 +4399,8 @@ static PyTypeObject pylv_tabview_ext_t_Type = {
     .tp_init = (initproc) pylv_tabview_ext_t_init,
     .tp_dealloc = (destructor) Struct_dealloc,
     .tp_getset = pylv_tabview_ext_t_getset,
-    .tp_repr = (reprfunc) Struct_repr
-
+    .tp_repr = (reprfunc) Struct_repr,
+    .tp_as_buffer = &Struct_bufferprocs
 };
 
 
@@ -3036,30 +4408,132 @@ static PyTypeObject pylv_tabview_ext_t_Type = {
 static int
 pylv_tileview_ext_t_init(StructObject *self, PyObject *args, PyObject *kwds) 
 {
-
-    self->data = PyMem_Malloc(sizeof(lv_tileview_ext_t));
+    self->size = sizeof(lv_tileview_ext_t);
+    self->data = PyMem_Malloc(self->size);
     if (!self->data) return -1;
     
-    memset(self->data, 0, sizeof(lv_tileview_ext_t));
+    memset(self->data, 0, self->size);
     self->owner = (PyObject *)self;
 
     return 0;
 }
 
-static PyGetSetDef pylv_tileview_ext_t_getset[] = {
-    {"page", (getter) struct_get_blob, (setter) struct_set_blob, "lv_page_ext_t page", (void*)offsetof(lv_tileview_ext_t, page)},
-    {"valid_pos", (getter) struct_get_blob, (setter) struct_set_blob, "lv_point_t valid_pos", (void*)offsetof(lv_tileview_ext_t, valid_pos)},
-    {"anim_time", (getter) struct_get_uint16, (setter) struct_set_uint16, "uint16_t anim_time", (void*)offsetof(lv_tileview_ext_t, anim_time)},
-    {"act_id", (getter) struct_get_blob, (setter) struct_set_blob, "lv_point_t act_id", (void*)offsetof(lv_tileview_ext_t, act_id)},
-    {"drag_top_en", (getter) NULL, (setter) NULL, "uint8_t drag_top_en", NULL},
-    {"drag_bottom_en", (getter) NULL, (setter) NULL, "uint8_t drag_bottom_en", NULL},
-    {"drag_left_en", (getter) NULL, (setter) NULL, "uint8_t drag_left_en", NULL},
-    {"drag_right_en", (getter) NULL, (setter) NULL, "uint8_t drag_right_en", NULL},
-    {"drag_hor", (getter) NULL, (setter) NULL, "uint8_t drag_hor", NULL},
-    {"drag_ver", (getter) NULL, (setter) NULL, "uint8_t drag_ver", NULL},
 
+
+static PyObject *
+get_struct_bitfield_tileview_ext_t_drag_top_en(StructObject *self, void *closure)
+{
+    return PyLong_FromLong(((lv_tileview_ext_t*)(self->data))->drag_top_en );
+}
+
+static int
+set_struct_bitfield_tileview_ext_t_drag_top_en(StructObject *self, PyObject *value, void *closure)
+{
+    long v;
+    if (long_to_int(value, &v, 0, 1)) return -1;
+    ((lv_tileview_ext_t*)(self->data))->drag_top_en = v;
+    return 0;
+}
+
+
+
+static PyObject *
+get_struct_bitfield_tileview_ext_t_drag_bottom_en(StructObject *self, void *closure)
+{
+    return PyLong_FromLong(((lv_tileview_ext_t*)(self->data))->drag_bottom_en );
+}
+
+static int
+set_struct_bitfield_tileview_ext_t_drag_bottom_en(StructObject *self, PyObject *value, void *closure)
+{
+    long v;
+    if (long_to_int(value, &v, 0, 1)) return -1;
+    ((lv_tileview_ext_t*)(self->data))->drag_bottom_en = v;
+    return 0;
+}
+
+
+
+static PyObject *
+get_struct_bitfield_tileview_ext_t_drag_left_en(StructObject *self, void *closure)
+{
+    return PyLong_FromLong(((lv_tileview_ext_t*)(self->data))->drag_left_en );
+}
+
+static int
+set_struct_bitfield_tileview_ext_t_drag_left_en(StructObject *self, PyObject *value, void *closure)
+{
+    long v;
+    if (long_to_int(value, &v, 0, 1)) return -1;
+    ((lv_tileview_ext_t*)(self->data))->drag_left_en = v;
+    return 0;
+}
+
+
+
+static PyObject *
+get_struct_bitfield_tileview_ext_t_drag_right_en(StructObject *self, void *closure)
+{
+    return PyLong_FromLong(((lv_tileview_ext_t*)(self->data))->drag_right_en );
+}
+
+static int
+set_struct_bitfield_tileview_ext_t_drag_right_en(StructObject *self, PyObject *value, void *closure)
+{
+    long v;
+    if (long_to_int(value, &v, 0, 1)) return -1;
+    ((lv_tileview_ext_t*)(self->data))->drag_right_en = v;
+    return 0;
+}
+
+
+
+static PyObject *
+get_struct_bitfield_tileview_ext_t_drag_hor(StructObject *self, void *closure)
+{
+    return PyLong_FromLong(((lv_tileview_ext_t*)(self->data))->drag_hor );
+}
+
+static int
+set_struct_bitfield_tileview_ext_t_drag_hor(StructObject *self, PyObject *value, void *closure)
+{
+    long v;
+    if (long_to_int(value, &v, 0, 1)) return -1;
+    ((lv_tileview_ext_t*)(self->data))->drag_hor = v;
+    return 0;
+}
+
+
+
+static PyObject *
+get_struct_bitfield_tileview_ext_t_drag_ver(StructObject *self, void *closure)
+{
+    return PyLong_FromLong(((lv_tileview_ext_t*)(self->data))->drag_ver );
+}
+
+static int
+set_struct_bitfield_tileview_ext_t_drag_ver(StructObject *self, PyObject *value, void *closure)
+{
+    long v;
+    if (long_to_int(value, &v, 0, 1)) return -1;
+    ((lv_tileview_ext_t*)(self->data))->drag_ver = v;
+    return 0;
+}
+
+static PyGetSetDef pylv_tileview_ext_t_getset[] = {
+    {"page", (getter) struct_get_struct, (setter) struct_set_struct, "lv_page_ext_t page", & ((struct_closure_t){ &pylv_page_ext_t_Type, offsetof(lv_tileview_ext_t, page), sizeof(lv_page_ext_t)})},
+    {"valid_pos", (getter) struct_get_struct, (setter) struct_set_struct, "lv_point_t valid_pos", & ((struct_closure_t){ &Blob_Type, offsetof(lv_tileview_ext_t, valid_pos), sizeof(((lv_tileview_ext_t *)0)->valid_pos)})},
+    {"anim_time", (getter) struct_get_uint16, (setter) struct_set_uint16, "uint16_t anim_time", (void*)offsetof(lv_tileview_ext_t, anim_time)},
+    {"act_id", (getter) struct_get_struct, (setter) struct_set_struct, "lv_point_t act_id", & ((struct_closure_t){ &pylv_point_t_Type, offsetof(lv_tileview_ext_t, act_id), sizeof(lv_point_t)})},
+    {"drag_top_en", (getter) get_struct_bitfield_tileview_ext_t_drag_top_en, (setter) set_struct_bitfield_tileview_ext_t_drag_top_en, "uint8_t:1 drag_top_en", NULL},
+    {"drag_bottom_en", (getter) get_struct_bitfield_tileview_ext_t_drag_bottom_en, (setter) set_struct_bitfield_tileview_ext_t_drag_bottom_en, "uint8_t:1 drag_bottom_en", NULL},
+    {"drag_left_en", (getter) get_struct_bitfield_tileview_ext_t_drag_left_en, (setter) set_struct_bitfield_tileview_ext_t_drag_left_en, "uint8_t:1 drag_left_en", NULL},
+    {"drag_right_en", (getter) get_struct_bitfield_tileview_ext_t_drag_right_en, (setter) set_struct_bitfield_tileview_ext_t_drag_right_en, "uint8_t:1 drag_right_en", NULL},
+    {"drag_hor", (getter) get_struct_bitfield_tileview_ext_t_drag_hor, (setter) set_struct_bitfield_tileview_ext_t_drag_hor, "uint8_t:1 drag_hor", NULL},
+    {"drag_ver", (getter) get_struct_bitfield_tileview_ext_t_drag_ver, (setter) set_struct_bitfield_tileview_ext_t_drag_ver, "uint8_t:1 drag_ver", NULL},
     {NULL}
 };
+
 
 static PyTypeObject pylv_tileview_ext_t_Type = {
     PyVarObject_HEAD_INIT(NULL, 0)
@@ -3072,8 +4546,8 @@ static PyTypeObject pylv_tileview_ext_t_Type = {
     .tp_init = (initproc) pylv_tileview_ext_t_init,
     .tp_dealloc = (destructor) Struct_dealloc,
     .tp_getset = pylv_tileview_ext_t_getset,
-    .tp_repr = (reprfunc) Struct_repr
-
+    .tp_repr = (reprfunc) Struct_repr,
+    .tp_as_buffer = &Struct_bufferprocs
 };
 
 
@@ -3081,24 +4555,24 @@ static PyTypeObject pylv_tileview_ext_t_Type = {
 static int
 pylv_mbox_ext_t_init(StructObject *self, PyObject *args, PyObject *kwds) 
 {
-
-    self->data = PyMem_Malloc(sizeof(lv_mbox_ext_t));
+    self->size = sizeof(lv_mbox_ext_t);
+    self->data = PyMem_Malloc(self->size);
     if (!self->data) return -1;
     
-    memset(self->data, 0, sizeof(lv_mbox_ext_t));
+    memset(self->data, 0, self->size);
     self->owner = (PyObject *)self;
 
     return 0;
 }
 
 static PyGetSetDef pylv_mbox_ext_t_getset[] = {
-    {"bg", (getter) struct_get_blob, (setter) struct_set_blob, "lv_cont_ext_t bg", (void*)offsetof(lv_mbox_ext_t, bg)},
-    {"text", (getter) struct_get_blob, (setter) struct_set_blob, "lv_obj_t text", (void*)offsetof(lv_mbox_ext_t, text)},
-    {"btnm", (getter) struct_get_blob, (setter) struct_set_blob, "lv_obj_t btnm", (void*)offsetof(lv_mbox_ext_t, btnm)},
+    {"bg", (getter) struct_get_struct, (setter) struct_set_struct, "lv_cont_ext_t bg", & ((struct_closure_t){ &pylv_cont_ext_t_Type, offsetof(lv_mbox_ext_t, bg), sizeof(lv_cont_ext_t)})},
+    {"text", (getter) struct_get_struct, (setter) struct_set_struct, "lv_obj_t text", & ((struct_closure_t){ &Blob_Type, offsetof(lv_mbox_ext_t, text), sizeof(((lv_mbox_ext_t *)0)->text)})},
+    {"btnm", (getter) struct_get_struct, (setter) struct_set_struct, "lv_obj_t btnm", & ((struct_closure_t){ &Blob_Type, offsetof(lv_mbox_ext_t, btnm), sizeof(((lv_mbox_ext_t *)0)->btnm)})},
     {"anim_time", (getter) struct_get_uint16, (setter) struct_set_uint16, "uint16_t anim_time", (void*)offsetof(lv_mbox_ext_t, anim_time)},
-
     {NULL}
 };
+
 
 static PyTypeObject pylv_mbox_ext_t_Type = {
     PyVarObject_HEAD_INIT(NULL, 0)
@@ -3111,8 +4585,8 @@ static PyTypeObject pylv_mbox_ext_t_Type = {
     .tp_init = (initproc) pylv_mbox_ext_t_init,
     .tp_dealloc = (destructor) Struct_dealloc,
     .tp_getset = pylv_mbox_ext_t_getset,
-    .tp_repr = (reprfunc) Struct_repr
-
+    .tp_repr = (reprfunc) Struct_repr,
+    .tp_as_buffer = &Struct_bufferprocs
 };
 
 
@@ -3120,11 +4594,11 @@ static PyTypeObject pylv_mbox_ext_t_Type = {
 static int
 pylv_lmeter_ext_t_init(StructObject *self, PyObject *args, PyObject *kwds) 
 {
-
-    self->data = PyMem_Malloc(sizeof(lv_lmeter_ext_t));
+    self->size = sizeof(lv_lmeter_ext_t);
+    self->data = PyMem_Malloc(self->size);
     if (!self->data) return -1;
     
-    memset(self->data, 0, sizeof(lv_lmeter_ext_t));
+    memset(self->data, 0, self->size);
     self->owner = (PyObject *)self;
 
     return 0;
@@ -3136,9 +4610,9 @@ static PyGetSetDef pylv_lmeter_ext_t_getset[] = {
     {"cur_value", (getter) struct_get_int16, (setter) struct_set_int16, "int16_t cur_value", (void*)offsetof(lv_lmeter_ext_t, cur_value)},
     {"min_value", (getter) struct_get_int16, (setter) struct_set_int16, "int16_t min_value", (void*)offsetof(lv_lmeter_ext_t, min_value)},
     {"max_value", (getter) struct_get_int16, (setter) struct_set_int16, "int16_t max_value", (void*)offsetof(lv_lmeter_ext_t, max_value)},
-
     {NULL}
 };
+
 
 static PyTypeObject pylv_lmeter_ext_t_Type = {
     PyVarObject_HEAD_INIT(NULL, 0)
@@ -3151,8 +4625,8 @@ static PyTypeObject pylv_lmeter_ext_t_Type = {
     .tp_init = (initproc) pylv_lmeter_ext_t_init,
     .tp_dealloc = (destructor) Struct_dealloc,
     .tp_getset = pylv_lmeter_ext_t_getset,
-    .tp_repr = (reprfunc) Struct_repr
-
+    .tp_repr = (reprfunc) Struct_repr,
+    .tp_as_buffer = &Struct_bufferprocs
 };
 
 
@@ -3160,25 +4634,25 @@ static PyTypeObject pylv_lmeter_ext_t_Type = {
 static int
 pylv_gauge_ext_t_init(StructObject *self, PyObject *args, PyObject *kwds) 
 {
-
-    self->data = PyMem_Malloc(sizeof(lv_gauge_ext_t));
+    self->size = sizeof(lv_gauge_ext_t);
+    self->data = PyMem_Malloc(self->size);
     if (!self->data) return -1;
     
-    memset(self->data, 0, sizeof(lv_gauge_ext_t));
+    memset(self->data, 0, self->size);
     self->owner = (PyObject *)self;
 
     return 0;
 }
 
 static PyGetSetDef pylv_gauge_ext_t_getset[] = {
-    {"lmeter", (getter) struct_get_blob, (setter) struct_set_blob, "lv_lmeter_ext_t lmeter", (void*)offsetof(lv_gauge_ext_t, lmeter)},
-    {"values", (getter) struct_get_blob, (setter) struct_set_blob, "int16_t values", (void*)offsetof(lv_gauge_ext_t, values)},
-    {"needle_colors", (getter) struct_get_blob, (setter) struct_set_blob, "lv_color_t needle_colors", (void*)offsetof(lv_gauge_ext_t, needle_colors)},
+    {"lmeter", (getter) struct_get_struct, (setter) struct_set_struct, "lv_lmeter_ext_t lmeter", & ((struct_closure_t){ &pylv_lmeter_ext_t_Type, offsetof(lv_gauge_ext_t, lmeter), sizeof(lv_lmeter_ext_t)})},
+    {"values", (getter) struct_get_struct, (setter) struct_set_struct, "int16_t values", & ((struct_closure_t){ &Blob_Type, offsetof(lv_gauge_ext_t, values), sizeof(((lv_gauge_ext_t *)0)->values)})},
+    {"needle_colors", (getter) struct_get_struct, (setter) struct_set_struct, "lv_color_t needle_colors", & ((struct_closure_t){ &Blob_Type, offsetof(lv_gauge_ext_t, needle_colors), sizeof(((lv_gauge_ext_t *)0)->needle_colors)})},
     {"needle_count", (getter) struct_get_uint8, (setter) struct_set_uint8, "uint8_t needle_count", (void*)offsetof(lv_gauge_ext_t, needle_count)},
     {"label_count", (getter) struct_get_uint8, (setter) struct_set_uint8, "uint8_t label_count", (void*)offsetof(lv_gauge_ext_t, label_count)},
-
     {NULL}
 };
+
 
 static PyTypeObject pylv_gauge_ext_t_Type = {
     PyVarObject_HEAD_INIT(NULL, 0)
@@ -3191,8 +4665,8 @@ static PyTypeObject pylv_gauge_ext_t_Type = {
     .tp_init = (initproc) pylv_gauge_ext_t_init,
     .tp_dealloc = (destructor) Struct_dealloc,
     .tp_getset = pylv_gauge_ext_t_getset,
-    .tp_repr = (reprfunc) Struct_repr
-
+    .tp_repr = (reprfunc) Struct_repr,
+    .tp_as_buffer = &Struct_bufferprocs
 };
 
 
@@ -3200,27 +4674,61 @@ static PyTypeObject pylv_gauge_ext_t_Type = {
 static int
 pylv_sw_ext_t_init(StructObject *self, PyObject *args, PyObject *kwds) 
 {
-
-    self->data = PyMem_Malloc(sizeof(lv_sw_ext_t));
+    self->size = sizeof(lv_sw_ext_t);
+    self->data = PyMem_Malloc(self->size);
     if (!self->data) return -1;
     
-    memset(self->data, 0, sizeof(lv_sw_ext_t));
+    memset(self->data, 0, self->size);
     self->owner = (PyObject *)self;
 
     return 0;
 }
 
-static PyGetSetDef pylv_sw_ext_t_getset[] = {
-    {"slider", (getter) struct_get_blob, (setter) struct_set_blob, "lv_slider_ext_t slider", (void*)offsetof(lv_sw_ext_t, slider)},
-    {"style_knob_off", (getter) struct_get_blob, (setter) struct_set_blob, "lv_style_t style_knob_off", (void*)offsetof(lv_sw_ext_t, style_knob_off)},
-    {"style_knob_on", (getter) struct_get_blob, (setter) struct_set_blob, "lv_style_t style_knob_on", (void*)offsetof(lv_sw_ext_t, style_knob_on)},
-    {"start_x", (getter) struct_get_int16, (setter) struct_set_int16, "lv_coord_t start_x", (void*)offsetof(lv_sw_ext_t, start_x)},
-    {"changed", (getter) NULL, (setter) NULL, "uint8_t changed", NULL},
-    {"slided", (getter) NULL, (setter) NULL, "uint8_t slided", NULL},
-    {"anim_time", (getter) struct_get_uint16, (setter) struct_set_uint16, "uint16_t anim_time", (void*)offsetof(lv_sw_ext_t, anim_time)},
 
+
+static PyObject *
+get_struct_bitfield_sw_ext_t_changed(StructObject *self, void *closure)
+{
+    return PyLong_FromLong(((lv_sw_ext_t*)(self->data))->changed );
+}
+
+static int
+set_struct_bitfield_sw_ext_t_changed(StructObject *self, PyObject *value, void *closure)
+{
+    long v;
+    if (long_to_int(value, &v, 0, 1)) return -1;
+    ((lv_sw_ext_t*)(self->data))->changed = v;
+    return 0;
+}
+
+
+
+static PyObject *
+get_struct_bitfield_sw_ext_t_slided(StructObject *self, void *closure)
+{
+    return PyLong_FromLong(((lv_sw_ext_t*)(self->data))->slided );
+}
+
+static int
+set_struct_bitfield_sw_ext_t_slided(StructObject *self, PyObject *value, void *closure)
+{
+    long v;
+    if (long_to_int(value, &v, 0, 1)) return -1;
+    ((lv_sw_ext_t*)(self->data))->slided = v;
+    return 0;
+}
+
+static PyGetSetDef pylv_sw_ext_t_getset[] = {
+    {"slider", (getter) struct_get_struct, (setter) struct_set_struct, "lv_slider_ext_t slider", & ((struct_closure_t){ &pylv_slider_ext_t_Type, offsetof(lv_sw_ext_t, slider), sizeof(lv_slider_ext_t)})},
+    {"style_knob_off", (getter) struct_get_struct, (setter) struct_set_struct, "lv_style_t style_knob_off", & ((struct_closure_t){ &Blob_Type, offsetof(lv_sw_ext_t, style_knob_off), sizeof(((lv_sw_ext_t *)0)->style_knob_off)})},
+    {"style_knob_on", (getter) struct_get_struct, (setter) struct_set_struct, "lv_style_t style_knob_on", & ((struct_closure_t){ &Blob_Type, offsetof(lv_sw_ext_t, style_knob_on), sizeof(((lv_sw_ext_t *)0)->style_knob_on)})},
+    {"start_x", (getter) struct_get_int16, (setter) struct_set_int16, "lv_coord_t start_x", (void*)offsetof(lv_sw_ext_t, start_x)},
+    {"changed", (getter) get_struct_bitfield_sw_ext_t_changed, (setter) set_struct_bitfield_sw_ext_t_changed, "uint8_t:1 changed", NULL},
+    {"slided", (getter) get_struct_bitfield_sw_ext_t_slided, (setter) set_struct_bitfield_sw_ext_t_slided, "uint8_t:1 slided", NULL},
+    {"anim_time", (getter) struct_get_uint16, (setter) struct_set_uint16, "uint16_t anim_time", (void*)offsetof(lv_sw_ext_t, anim_time)},
     {NULL}
 };
+
 
 static PyTypeObject pylv_sw_ext_t_Type = {
     PyVarObject_HEAD_INIT(NULL, 0)
@@ -3233,8 +4741,8 @@ static PyTypeObject pylv_sw_ext_t_Type = {
     .tp_init = (initproc) pylv_sw_ext_t_init,
     .tp_dealloc = (destructor) Struct_dealloc,
     .tp_getset = pylv_sw_ext_t_getset,
-    .tp_repr = (reprfunc) Struct_repr
-
+    .tp_repr = (reprfunc) Struct_repr,
+    .tp_as_buffer = &Struct_bufferprocs
 };
 
 
@@ -3242,11 +4750,11 @@ static PyTypeObject pylv_sw_ext_t_Type = {
 static int
 pylv_arc_ext_t_init(StructObject *self, PyObject *args, PyObject *kwds) 
 {
-
-    self->data = PyMem_Malloc(sizeof(lv_arc_ext_t));
+    self->size = sizeof(lv_arc_ext_t);
+    self->data = PyMem_Malloc(self->size);
     if (!self->data) return -1;
     
-    memset(self->data, 0, sizeof(lv_arc_ext_t));
+    memset(self->data, 0, self->size);
     self->owner = (PyObject *)self;
 
     return 0;
@@ -3255,9 +4763,9 @@ pylv_arc_ext_t_init(StructObject *self, PyObject *args, PyObject *kwds)
 static PyGetSetDef pylv_arc_ext_t_getset[] = {
     {"angle_start", (getter) struct_get_int16, (setter) struct_set_int16, "lv_coord_t angle_start", (void*)offsetof(lv_arc_ext_t, angle_start)},
     {"angle_end", (getter) struct_get_int16, (setter) struct_set_int16, "lv_coord_t angle_end", (void*)offsetof(lv_arc_ext_t, angle_end)},
-
     {NULL}
 };
+
 
 static PyTypeObject pylv_arc_ext_t_Type = {
     PyVarObject_HEAD_INIT(NULL, 0)
@@ -3270,8 +4778,8 @@ static PyTypeObject pylv_arc_ext_t_Type = {
     .tp_init = (initproc) pylv_arc_ext_t_init,
     .tp_dealloc = (destructor) Struct_dealloc,
     .tp_getset = pylv_arc_ext_t_getset,
-    .tp_repr = (reprfunc) Struct_repr
-
+    .tp_repr = (reprfunc) Struct_repr,
+    .tp_as_buffer = &Struct_bufferprocs
 };
 
 
@@ -3279,24 +4787,24 @@ static PyTypeObject pylv_arc_ext_t_Type = {
 static int
 pylv_preload_ext_t_init(StructObject *self, PyObject *args, PyObject *kwds) 
 {
-
-    self->data = PyMem_Malloc(sizeof(lv_preload_ext_t));
+    self->size = sizeof(lv_preload_ext_t);
+    self->data = PyMem_Malloc(self->size);
     if (!self->data) return -1;
     
-    memset(self->data, 0, sizeof(lv_preload_ext_t));
+    memset(self->data, 0, self->size);
     self->owner = (PyObject *)self;
 
     return 0;
 }
 
 static PyGetSetDef pylv_preload_ext_t_getset[] = {
-    {"arc", (getter) struct_get_blob, (setter) struct_set_blob, "lv_arc_ext_t arc", (void*)offsetof(lv_preload_ext_t, arc)},
+    {"arc", (getter) struct_get_struct, (setter) struct_set_struct, "lv_arc_ext_t arc", & ((struct_closure_t){ &pylv_arc_ext_t_Type, offsetof(lv_preload_ext_t, arc), sizeof(lv_arc_ext_t)})},
     {"arc_length", (getter) struct_get_uint16, (setter) struct_set_uint16, "uint16_t arc_length", (void*)offsetof(lv_preload_ext_t, arc_length)},
     {"time", (getter) struct_get_uint16, (setter) struct_set_uint16, "uint16_t time", (void*)offsetof(lv_preload_ext_t, time)},
     {"anim_type", (getter) struct_get_uint8, (setter) struct_set_uint8, "lv_preloader_type_t anim_type", (void*)offsetof(lv_preload_ext_t, anim_type)},
-
     {NULL}
 };
+
 
 static PyTypeObject pylv_preload_ext_t_Type = {
     PyVarObject_HEAD_INIT(NULL, 0)
@@ -3309,8 +4817,8 @@ static PyTypeObject pylv_preload_ext_t_Type = {
     .tp_init = (initproc) pylv_preload_ext_t_init,
     .tp_dealloc = (destructor) Struct_dealloc,
     .tp_getset = pylv_preload_ext_t_getset,
-    .tp_repr = (reprfunc) Struct_repr
-
+    .tp_repr = (reprfunc) Struct_repr,
+    .tp_as_buffer = &Struct_bufferprocs
 };
 
 
@@ -3318,28 +4826,79 @@ static PyTypeObject pylv_preload_ext_t_Type = {
 static int
 pylv_spinbox_ext_t_init(StructObject *self, PyObject *args, PyObject *kwds) 
 {
-
-    self->data = PyMem_Malloc(sizeof(lv_spinbox_ext_t));
+    self->size = sizeof(lv_spinbox_ext_t);
+    self->data = PyMem_Malloc(self->size);
     if (!self->data) return -1;
     
-    memset(self->data, 0, sizeof(lv_spinbox_ext_t));
+    memset(self->data, 0, self->size);
     self->owner = (PyObject *)self;
 
     return 0;
 }
 
+
+
+static PyObject *
+get_struct_bitfield_spinbox_ext_t_digit_count(StructObject *self, void *closure)
+{
+    return PyLong_FromLong(((lv_spinbox_ext_t*)(self->data))->digit_count );
+}
+
+static int
+set_struct_bitfield_spinbox_ext_t_digit_count(StructObject *self, PyObject *value, void *closure)
+{
+    long v;
+    if (long_to_int(value, &v, 0, 15)) return -1;
+    ((lv_spinbox_ext_t*)(self->data))->digit_count = v;
+    return 0;
+}
+
+
+
+static PyObject *
+get_struct_bitfield_spinbox_ext_t_dec_point_pos(StructObject *self, void *closure)
+{
+    return PyLong_FromLong(((lv_spinbox_ext_t*)(self->data))->dec_point_pos );
+}
+
+static int
+set_struct_bitfield_spinbox_ext_t_dec_point_pos(StructObject *self, PyObject *value, void *closure)
+{
+    long v;
+    if (long_to_int(value, &v, 0, 15)) return -1;
+    ((lv_spinbox_ext_t*)(self->data))->dec_point_pos = v;
+    return 0;
+}
+
+
+
+static PyObject *
+get_struct_bitfield_spinbox_ext_t_digit_padding_left(StructObject *self, void *closure)
+{
+    return PyLong_FromLong(((lv_spinbox_ext_t*)(self->data))->digit_padding_left );
+}
+
+static int
+set_struct_bitfield_spinbox_ext_t_digit_padding_left(StructObject *self, PyObject *value, void *closure)
+{
+    long v;
+    if (long_to_int(value, &v, 0, 15)) return -1;
+    ((lv_spinbox_ext_t*)(self->data))->digit_padding_left = v;
+    return 0;
+}
+
 static PyGetSetDef pylv_spinbox_ext_t_getset[] = {
-    {"ta", (getter) struct_get_blob, (setter) struct_set_blob, "lv_ta_ext_t ta", (void*)offsetof(lv_spinbox_ext_t, ta)},
+    {"ta", (getter) struct_get_struct, (setter) struct_set_struct, "lv_ta_ext_t ta", & ((struct_closure_t){ &pylv_ta_ext_t_Type, offsetof(lv_spinbox_ext_t, ta), sizeof(lv_ta_ext_t)})},
     {"value", (getter) struct_get_int32, (setter) struct_set_int32, "int32_t value", (void*)offsetof(lv_spinbox_ext_t, value)},
     {"range_max", (getter) struct_get_int32, (setter) struct_set_int32, "int32_t range_max", (void*)offsetof(lv_spinbox_ext_t, range_max)},
     {"range_min", (getter) struct_get_int32, (setter) struct_set_int32, "int32_t range_min", (void*)offsetof(lv_spinbox_ext_t, range_min)},
     {"step", (getter) struct_get_int32, (setter) struct_set_int32, "int32_t step", (void*)offsetof(lv_spinbox_ext_t, step)},
-    {"digit_count", (getter) NULL, (setter) NULL, "uint16_t digit_count", NULL},
-    {"dec_point_pos", (getter) NULL, (setter) NULL, "uint16_t dec_point_pos", NULL},
-    {"digit_padding_left", (getter) NULL, (setter) NULL, "uint16_t digit_padding_left", NULL},
-
+    {"digit_count", (getter) get_struct_bitfield_spinbox_ext_t_digit_count, (setter) set_struct_bitfield_spinbox_ext_t_digit_count, "uint16_t:4 digit_count", NULL},
+    {"dec_point_pos", (getter) get_struct_bitfield_spinbox_ext_t_dec_point_pos, (setter) set_struct_bitfield_spinbox_ext_t_dec_point_pos, "uint16_t:4 dec_point_pos", NULL},
+    {"digit_padding_left", (getter) get_struct_bitfield_spinbox_ext_t_digit_padding_left, (setter) set_struct_bitfield_spinbox_ext_t_digit_padding_left, "uint16_t:4 digit_padding_left", NULL},
     {NULL}
 };
+
 
 static PyTypeObject pylv_spinbox_ext_t_Type = {
     PyVarObject_HEAD_INIT(NULL, 0)
@@ -3352,21 +4911,72 @@ static PyTypeObject pylv_spinbox_ext_t_Type = {
     .tp_init = (initproc) pylv_spinbox_ext_t_init,
     .tp_dealloc = (destructor) Struct_dealloc,
     .tp_getset = pylv_spinbox_ext_t_getset,
-    .tp_repr = (reprfunc) Struct_repr
-
+    .tp_repr = (reprfunc) Struct_repr,
+    .tp_as_buffer = &Struct_bufferprocs
 };
 
 
 
 
+
+
+
+static PyObject *
+get_struct_bitfield_color8_t_ch_blue(StructObject *self, void *closure)
+{
+    return PyLong_FromLong(((lv_color8_t*)(self->data))->ch.blue );
+}
+
+static int
+set_struct_bitfield_color8_t_ch_blue(StructObject *self, PyObject *value, void *closure)
+{
+    long v;
+    if (long_to_int(value, &v, 0, 3)) return -1;
+    ((lv_color8_t*)(self->data))->ch.blue = v;
+    return 0;
+}
+
+
+
+static PyObject *
+get_struct_bitfield_color8_t_ch_green(StructObject *self, void *closure)
+{
+    return PyLong_FromLong(((lv_color8_t*)(self->data))->ch.green );
+}
+
+static int
+set_struct_bitfield_color8_t_ch_green(StructObject *self, PyObject *value, void *closure)
+{
+    long v;
+    if (long_to_int(value, &v, 0, 7)) return -1;
+    ((lv_color8_t*)(self->data))->ch.green = v;
+    return 0;
+}
+
+
+
+static PyObject *
+get_struct_bitfield_color8_t_ch_red(StructObject *self, void *closure)
+{
+    return PyLong_FromLong(((lv_color8_t*)(self->data))->ch.red );
+}
+
+static int
+set_struct_bitfield_color8_t_ch_red(StructObject *self, PyObject *value, void *closure)
+{
+    long v;
+    if (long_to_int(value, &v, 0, 7)) return -1;
+    ((lv_color8_t*)(self->data))->ch.red = v;
+    return 0;
+}
 
 static PyGetSetDef pylv_color8_t_ch_getset[] = {
-    {"blue", (getter) NULL, (setter) NULL, "uint8_t blue", NULL},
-    {"green", (getter) NULL, (setter) NULL, "uint8_t green", NULL},
-    {"red", (getter) NULL, (setter) NULL, "uint8_t red", NULL},
-
+    {"blue", (getter) get_struct_bitfield_color8_t_ch_blue, (setter) set_struct_bitfield_color8_t_ch_blue, "uint8_t:2 blue", NULL},
+    {"green", (getter) get_struct_bitfield_color8_t_ch_green, (setter) set_struct_bitfield_color8_t_ch_green, "uint8_t:3 green", NULL},
+    {"red", (getter) get_struct_bitfield_color8_t_ch_red, (setter) set_struct_bitfield_color8_t_ch_red, "uint8_t:3 red", NULL},
     {NULL}
 };
+
 
 static PyTypeObject pylv_color8_t_ch_Type = {
     PyVarObject_HEAD_INIT(NULL, 0)
@@ -3378,18 +4988,70 @@ static PyTypeObject pylv_color8_t_ch_Type = {
     .tp_new = NULL, // sub structs cannot be instantiated
     .tp_dealloc = (destructor) Struct_dealloc,
     .tp_getset = pylv_color8_t_ch_getset,
-    .tp_repr = (reprfunc) Struct_repr
+    .tp_repr = (reprfunc) Struct_repr,
+    .tp_as_buffer = &Struct_bufferprocs
 };
 
 
+
+
+
+static PyObject *
+get_struct_bitfield_color16_t_ch_blue(StructObject *self, void *closure)
+{
+    return PyLong_FromLong(((lv_color16_t*)(self->data))->ch.blue );
+}
+
+static int
+set_struct_bitfield_color16_t_ch_blue(StructObject *self, PyObject *value, void *closure)
+{
+    long v;
+    if (long_to_int(value, &v, 0, 31)) return -1;
+    ((lv_color16_t*)(self->data))->ch.blue = v;
+    return 0;
+}
+
+
+
+static PyObject *
+get_struct_bitfield_color16_t_ch_green(StructObject *self, void *closure)
+{
+    return PyLong_FromLong(((lv_color16_t*)(self->data))->ch.green );
+}
+
+static int
+set_struct_bitfield_color16_t_ch_green(StructObject *self, PyObject *value, void *closure)
+{
+    long v;
+    if (long_to_int(value, &v, 0, 63)) return -1;
+    ((lv_color16_t*)(self->data))->ch.green = v;
+    return 0;
+}
+
+
+
+static PyObject *
+get_struct_bitfield_color16_t_ch_red(StructObject *self, void *closure)
+{
+    return PyLong_FromLong(((lv_color16_t*)(self->data))->ch.red );
+}
+
+static int
+set_struct_bitfield_color16_t_ch_red(StructObject *self, PyObject *value, void *closure)
+{
+    long v;
+    if (long_to_int(value, &v, 0, 31)) return -1;
+    ((lv_color16_t*)(self->data))->ch.red = v;
+    return 0;
+}
 
 static PyGetSetDef pylv_color16_t_ch_getset[] = {
-    {"blue", (getter) NULL, (setter) NULL, "uint16_t blue", NULL},
-    {"green", (getter) NULL, (setter) NULL, "uint16_t green", NULL},
-    {"red", (getter) NULL, (setter) NULL, "uint16_t red", NULL},
-
+    {"blue", (getter) get_struct_bitfield_color16_t_ch_blue, (setter) set_struct_bitfield_color16_t_ch_blue, "uint16_t:5 blue", NULL},
+    {"green", (getter) get_struct_bitfield_color16_t_ch_green, (setter) set_struct_bitfield_color16_t_ch_green, "uint16_t:6 green", NULL},
+    {"red", (getter) get_struct_bitfield_color16_t_ch_red, (setter) set_struct_bitfield_color16_t_ch_red, "uint16_t:5 red", NULL},
     {NULL}
 };
+
 
 static PyTypeObject pylv_color16_t_ch_Type = {
     PyVarObject_HEAD_INIT(NULL, 0)
@@ -3401,19 +5063,20 @@ static PyTypeObject pylv_color16_t_ch_Type = {
     .tp_new = NULL, // sub structs cannot be instantiated
     .tp_dealloc = (destructor) Struct_dealloc,
     .tp_getset = pylv_color16_t_ch_getset,
-    .tp_repr = (reprfunc) Struct_repr
+    .tp_repr = (reprfunc) Struct_repr,
+    .tp_as_buffer = &Struct_bufferprocs
 };
 
 
 
 static PyGetSetDef pylv_color32_t_ch_getset[] = {
-    {"blue", (getter) struct_get_uint8, (setter) struct_set_uint8, "uint8_t blue", (void*)offsetof(lv_color32_t, ch.blue)},
-    {"green", (getter) struct_get_uint8, (setter) struct_set_uint8, "uint8_t green", (void*)offsetof(lv_color32_t, ch.green)},
-    {"red", (getter) struct_get_uint8, (setter) struct_set_uint8, "uint8_t red", (void*)offsetof(lv_color32_t, ch.red)},
-    {"alpha", (getter) struct_get_uint8, (setter) struct_set_uint8, "uint8_t alpha", (void*)offsetof(lv_color32_t, ch.alpha)},
-
+    {"blue", (getter) struct_get_uint8, (setter) struct_set_uint8, "uint8_t blue", (void*)(offsetof(lv_color32_t, ch.blue)-offsetof(lv_color32_t, ch))},
+    {"green", (getter) struct_get_uint8, (setter) struct_set_uint8, "uint8_t green", (void*)(offsetof(lv_color32_t, ch.green)-offsetof(lv_color32_t, ch))},
+    {"red", (getter) struct_get_uint8, (setter) struct_set_uint8, "uint8_t red", (void*)(offsetof(lv_color32_t, ch.red)-offsetof(lv_color32_t, ch))},
+    {"alpha", (getter) struct_get_uint8, (setter) struct_set_uint8, "uint8_t alpha", (void*)(offsetof(lv_color32_t, ch.alpha)-offsetof(lv_color32_t, ch))},
     {NULL}
 };
+
 
 static PyTypeObject pylv_color32_t_ch_Type = {
     PyVarObject_HEAD_INIT(NULL, 0)
@@ -3425,17 +5088,18 @@ static PyTypeObject pylv_color32_t_ch_Type = {
     .tp_new = NULL, // sub structs cannot be instantiated
     .tp_dealloc = (destructor) Struct_dealloc,
     .tp_getset = pylv_color32_t_ch_getset,
-    .tp_repr = (reprfunc) Struct_repr
+    .tp_repr = (reprfunc) Struct_repr,
+    .tp_as_buffer = &Struct_bufferprocs
 };
 
 
 
 static PyGetSetDef pylv_indev_proc_t_types_getset[] = {
-    {"pointer", (getter) struct_get_struct, (setter) struct_set_struct, "struct  {   lv_point_t act_point;   lv_point_t last_point;   lv_point_t vect;   lv_point_t drag_sum;   lv_point_t drag_throw_vect;   struct _lv_obj_t *act_obj;   struct _lv_obj_t *last_obj;   struct _lv_obj_t *last_pressed;   uint8_t drag_limit_out : 1;   uint8_t drag_in_prog : 1;   uint8_t wait_until_release : 1; } pointer", & ((struct_closure_t){ &pylv_indev_proc_t_types_pointer_Type, offsetof(lv_indev_proc_t, types.pointer), sizeof(((lv_indev_proc_t *)0)->types.pointer)})},
-    {"keypad", (getter) struct_get_struct, (setter) struct_set_struct, "struct  {   lv_indev_state_t last_state;   uint32_t last_key; } keypad", & ((struct_closure_t){ &pylv_indev_proc_t_types_keypad_Type, offsetof(lv_indev_proc_t, types.keypad), sizeof(((lv_indev_proc_t *)0)->types.keypad)})},
-
+    {"pointer", (getter) struct_get_struct, (setter) struct_set_struct, "struct  {   lv_point_t act_point;   lv_point_t last_point;   lv_point_t vect;   lv_point_t drag_sum;   lv_point_t drag_throw_vect;   struct _lv_obj_t *act_obj;   struct _lv_obj_t *last_obj;   struct _lv_obj_t *last_pressed;   uint8_t drag_limit_out : 1;   uint8_t drag_in_prog : 1;   uint8_t wait_until_release : 1; } pointer", & ((struct_closure_t){ &pylv_indev_proc_t_types_pointer_Type, (offsetof(lv_indev_proc_t, types.pointer)-offsetof(lv_indev_proc_t, types)), sizeof(((lv_indev_proc_t *)0)->types.pointer)})},
+    {"keypad", (getter) struct_get_struct, (setter) struct_set_struct, "struct  {   lv_indev_state_t last_state;   uint32_t last_key; } keypad", & ((struct_closure_t){ &pylv_indev_proc_t_types_keypad_Type, (offsetof(lv_indev_proc_t, types.keypad)-offsetof(lv_indev_proc_t, types)), sizeof(((lv_indev_proc_t *)0)->types.keypad)})},
     {NULL}
 };
+
 
 static PyTypeObject pylv_indev_proc_t_types_Type = {
     PyVarObject_HEAD_INIT(NULL, 0)
@@ -3447,26 +5111,78 @@ static PyTypeObject pylv_indev_proc_t_types_Type = {
     .tp_new = NULL, // sub structs cannot be instantiated
     .tp_dealloc = (destructor) Struct_dealloc,
     .tp_getset = pylv_indev_proc_t_types_getset,
-    .tp_repr = (reprfunc) Struct_repr
+    .tp_repr = (reprfunc) Struct_repr,
+    .tp_as_buffer = &Struct_bufferprocs
 };
 
 
+
+
+
+static PyObject *
+get_struct_bitfield_indev_proc_t_types_pointer_drag_limit_out(StructObject *self, void *closure)
+{
+    return PyLong_FromLong(((lv_indev_proc_t*)(self->data))->types.pointer.drag_limit_out );
+}
+
+static int
+set_struct_bitfield_indev_proc_t_types_pointer_drag_limit_out(StructObject *self, PyObject *value, void *closure)
+{
+    long v;
+    if (long_to_int(value, &v, 0, 1)) return -1;
+    ((lv_indev_proc_t*)(self->data))->types.pointer.drag_limit_out = v;
+    return 0;
+}
+
+
+
+static PyObject *
+get_struct_bitfield_indev_proc_t_types_pointer_drag_in_prog(StructObject *self, void *closure)
+{
+    return PyLong_FromLong(((lv_indev_proc_t*)(self->data))->types.pointer.drag_in_prog );
+}
+
+static int
+set_struct_bitfield_indev_proc_t_types_pointer_drag_in_prog(StructObject *self, PyObject *value, void *closure)
+{
+    long v;
+    if (long_to_int(value, &v, 0, 1)) return -1;
+    ((lv_indev_proc_t*)(self->data))->types.pointer.drag_in_prog = v;
+    return 0;
+}
+
+
+
+static PyObject *
+get_struct_bitfield_indev_proc_t_types_pointer_wait_until_release(StructObject *self, void *closure)
+{
+    return PyLong_FromLong(((lv_indev_proc_t*)(self->data))->types.pointer.wait_until_release );
+}
+
+static int
+set_struct_bitfield_indev_proc_t_types_pointer_wait_until_release(StructObject *self, PyObject *value, void *closure)
+{
+    long v;
+    if (long_to_int(value, &v, 0, 1)) return -1;
+    ((lv_indev_proc_t*)(self->data))->types.pointer.wait_until_release = v;
+    return 0;
+}
 
 static PyGetSetDef pylv_indev_proc_t_types_pointer_getset[] = {
-    {"act_point", (getter) struct_get_blob, (setter) struct_set_blob, "lv_point_t act_point", (void*)offsetof(lv_indev_proc_t, types.pointer.act_point)},
-    {"last_point", (getter) struct_get_blob, (setter) struct_set_blob, "lv_point_t last_point", (void*)offsetof(lv_indev_proc_t, types.pointer.last_point)},
-    {"vect", (getter) struct_get_blob, (setter) struct_set_blob, "lv_point_t vect", (void*)offsetof(lv_indev_proc_t, types.pointer.vect)},
-    {"drag_sum", (getter) struct_get_blob, (setter) struct_set_blob, "lv_point_t drag_sum", (void*)offsetof(lv_indev_proc_t, types.pointer.drag_sum)},
-    {"drag_throw_vect", (getter) struct_get_blob, (setter) struct_set_blob, "lv_point_t drag_throw_vect", (void*)offsetof(lv_indev_proc_t, types.pointer.drag_throw_vect)},
-    {"act_obj", (getter) struct_get_blob, (setter) struct_set_blob, "struct _lv_obj_t act_obj", (void*)offsetof(lv_indev_proc_t, types.pointer.act_obj)},
-    {"last_obj", (getter) struct_get_blob, (setter) struct_set_blob, "struct _lv_obj_t last_obj", (void*)offsetof(lv_indev_proc_t, types.pointer.last_obj)},
-    {"last_pressed", (getter) struct_get_blob, (setter) struct_set_blob, "struct _lv_obj_t last_pressed", (void*)offsetof(lv_indev_proc_t, types.pointer.last_pressed)},
-    {"drag_limit_out", (getter) NULL, (setter) NULL, "uint8_t drag_limit_out", NULL},
-    {"drag_in_prog", (getter) NULL, (setter) NULL, "uint8_t drag_in_prog", NULL},
-    {"wait_until_release", (getter) NULL, (setter) NULL, "uint8_t wait_until_release", NULL},
-
+    {"act_point", (getter) struct_get_struct, (setter) struct_set_struct, "lv_point_t act_point", & ((struct_closure_t){ &pylv_point_t_Type, (offsetof(lv_indev_proc_t, types.pointer.act_point)-offsetof(lv_indev_proc_t, types.pointer)), sizeof(lv_point_t)})},
+    {"last_point", (getter) struct_get_struct, (setter) struct_set_struct, "lv_point_t last_point", & ((struct_closure_t){ &pylv_point_t_Type, (offsetof(lv_indev_proc_t, types.pointer.last_point)-offsetof(lv_indev_proc_t, types.pointer)), sizeof(lv_point_t)})},
+    {"vect", (getter) struct_get_struct, (setter) struct_set_struct, "lv_point_t vect", & ((struct_closure_t){ &pylv_point_t_Type, (offsetof(lv_indev_proc_t, types.pointer.vect)-offsetof(lv_indev_proc_t, types.pointer)), sizeof(lv_point_t)})},
+    {"drag_sum", (getter) struct_get_struct, (setter) struct_set_struct, "lv_point_t drag_sum", & ((struct_closure_t){ &pylv_point_t_Type, (offsetof(lv_indev_proc_t, types.pointer.drag_sum)-offsetof(lv_indev_proc_t, types.pointer)), sizeof(lv_point_t)})},
+    {"drag_throw_vect", (getter) struct_get_struct, (setter) struct_set_struct, "lv_point_t drag_throw_vect", & ((struct_closure_t){ &pylv_point_t_Type, (offsetof(lv_indev_proc_t, types.pointer.drag_throw_vect)-offsetof(lv_indev_proc_t, types.pointer)), sizeof(lv_point_t)})},
+    {"act_obj", (getter) struct_get_struct, (setter) struct_set_struct, "struct _lv_obj_t act_obj", & ((struct_closure_t){ &Blob_Type, (offsetof(lv_indev_proc_t, types.pointer.act_obj)-offsetof(lv_indev_proc_t, types.pointer)), sizeof(((lv_indev_proc_t *)0)->types.pointer.act_obj)})},
+    {"last_obj", (getter) struct_get_struct, (setter) struct_set_struct, "struct _lv_obj_t last_obj", & ((struct_closure_t){ &Blob_Type, (offsetof(lv_indev_proc_t, types.pointer.last_obj)-offsetof(lv_indev_proc_t, types.pointer)), sizeof(((lv_indev_proc_t *)0)->types.pointer.last_obj)})},
+    {"last_pressed", (getter) struct_get_struct, (setter) struct_set_struct, "struct _lv_obj_t last_pressed", & ((struct_closure_t){ &Blob_Type, (offsetof(lv_indev_proc_t, types.pointer.last_pressed)-offsetof(lv_indev_proc_t, types.pointer)), sizeof(((lv_indev_proc_t *)0)->types.pointer.last_pressed)})},
+    {"drag_limit_out", (getter) get_struct_bitfield_indev_proc_t_types_pointer_drag_limit_out, (setter) set_struct_bitfield_indev_proc_t_types_pointer_drag_limit_out, "uint8_t:1 drag_limit_out", NULL},
+    {"drag_in_prog", (getter) get_struct_bitfield_indev_proc_t_types_pointer_drag_in_prog, (setter) set_struct_bitfield_indev_proc_t_types_pointer_drag_in_prog, "uint8_t:1 drag_in_prog", NULL},
+    {"wait_until_release", (getter) get_struct_bitfield_indev_proc_t_types_pointer_wait_until_release, (setter) set_struct_bitfield_indev_proc_t_types_pointer_wait_until_release, "uint8_t:1 wait_until_release", NULL},
     {NULL}
 };
+
 
 static PyTypeObject pylv_indev_proc_t_types_pointer_Type = {
     PyVarObject_HEAD_INIT(NULL, 0)
@@ -3478,17 +5194,18 @@ static PyTypeObject pylv_indev_proc_t_types_pointer_Type = {
     .tp_new = NULL, // sub structs cannot be instantiated
     .tp_dealloc = (destructor) Struct_dealloc,
     .tp_getset = pylv_indev_proc_t_types_pointer_getset,
-    .tp_repr = (reprfunc) Struct_repr
+    .tp_repr = (reprfunc) Struct_repr,
+    .tp_as_buffer = &Struct_bufferprocs
 };
 
 
 
 static PyGetSetDef pylv_indev_proc_t_types_keypad_getset[] = {
-    {"last_state", (getter) struct_get_uint8, (setter) struct_set_uint8, "lv_indev_state_t last_state", (void*)offsetof(lv_indev_proc_t, types.keypad.last_state)},
-    {"last_key", (getter) struct_get_uint32, (setter) struct_set_uint32, "uint32_t last_key", (void*)offsetof(lv_indev_proc_t, types.keypad.last_key)},
-
+    {"last_state", (getter) struct_get_uint8, (setter) struct_set_uint8, "lv_indev_state_t last_state", (void*)(offsetof(lv_indev_proc_t, types.keypad.last_state)-offsetof(lv_indev_proc_t, types.keypad))},
+    {"last_key", (getter) struct_get_uint32, (setter) struct_set_uint32, "uint32_t last_key", (void*)(offsetof(lv_indev_proc_t, types.keypad.last_key)-offsetof(lv_indev_proc_t, types.keypad))},
     {NULL}
 };
+
 
 static PyTypeObject pylv_indev_proc_t_types_keypad_Type = {
     PyVarObject_HEAD_INIT(NULL, 0)
@@ -3500,22 +5217,23 @@ static PyTypeObject pylv_indev_proc_t_types_keypad_Type = {
     .tp_new = NULL, // sub structs cannot be instantiated
     .tp_dealloc = (destructor) Struct_dealloc,
     .tp_getset = pylv_indev_proc_t_types_keypad_getset,
-    .tp_repr = (reprfunc) Struct_repr
+    .tp_repr = (reprfunc) Struct_repr,
+    .tp_as_buffer = &Struct_bufferprocs
 };
 
 
 
 static PyGetSetDef pylv_style_t_body_getset[] = {
-    {"main_color", (getter) struct_get_blob, (setter) struct_set_blob, "lv_color_t main_color", (void*)offsetof(lv_style_t, body.main_color)},
-    {"grad_color", (getter) struct_get_blob, (setter) struct_set_blob, "lv_color_t grad_color", (void*)offsetof(lv_style_t, body.grad_color)},
-    {"radius", (getter) struct_get_int16, (setter) struct_set_int16, "lv_coord_t radius", (void*)offsetof(lv_style_t, body.radius)},
-    {"opa", (getter) struct_get_uint8, (setter) struct_set_uint8, "lv_opa_t opa", (void*)offsetof(lv_style_t, body.opa)},
-    {"border", (getter) struct_get_struct, (setter) struct_set_struct, "struct  {   lv_color_t color;   lv_coord_t width;   lv_border_part_t part;   lv_opa_t opa; } border", & ((struct_closure_t){ &pylv_style_t_body_border_Type, offsetof(lv_style_t, body.border), sizeof(((lv_style_t *)0)->body.border)})},
-    {"shadow", (getter) struct_get_struct, (setter) struct_set_struct, "struct  {   lv_color_t color;   lv_coord_t width;   lv_shadow_type_t type; } shadow", & ((struct_closure_t){ &pylv_style_t_body_shadow_Type, offsetof(lv_style_t, body.shadow), sizeof(((lv_style_t *)0)->body.shadow)})},
-    {"padding", (getter) struct_get_struct, (setter) struct_set_struct, "struct  {   lv_coord_t ver;   lv_coord_t hor;   lv_coord_t inner; } padding", & ((struct_closure_t){ &pylv_style_t_body_padding_Type, offsetof(lv_style_t, body.padding), sizeof(((lv_style_t *)0)->body.padding)})},
-
+    {"main_color", (getter) struct_get_struct, (setter) struct_set_struct, "lv_color_t main_color", & ((struct_closure_t){ &pylv_color16_t_Type, (offsetof(lv_style_t, body.main_color)-offsetof(lv_style_t, body)), sizeof(lv_color16_t)})},
+    {"grad_color", (getter) struct_get_struct, (setter) struct_set_struct, "lv_color_t grad_color", & ((struct_closure_t){ &pylv_color16_t_Type, (offsetof(lv_style_t, body.grad_color)-offsetof(lv_style_t, body)), sizeof(lv_color16_t)})},
+    {"radius", (getter) struct_get_int16, (setter) struct_set_int16, "lv_coord_t radius", (void*)(offsetof(lv_style_t, body.radius)-offsetof(lv_style_t, body))},
+    {"opa", (getter) struct_get_uint8, (setter) struct_set_uint8, "lv_opa_t opa", (void*)(offsetof(lv_style_t, body.opa)-offsetof(lv_style_t, body))},
+    {"border", (getter) struct_get_struct, (setter) struct_set_struct, "struct  {   lv_color_t color;   lv_coord_t width;   lv_border_part_t part;   lv_opa_t opa; } border", & ((struct_closure_t){ &pylv_style_t_body_border_Type, (offsetof(lv_style_t, body.border)-offsetof(lv_style_t, body)), sizeof(((lv_style_t *)0)->body.border)})},
+    {"shadow", (getter) struct_get_struct, (setter) struct_set_struct, "struct  {   lv_color_t color;   lv_coord_t width;   lv_shadow_type_t type; } shadow", & ((struct_closure_t){ &pylv_style_t_body_shadow_Type, (offsetof(lv_style_t, body.shadow)-offsetof(lv_style_t, body)), sizeof(((lv_style_t *)0)->body.shadow)})},
+    {"padding", (getter) struct_get_struct, (setter) struct_set_struct, "struct  {   lv_coord_t ver;   lv_coord_t hor;   lv_coord_t inner; } padding", & ((struct_closure_t){ &pylv_style_t_body_padding_Type, (offsetof(lv_style_t, body.padding)-offsetof(lv_style_t, body)), sizeof(((lv_style_t *)0)->body.padding)})},
     {NULL}
 };
+
 
 static PyTypeObject pylv_style_t_body_Type = {
     PyVarObject_HEAD_INIT(NULL, 0)
@@ -3527,19 +5245,20 @@ static PyTypeObject pylv_style_t_body_Type = {
     .tp_new = NULL, // sub structs cannot be instantiated
     .tp_dealloc = (destructor) Struct_dealloc,
     .tp_getset = pylv_style_t_body_getset,
-    .tp_repr = (reprfunc) Struct_repr
+    .tp_repr = (reprfunc) Struct_repr,
+    .tp_as_buffer = &Struct_bufferprocs
 };
 
 
 
 static PyGetSetDef pylv_style_t_body_border_getset[] = {
-    {"color", (getter) struct_get_blob, (setter) struct_set_blob, "lv_color_t color", (void*)offsetof(lv_style_t, body.border.color)},
-    {"width", (getter) struct_get_int16, (setter) struct_set_int16, "lv_coord_t width", (void*)offsetof(lv_style_t, body.border.width)},
-    {"part", (getter) struct_get_uint8, (setter) struct_set_uint8, "lv_border_part_t part", (void*)offsetof(lv_style_t, body.border.part)},
-    {"opa", (getter) struct_get_uint8, (setter) struct_set_uint8, "lv_opa_t opa", (void*)offsetof(lv_style_t, body.border.opa)},
-
+    {"color", (getter) struct_get_struct, (setter) struct_set_struct, "lv_color_t color", & ((struct_closure_t){ &pylv_color16_t_Type, (offsetof(lv_style_t, body.border.color)-offsetof(lv_style_t, body.border)), sizeof(lv_color16_t)})},
+    {"width", (getter) struct_get_int16, (setter) struct_set_int16, "lv_coord_t width", (void*)(offsetof(lv_style_t, body.border.width)-offsetof(lv_style_t, body.border))},
+    {"part", (getter) struct_get_uint8, (setter) struct_set_uint8, "lv_border_part_t part", (void*)(offsetof(lv_style_t, body.border.part)-offsetof(lv_style_t, body.border))},
+    {"opa", (getter) struct_get_uint8, (setter) struct_set_uint8, "lv_opa_t opa", (void*)(offsetof(lv_style_t, body.border.opa)-offsetof(lv_style_t, body.border))},
     {NULL}
 };
+
 
 static PyTypeObject pylv_style_t_body_border_Type = {
     PyVarObject_HEAD_INIT(NULL, 0)
@@ -3551,18 +5270,19 @@ static PyTypeObject pylv_style_t_body_border_Type = {
     .tp_new = NULL, // sub structs cannot be instantiated
     .tp_dealloc = (destructor) Struct_dealloc,
     .tp_getset = pylv_style_t_body_border_getset,
-    .tp_repr = (reprfunc) Struct_repr
+    .tp_repr = (reprfunc) Struct_repr,
+    .tp_as_buffer = &Struct_bufferprocs
 };
 
 
 
 static PyGetSetDef pylv_style_t_body_shadow_getset[] = {
-    {"color", (getter) struct_get_blob, (setter) struct_set_blob, "lv_color_t color", (void*)offsetof(lv_style_t, body.shadow.color)},
-    {"width", (getter) struct_get_int16, (setter) struct_set_int16, "lv_coord_t width", (void*)offsetof(lv_style_t, body.shadow.width)},
-    {"type", (getter) struct_get_uint8, (setter) struct_set_uint8, "lv_shadow_type_t type", (void*)offsetof(lv_style_t, body.shadow.type)},
-
+    {"color", (getter) struct_get_struct, (setter) struct_set_struct, "lv_color_t color", & ((struct_closure_t){ &pylv_color16_t_Type, (offsetof(lv_style_t, body.shadow.color)-offsetof(lv_style_t, body.shadow)), sizeof(lv_color16_t)})},
+    {"width", (getter) struct_get_int16, (setter) struct_set_int16, "lv_coord_t width", (void*)(offsetof(lv_style_t, body.shadow.width)-offsetof(lv_style_t, body.shadow))},
+    {"type", (getter) struct_get_uint8, (setter) struct_set_uint8, "lv_shadow_type_t type", (void*)(offsetof(lv_style_t, body.shadow.type)-offsetof(lv_style_t, body.shadow))},
     {NULL}
 };
+
 
 static PyTypeObject pylv_style_t_body_shadow_Type = {
     PyVarObject_HEAD_INIT(NULL, 0)
@@ -3574,18 +5294,19 @@ static PyTypeObject pylv_style_t_body_shadow_Type = {
     .tp_new = NULL, // sub structs cannot be instantiated
     .tp_dealloc = (destructor) Struct_dealloc,
     .tp_getset = pylv_style_t_body_shadow_getset,
-    .tp_repr = (reprfunc) Struct_repr
+    .tp_repr = (reprfunc) Struct_repr,
+    .tp_as_buffer = &Struct_bufferprocs
 };
 
 
 
 static PyGetSetDef pylv_style_t_body_padding_getset[] = {
-    {"ver", (getter) struct_get_int16, (setter) struct_set_int16, "lv_coord_t ver", (void*)offsetof(lv_style_t, body.padding.ver)},
-    {"hor", (getter) struct_get_int16, (setter) struct_set_int16, "lv_coord_t hor", (void*)offsetof(lv_style_t, body.padding.hor)},
-    {"inner", (getter) struct_get_int16, (setter) struct_set_int16, "lv_coord_t inner", (void*)offsetof(lv_style_t, body.padding.inner)},
-
+    {"ver", (getter) struct_get_int16, (setter) struct_set_int16, "lv_coord_t ver", (void*)(offsetof(lv_style_t, body.padding.ver)-offsetof(lv_style_t, body.padding))},
+    {"hor", (getter) struct_get_int16, (setter) struct_set_int16, "lv_coord_t hor", (void*)(offsetof(lv_style_t, body.padding.hor)-offsetof(lv_style_t, body.padding))},
+    {"inner", (getter) struct_get_int16, (setter) struct_set_int16, "lv_coord_t inner", (void*)(offsetof(lv_style_t, body.padding.inner)-offsetof(lv_style_t, body.padding))},
     {NULL}
 };
+
 
 static PyTypeObject pylv_style_t_body_padding_Type = {
     PyVarObject_HEAD_INIT(NULL, 0)
@@ -3597,20 +5318,21 @@ static PyTypeObject pylv_style_t_body_padding_Type = {
     .tp_new = NULL, // sub structs cannot be instantiated
     .tp_dealloc = (destructor) Struct_dealloc,
     .tp_getset = pylv_style_t_body_padding_getset,
-    .tp_repr = (reprfunc) Struct_repr
+    .tp_repr = (reprfunc) Struct_repr,
+    .tp_as_buffer = &Struct_bufferprocs
 };
 
 
 
 static PyGetSetDef pylv_style_t_text_getset[] = {
-    {"color", (getter) struct_get_blob, (setter) struct_set_blob, "lv_color_t color", (void*)offsetof(lv_style_t, text.color)},
-    {"font", (getter) struct_get_blob, (setter) struct_set_blob, "lv_font_t font", (void*)offsetof(lv_style_t, text.font)},
-    {"letter_space", (getter) struct_get_int16, (setter) struct_set_int16, "lv_coord_t letter_space", (void*)offsetof(lv_style_t, text.letter_space)},
-    {"line_space", (getter) struct_get_int16, (setter) struct_set_int16, "lv_coord_t line_space", (void*)offsetof(lv_style_t, text.line_space)},
-    {"opa", (getter) struct_get_uint8, (setter) struct_set_uint8, "lv_opa_t opa", (void*)offsetof(lv_style_t, text.opa)},
-
+    {"color", (getter) struct_get_struct, (setter) struct_set_struct, "lv_color_t color", & ((struct_closure_t){ &pylv_color16_t_Type, (offsetof(lv_style_t, text.color)-offsetof(lv_style_t, text)), sizeof(lv_color16_t)})},
+    {"font", (getter) struct_get_struct, (setter) struct_set_struct, "lv_font_t font", & ((struct_closure_t){ &Blob_Type, (offsetof(lv_style_t, text.font)-offsetof(lv_style_t, text)), sizeof(((lv_style_t *)0)->text.font)})},
+    {"letter_space", (getter) struct_get_int16, (setter) struct_set_int16, "lv_coord_t letter_space", (void*)(offsetof(lv_style_t, text.letter_space)-offsetof(lv_style_t, text))},
+    {"line_space", (getter) struct_get_int16, (setter) struct_set_int16, "lv_coord_t line_space", (void*)(offsetof(lv_style_t, text.line_space)-offsetof(lv_style_t, text))},
+    {"opa", (getter) struct_get_uint8, (setter) struct_set_uint8, "lv_opa_t opa", (void*)(offsetof(lv_style_t, text.opa)-offsetof(lv_style_t, text))},
     {NULL}
 };
+
 
 static PyTypeObject pylv_style_t_text_Type = {
     PyVarObject_HEAD_INIT(NULL, 0)
@@ -3622,18 +5344,19 @@ static PyTypeObject pylv_style_t_text_Type = {
     .tp_new = NULL, // sub structs cannot be instantiated
     .tp_dealloc = (destructor) Struct_dealloc,
     .tp_getset = pylv_style_t_text_getset,
-    .tp_repr = (reprfunc) Struct_repr
+    .tp_repr = (reprfunc) Struct_repr,
+    .tp_as_buffer = &Struct_bufferprocs
 };
 
 
 
 static PyGetSetDef pylv_style_t_image_getset[] = {
-    {"color", (getter) struct_get_blob, (setter) struct_set_blob, "lv_color_t color", (void*)offsetof(lv_style_t, image.color)},
-    {"intense", (getter) struct_get_uint8, (setter) struct_set_uint8, "lv_opa_t intense", (void*)offsetof(lv_style_t, image.intense)},
-    {"opa", (getter) struct_get_uint8, (setter) struct_set_uint8, "lv_opa_t opa", (void*)offsetof(lv_style_t, image.opa)},
-
+    {"color", (getter) struct_get_struct, (setter) struct_set_struct, "lv_color_t color", & ((struct_closure_t){ &pylv_color16_t_Type, (offsetof(lv_style_t, image.color)-offsetof(lv_style_t, image)), sizeof(lv_color16_t)})},
+    {"intense", (getter) struct_get_uint8, (setter) struct_set_uint8, "lv_opa_t intense", (void*)(offsetof(lv_style_t, image.intense)-offsetof(lv_style_t, image))},
+    {"opa", (getter) struct_get_uint8, (setter) struct_set_uint8, "lv_opa_t opa", (void*)(offsetof(lv_style_t, image.opa)-offsetof(lv_style_t, image))},
     {NULL}
 };
+
 
 static PyTypeObject pylv_style_t_image_Type = {
     PyVarObject_HEAD_INIT(NULL, 0)
@@ -3645,19 +5368,37 @@ static PyTypeObject pylv_style_t_image_Type = {
     .tp_new = NULL, // sub structs cannot be instantiated
     .tp_dealloc = (destructor) Struct_dealloc,
     .tp_getset = pylv_style_t_image_getset,
-    .tp_repr = (reprfunc) Struct_repr
+    .tp_repr = (reprfunc) Struct_repr,
+    .tp_as_buffer = &Struct_bufferprocs
 };
 
 
+
+
+
+static PyObject *
+get_struct_bitfield_style_t_line_rounded(StructObject *self, void *closure)
+{
+    return PyLong_FromLong(((lv_style_t*)(self->data))->line.rounded );
+}
+
+static int
+set_struct_bitfield_style_t_line_rounded(StructObject *self, PyObject *value, void *closure)
+{
+    long v;
+    if (long_to_int(value, &v, 0, 1)) return -1;
+    ((lv_style_t*)(self->data))->line.rounded = v;
+    return 0;
+}
 
 static PyGetSetDef pylv_style_t_line_getset[] = {
-    {"color", (getter) struct_get_blob, (setter) struct_set_blob, "lv_color_t color", (void*)offsetof(lv_style_t, line.color)},
-    {"width", (getter) struct_get_int16, (setter) struct_set_int16, "lv_coord_t width", (void*)offsetof(lv_style_t, line.width)},
-    {"opa", (getter) struct_get_uint8, (setter) struct_set_uint8, "lv_opa_t opa", (void*)offsetof(lv_style_t, line.opa)},
-    {"rounded", (getter) NULL, (setter) NULL, "uint8_t rounded", NULL},
-
+    {"color", (getter) struct_get_struct, (setter) struct_set_struct, "lv_color_t color", & ((struct_closure_t){ &pylv_color16_t_Type, (offsetof(lv_style_t, line.color)-offsetof(lv_style_t, line)), sizeof(lv_color16_t)})},
+    {"width", (getter) struct_get_int16, (setter) struct_set_int16, "lv_coord_t width", (void*)(offsetof(lv_style_t, line.width)-offsetof(lv_style_t, line))},
+    {"opa", (getter) struct_get_uint8, (setter) struct_set_uint8, "lv_opa_t opa", (void*)(offsetof(lv_style_t, line.opa)-offsetof(lv_style_t, line))},
+    {"rounded", (getter) get_struct_bitfield_style_t_line_rounded, (setter) set_struct_bitfield_style_t_line_rounded, "uint8_t:1 rounded", NULL},
     {NULL}
 };
+
 
 static PyTypeObject pylv_style_t_line_Type = {
     PyVarObject_HEAD_INIT(NULL, 0)
@@ -3669,46 +5410,47 @@ static PyTypeObject pylv_style_t_line_Type = {
     .tp_new = NULL, // sub structs cannot be instantiated
     .tp_dealloc = (destructor) Struct_dealloc,
     .tp_getset = pylv_style_t_line_getset,
-    .tp_repr = (reprfunc) Struct_repr
+    .tp_repr = (reprfunc) Struct_repr,
+    .tp_as_buffer = &Struct_bufferprocs
 };
 
 
 
 static PyGetSetDef pylv_theme_t_style_getset[] = {
-    {"bg", (getter) struct_get_blob, (setter) struct_set_blob, "lv_style_t bg", (void*)offsetof(lv_theme_t, style.bg)},
-    {"panel", (getter) struct_get_blob, (setter) struct_set_blob, "lv_style_t panel", (void*)offsetof(lv_theme_t, style.panel)},
-    {"cont", (getter) struct_get_blob, (setter) struct_set_blob, "lv_style_t cont", (void*)offsetof(lv_theme_t, style.cont)},
-    {"btn", (getter) struct_get_struct, (setter) struct_set_struct, "struct  {   lv_style_t *rel;   lv_style_t *pr;   lv_style_t *tgl_rel;   lv_style_t *tgl_pr;   lv_style_t *ina; } btn", & ((struct_closure_t){ &pylv_theme_t_style_btn_Type, offsetof(lv_theme_t, style.btn), sizeof(((lv_theme_t *)0)->style.btn)})},
-    {"imgbtn", (getter) struct_get_struct, (setter) struct_set_struct, "struct  {   lv_style_t *rel;   lv_style_t *pr;   lv_style_t *tgl_rel;   lv_style_t *tgl_pr;   lv_style_t *ina; } imgbtn", & ((struct_closure_t){ &pylv_theme_t_style_imgbtn_Type, offsetof(lv_theme_t, style.imgbtn), sizeof(((lv_theme_t *)0)->style.imgbtn)})},
-    {"label", (getter) struct_get_struct, (setter) struct_set_struct, "struct  {   lv_style_t *prim;   lv_style_t *sec;   lv_style_t *hint; } label", & ((struct_closure_t){ &pylv_theme_t_style_label_Type, offsetof(lv_theme_t, style.label), sizeof(((lv_theme_t *)0)->style.label)})},
-    {"img", (getter) struct_get_struct, (setter) struct_set_struct, "struct  {   lv_style_t *light;   lv_style_t *dark; } img", & ((struct_closure_t){ &pylv_theme_t_style_img_Type, offsetof(lv_theme_t, style.img), sizeof(((lv_theme_t *)0)->style.img)})},
-    {"line", (getter) struct_get_struct, (setter) struct_set_struct, "struct  {   lv_style_t *decor; } line", & ((struct_closure_t){ &pylv_theme_t_style_line_Type, offsetof(lv_theme_t, style.line), sizeof(((lv_theme_t *)0)->style.line)})},
-    {"led", (getter) struct_get_blob, (setter) struct_set_blob, "lv_style_t led", (void*)offsetof(lv_theme_t, style.led)},
-    {"bar", (getter) struct_get_struct, (setter) struct_set_struct, "struct  {   lv_style_t *bg;   lv_style_t *indic; } bar", & ((struct_closure_t){ &pylv_theme_t_style_bar_Type, offsetof(lv_theme_t, style.bar), sizeof(((lv_theme_t *)0)->style.bar)})},
-    {"slider", (getter) struct_get_struct, (setter) struct_set_struct, "struct  {   lv_style_t *bg;   lv_style_t *indic;   lv_style_t *knob; } slider", & ((struct_closure_t){ &pylv_theme_t_style_slider_Type, offsetof(lv_theme_t, style.slider), sizeof(((lv_theme_t *)0)->style.slider)})},
-    {"lmeter", (getter) struct_get_blob, (setter) struct_set_blob, "lv_style_t lmeter", (void*)offsetof(lv_theme_t, style.lmeter)},
-    {"gauge", (getter) struct_get_blob, (setter) struct_set_blob, "lv_style_t gauge", (void*)offsetof(lv_theme_t, style.gauge)},
-    {"arc", (getter) struct_get_blob, (setter) struct_set_blob, "lv_style_t arc", (void*)offsetof(lv_theme_t, style.arc)},
-    {"preload", (getter) struct_get_blob, (setter) struct_set_blob, "lv_style_t preload", (void*)offsetof(lv_theme_t, style.preload)},
-    {"sw", (getter) struct_get_struct, (setter) struct_set_struct, "struct  {   lv_style_t *bg;   lv_style_t *indic;   lv_style_t *knob_off;   lv_style_t *knob_on; } sw", & ((struct_closure_t){ &pylv_theme_t_style_sw_Type, offsetof(lv_theme_t, style.sw), sizeof(((lv_theme_t *)0)->style.sw)})},
-    {"chart", (getter) struct_get_blob, (setter) struct_set_blob, "lv_style_t chart", (void*)offsetof(lv_theme_t, style.chart)},
-    {"cb", (getter) struct_get_struct, (setter) struct_set_struct, "struct  {   lv_style_t *bg;   struct    {     lv_style_t *rel;     lv_style_t *pr;     lv_style_t *tgl_rel;     lv_style_t *tgl_pr;     lv_style_t *ina;   } box; } cb", & ((struct_closure_t){ &pylv_theme_t_style_cb_Type, offsetof(lv_theme_t, style.cb), sizeof(((lv_theme_t *)0)->style.cb)})},
-    {"btnm", (getter) struct_get_struct, (setter) struct_set_struct, "struct  {   lv_style_t *bg;   struct    {     lv_style_t *rel;     lv_style_t *pr;     lv_style_t *tgl_rel;     lv_style_t *tgl_pr;     lv_style_t *ina;   } btn; } btnm", & ((struct_closure_t){ &pylv_theme_t_style_btnm_Type, offsetof(lv_theme_t, style.btnm), sizeof(((lv_theme_t *)0)->style.btnm)})},
-    {"kb", (getter) struct_get_struct, (setter) struct_set_struct, "struct  {   lv_style_t *bg;   struct    {     lv_style_t *rel;     lv_style_t *pr;     lv_style_t *tgl_rel;     lv_style_t *tgl_pr;     lv_style_t *ina;   } btn; } kb", & ((struct_closure_t){ &pylv_theme_t_style_kb_Type, offsetof(lv_theme_t, style.kb), sizeof(((lv_theme_t *)0)->style.kb)})},
-    {"mbox", (getter) struct_get_struct, (setter) struct_set_struct, "struct  {   lv_style_t *bg;   struct    {     lv_style_t *bg;     lv_style_t *rel;     lv_style_t *pr;   } btn; } mbox", & ((struct_closure_t){ &pylv_theme_t_style_mbox_Type, offsetof(lv_theme_t, style.mbox), sizeof(((lv_theme_t *)0)->style.mbox)})},
-    {"page", (getter) struct_get_struct, (setter) struct_set_struct, "struct  {   lv_style_t *bg;   lv_style_t *scrl;   lv_style_t *sb; } page", & ((struct_closure_t){ &pylv_theme_t_style_page_Type, offsetof(lv_theme_t, style.page), sizeof(((lv_theme_t *)0)->style.page)})},
-    {"ta", (getter) struct_get_struct, (setter) struct_set_struct, "struct  {   lv_style_t *area;   lv_style_t *oneline;   lv_style_t *cursor;   lv_style_t *sb; } ta", & ((struct_closure_t){ &pylv_theme_t_style_ta_Type, offsetof(lv_theme_t, style.ta), sizeof(((lv_theme_t *)0)->style.ta)})},
-    {"spinbox", (getter) struct_get_struct, (setter) struct_set_struct, "struct  {   lv_style_t *bg;   lv_style_t *cursor;   lv_style_t *sb; } spinbox", & ((struct_closure_t){ &pylv_theme_t_style_spinbox_Type, offsetof(lv_theme_t, style.spinbox), sizeof(((lv_theme_t *)0)->style.spinbox)})},
-    {"list", (getter) struct_get_struct, (setter) struct_set_struct, "struct  {   lv_style_t *bg;   lv_style_t *scrl;   lv_style_t *sb;   struct    {     lv_style_t *rel;     lv_style_t *pr;     lv_style_t *tgl_rel;     lv_style_t *tgl_pr;     lv_style_t *ina;   } btn; } list", & ((struct_closure_t){ &pylv_theme_t_style_list_Type, offsetof(lv_theme_t, style.list), sizeof(((lv_theme_t *)0)->style.list)})},
-    {"ddlist", (getter) struct_get_struct, (setter) struct_set_struct, "struct  {   lv_style_t *bg;   lv_style_t *sel;   lv_style_t *sb; } ddlist", & ((struct_closure_t){ &pylv_theme_t_style_ddlist_Type, offsetof(lv_theme_t, style.ddlist), sizeof(((lv_theme_t *)0)->style.ddlist)})},
-    {"roller", (getter) struct_get_struct, (setter) struct_set_struct, "struct  {   lv_style_t *bg;   lv_style_t *sel; } roller", & ((struct_closure_t){ &pylv_theme_t_style_roller_Type, offsetof(lv_theme_t, style.roller), sizeof(((lv_theme_t *)0)->style.roller)})},
-    {"tabview", (getter) struct_get_struct, (setter) struct_set_struct, "struct  {   lv_style_t *bg;   lv_style_t *indic;   struct    {     lv_style_t *bg;     lv_style_t *rel;     lv_style_t *pr;     lv_style_t *tgl_rel;     lv_style_t *tgl_pr;   } btn; } tabview", & ((struct_closure_t){ &pylv_theme_t_style_tabview_Type, offsetof(lv_theme_t, style.tabview), sizeof(((lv_theme_t *)0)->style.tabview)})},
-    {"tileview", (getter) struct_get_struct, (setter) struct_set_struct, "struct  {   lv_style_t *bg;   lv_style_t *scrl;   lv_style_t *sb; } tileview", & ((struct_closure_t){ &pylv_theme_t_style_tileview_Type, offsetof(lv_theme_t, style.tileview), sizeof(((lv_theme_t *)0)->style.tileview)})},
-    {"table", (getter) struct_get_struct, (setter) struct_set_struct, "struct  {   lv_style_t *bg;   lv_style_t *cell; } table", & ((struct_closure_t){ &pylv_theme_t_style_table_Type, offsetof(lv_theme_t, style.table), sizeof(((lv_theme_t *)0)->style.table)})},
-    {"win", (getter) struct_get_struct, (setter) struct_set_struct, "struct  {   lv_style_t *bg;   lv_style_t *sb;   lv_style_t *header;   struct    {     lv_style_t *bg;     lv_style_t *scrl;   } content;   struct    {     lv_style_t *rel;     lv_style_t *pr;   } btn; } win", & ((struct_closure_t){ &pylv_theme_t_style_win_Type, offsetof(lv_theme_t, style.win), sizeof(((lv_theme_t *)0)->style.win)})},
-
+    {"bg", (getter) struct_get_struct, (setter) struct_set_struct, "lv_style_t bg", & ((struct_closure_t){ &Blob_Type, (offsetof(lv_theme_t, style.bg)-offsetof(lv_theme_t, style)), sizeof(((lv_theme_t *)0)->style.bg)})},
+    {"panel", (getter) struct_get_struct, (setter) struct_set_struct, "lv_style_t panel", & ((struct_closure_t){ &Blob_Type, (offsetof(lv_theme_t, style.panel)-offsetof(lv_theme_t, style)), sizeof(((lv_theme_t *)0)->style.panel)})},
+    {"cont", (getter) struct_get_struct, (setter) struct_set_struct, "lv_style_t cont", & ((struct_closure_t){ &Blob_Type, (offsetof(lv_theme_t, style.cont)-offsetof(lv_theme_t, style)), sizeof(((lv_theme_t *)0)->style.cont)})},
+    {"btn", (getter) struct_get_struct, (setter) struct_set_struct, "struct  {   lv_style_t *rel;   lv_style_t *pr;   lv_style_t *tgl_rel;   lv_style_t *tgl_pr;   lv_style_t *ina; } btn", & ((struct_closure_t){ &pylv_theme_t_style_btn_Type, (offsetof(lv_theme_t, style.btn)-offsetof(lv_theme_t, style)), sizeof(((lv_theme_t *)0)->style.btn)})},
+    {"imgbtn", (getter) struct_get_struct, (setter) struct_set_struct, "struct  {   lv_style_t *rel;   lv_style_t *pr;   lv_style_t *tgl_rel;   lv_style_t *tgl_pr;   lv_style_t *ina; } imgbtn", & ((struct_closure_t){ &pylv_theme_t_style_imgbtn_Type, (offsetof(lv_theme_t, style.imgbtn)-offsetof(lv_theme_t, style)), sizeof(((lv_theme_t *)0)->style.imgbtn)})},
+    {"label", (getter) struct_get_struct, (setter) struct_set_struct, "struct  {   lv_style_t *prim;   lv_style_t *sec;   lv_style_t *hint; } label", & ((struct_closure_t){ &pylv_theme_t_style_label_Type, (offsetof(lv_theme_t, style.label)-offsetof(lv_theme_t, style)), sizeof(((lv_theme_t *)0)->style.label)})},
+    {"img", (getter) struct_get_struct, (setter) struct_set_struct, "struct  {   lv_style_t *light;   lv_style_t *dark; } img", & ((struct_closure_t){ &pylv_theme_t_style_img_Type, (offsetof(lv_theme_t, style.img)-offsetof(lv_theme_t, style)), sizeof(((lv_theme_t *)0)->style.img)})},
+    {"line", (getter) struct_get_struct, (setter) struct_set_struct, "struct  {   lv_style_t *decor; } line", & ((struct_closure_t){ &pylv_theme_t_style_line_Type, (offsetof(lv_theme_t, style.line)-offsetof(lv_theme_t, style)), sizeof(((lv_theme_t *)0)->style.line)})},
+    {"led", (getter) struct_get_struct, (setter) struct_set_struct, "lv_style_t led", & ((struct_closure_t){ &Blob_Type, (offsetof(lv_theme_t, style.led)-offsetof(lv_theme_t, style)), sizeof(((lv_theme_t *)0)->style.led)})},
+    {"bar", (getter) struct_get_struct, (setter) struct_set_struct, "struct  {   lv_style_t *bg;   lv_style_t *indic; } bar", & ((struct_closure_t){ &pylv_theme_t_style_bar_Type, (offsetof(lv_theme_t, style.bar)-offsetof(lv_theme_t, style)), sizeof(((lv_theme_t *)0)->style.bar)})},
+    {"slider", (getter) struct_get_struct, (setter) struct_set_struct, "struct  {   lv_style_t *bg;   lv_style_t *indic;   lv_style_t *knob; } slider", & ((struct_closure_t){ &pylv_theme_t_style_slider_Type, (offsetof(lv_theme_t, style.slider)-offsetof(lv_theme_t, style)), sizeof(((lv_theme_t *)0)->style.slider)})},
+    {"lmeter", (getter) struct_get_struct, (setter) struct_set_struct, "lv_style_t lmeter", & ((struct_closure_t){ &Blob_Type, (offsetof(lv_theme_t, style.lmeter)-offsetof(lv_theme_t, style)), sizeof(((lv_theme_t *)0)->style.lmeter)})},
+    {"gauge", (getter) struct_get_struct, (setter) struct_set_struct, "lv_style_t gauge", & ((struct_closure_t){ &Blob_Type, (offsetof(lv_theme_t, style.gauge)-offsetof(lv_theme_t, style)), sizeof(((lv_theme_t *)0)->style.gauge)})},
+    {"arc", (getter) struct_get_struct, (setter) struct_set_struct, "lv_style_t arc", & ((struct_closure_t){ &Blob_Type, (offsetof(lv_theme_t, style.arc)-offsetof(lv_theme_t, style)), sizeof(((lv_theme_t *)0)->style.arc)})},
+    {"preload", (getter) struct_get_struct, (setter) struct_set_struct, "lv_style_t preload", & ((struct_closure_t){ &Blob_Type, (offsetof(lv_theme_t, style.preload)-offsetof(lv_theme_t, style)), sizeof(((lv_theme_t *)0)->style.preload)})},
+    {"sw", (getter) struct_get_struct, (setter) struct_set_struct, "struct  {   lv_style_t *bg;   lv_style_t *indic;   lv_style_t *knob_off;   lv_style_t *knob_on; } sw", & ((struct_closure_t){ &pylv_theme_t_style_sw_Type, (offsetof(lv_theme_t, style.sw)-offsetof(lv_theme_t, style)), sizeof(((lv_theme_t *)0)->style.sw)})},
+    {"chart", (getter) struct_get_struct, (setter) struct_set_struct, "lv_style_t chart", & ((struct_closure_t){ &Blob_Type, (offsetof(lv_theme_t, style.chart)-offsetof(lv_theme_t, style)), sizeof(((lv_theme_t *)0)->style.chart)})},
+    {"cb", (getter) struct_get_struct, (setter) struct_set_struct, "struct  {   lv_style_t *bg;   struct    {     lv_style_t *rel;     lv_style_t *pr;     lv_style_t *tgl_rel;     lv_style_t *tgl_pr;     lv_style_t *ina;   } box; } cb", & ((struct_closure_t){ &pylv_theme_t_style_cb_Type, (offsetof(lv_theme_t, style.cb)-offsetof(lv_theme_t, style)), sizeof(((lv_theme_t *)0)->style.cb)})},
+    {"btnm", (getter) struct_get_struct, (setter) struct_set_struct, "struct  {   lv_style_t *bg;   struct    {     lv_style_t *rel;     lv_style_t *pr;     lv_style_t *tgl_rel;     lv_style_t *tgl_pr;     lv_style_t *ina;   } btn; } btnm", & ((struct_closure_t){ &pylv_theme_t_style_btnm_Type, (offsetof(lv_theme_t, style.btnm)-offsetof(lv_theme_t, style)), sizeof(((lv_theme_t *)0)->style.btnm)})},
+    {"kb", (getter) struct_get_struct, (setter) struct_set_struct, "struct  {   lv_style_t *bg;   struct    {     lv_style_t *rel;     lv_style_t *pr;     lv_style_t *tgl_rel;     lv_style_t *tgl_pr;     lv_style_t *ina;   } btn; } kb", & ((struct_closure_t){ &pylv_theme_t_style_kb_Type, (offsetof(lv_theme_t, style.kb)-offsetof(lv_theme_t, style)), sizeof(((lv_theme_t *)0)->style.kb)})},
+    {"mbox", (getter) struct_get_struct, (setter) struct_set_struct, "struct  {   lv_style_t *bg;   struct    {     lv_style_t *bg;     lv_style_t *rel;     lv_style_t *pr;   } btn; } mbox", & ((struct_closure_t){ &pylv_theme_t_style_mbox_Type, (offsetof(lv_theme_t, style.mbox)-offsetof(lv_theme_t, style)), sizeof(((lv_theme_t *)0)->style.mbox)})},
+    {"page", (getter) struct_get_struct, (setter) struct_set_struct, "struct  {   lv_style_t *bg;   lv_style_t *scrl;   lv_style_t *sb; } page", & ((struct_closure_t){ &pylv_theme_t_style_page_Type, (offsetof(lv_theme_t, style.page)-offsetof(lv_theme_t, style)), sizeof(((lv_theme_t *)0)->style.page)})},
+    {"ta", (getter) struct_get_struct, (setter) struct_set_struct, "struct  {   lv_style_t *area;   lv_style_t *oneline;   lv_style_t *cursor;   lv_style_t *sb; } ta", & ((struct_closure_t){ &pylv_theme_t_style_ta_Type, (offsetof(lv_theme_t, style.ta)-offsetof(lv_theme_t, style)), sizeof(((lv_theme_t *)0)->style.ta)})},
+    {"spinbox", (getter) struct_get_struct, (setter) struct_set_struct, "struct  {   lv_style_t *bg;   lv_style_t *cursor;   lv_style_t *sb; } spinbox", & ((struct_closure_t){ &pylv_theme_t_style_spinbox_Type, (offsetof(lv_theme_t, style.spinbox)-offsetof(lv_theme_t, style)), sizeof(((lv_theme_t *)0)->style.spinbox)})},
+    {"list", (getter) struct_get_struct, (setter) struct_set_struct, "struct  {   lv_style_t *bg;   lv_style_t *scrl;   lv_style_t *sb;   struct    {     lv_style_t *rel;     lv_style_t *pr;     lv_style_t *tgl_rel;     lv_style_t *tgl_pr;     lv_style_t *ina;   } btn; } list", & ((struct_closure_t){ &pylv_theme_t_style_list_Type, (offsetof(lv_theme_t, style.list)-offsetof(lv_theme_t, style)), sizeof(((lv_theme_t *)0)->style.list)})},
+    {"ddlist", (getter) struct_get_struct, (setter) struct_set_struct, "struct  {   lv_style_t *bg;   lv_style_t *sel;   lv_style_t *sb; } ddlist", & ((struct_closure_t){ &pylv_theme_t_style_ddlist_Type, (offsetof(lv_theme_t, style.ddlist)-offsetof(lv_theme_t, style)), sizeof(((lv_theme_t *)0)->style.ddlist)})},
+    {"roller", (getter) struct_get_struct, (setter) struct_set_struct, "struct  {   lv_style_t *bg;   lv_style_t *sel; } roller", & ((struct_closure_t){ &pylv_theme_t_style_roller_Type, (offsetof(lv_theme_t, style.roller)-offsetof(lv_theme_t, style)), sizeof(((lv_theme_t *)0)->style.roller)})},
+    {"tabview", (getter) struct_get_struct, (setter) struct_set_struct, "struct  {   lv_style_t *bg;   lv_style_t *indic;   struct    {     lv_style_t *bg;     lv_style_t *rel;     lv_style_t *pr;     lv_style_t *tgl_rel;     lv_style_t *tgl_pr;   } btn; } tabview", & ((struct_closure_t){ &pylv_theme_t_style_tabview_Type, (offsetof(lv_theme_t, style.tabview)-offsetof(lv_theme_t, style)), sizeof(((lv_theme_t *)0)->style.tabview)})},
+    {"tileview", (getter) struct_get_struct, (setter) struct_set_struct, "struct  {   lv_style_t *bg;   lv_style_t *scrl;   lv_style_t *sb; } tileview", & ((struct_closure_t){ &pylv_theme_t_style_tileview_Type, (offsetof(lv_theme_t, style.tileview)-offsetof(lv_theme_t, style)), sizeof(((lv_theme_t *)0)->style.tileview)})},
+    {"table", (getter) struct_get_struct, (setter) struct_set_struct, "struct  {   lv_style_t *bg;   lv_style_t *cell; } table", & ((struct_closure_t){ &pylv_theme_t_style_table_Type, (offsetof(lv_theme_t, style.table)-offsetof(lv_theme_t, style)), sizeof(((lv_theme_t *)0)->style.table)})},
+    {"win", (getter) struct_get_struct, (setter) struct_set_struct, "struct  {   lv_style_t *bg;   lv_style_t *sb;   lv_style_t *header;   struct    {     lv_style_t *bg;     lv_style_t *scrl;   } content;   struct    {     lv_style_t *rel;     lv_style_t *pr;   } btn; } win", & ((struct_closure_t){ &pylv_theme_t_style_win_Type, (offsetof(lv_theme_t, style.win)-offsetof(lv_theme_t, style)), sizeof(((lv_theme_t *)0)->style.win)})},
     {NULL}
 };
+
 
 static PyTypeObject pylv_theme_t_style_Type = {
     PyVarObject_HEAD_INIT(NULL, 0)
@@ -3720,20 +5462,21 @@ static PyTypeObject pylv_theme_t_style_Type = {
     .tp_new = NULL, // sub structs cannot be instantiated
     .tp_dealloc = (destructor) Struct_dealloc,
     .tp_getset = pylv_theme_t_style_getset,
-    .tp_repr = (reprfunc) Struct_repr
+    .tp_repr = (reprfunc) Struct_repr,
+    .tp_as_buffer = &Struct_bufferprocs
 };
 
 
 
 static PyGetSetDef pylv_theme_t_style_btn_getset[] = {
-    {"rel", (getter) struct_get_blob, (setter) struct_set_blob, "lv_style_t rel", (void*)offsetof(lv_theme_t, style.btn.rel)},
-    {"pr", (getter) struct_get_blob, (setter) struct_set_blob, "lv_style_t pr", (void*)offsetof(lv_theme_t, style.btn.pr)},
-    {"tgl_rel", (getter) struct_get_blob, (setter) struct_set_blob, "lv_style_t tgl_rel", (void*)offsetof(lv_theme_t, style.btn.tgl_rel)},
-    {"tgl_pr", (getter) struct_get_blob, (setter) struct_set_blob, "lv_style_t tgl_pr", (void*)offsetof(lv_theme_t, style.btn.tgl_pr)},
-    {"ina", (getter) struct_get_blob, (setter) struct_set_blob, "lv_style_t ina", (void*)offsetof(lv_theme_t, style.btn.ina)},
-
+    {"rel", (getter) struct_get_struct, (setter) struct_set_struct, "lv_style_t rel", & ((struct_closure_t){ &Blob_Type, (offsetof(lv_theme_t, style.btn.rel)-offsetof(lv_theme_t, style.btn)), sizeof(((lv_theme_t *)0)->style.btn.rel)})},
+    {"pr", (getter) struct_get_struct, (setter) struct_set_struct, "lv_style_t pr", & ((struct_closure_t){ &Blob_Type, (offsetof(lv_theme_t, style.btn.pr)-offsetof(lv_theme_t, style.btn)), sizeof(((lv_theme_t *)0)->style.btn.pr)})},
+    {"tgl_rel", (getter) struct_get_struct, (setter) struct_set_struct, "lv_style_t tgl_rel", & ((struct_closure_t){ &Blob_Type, (offsetof(lv_theme_t, style.btn.tgl_rel)-offsetof(lv_theme_t, style.btn)), sizeof(((lv_theme_t *)0)->style.btn.tgl_rel)})},
+    {"tgl_pr", (getter) struct_get_struct, (setter) struct_set_struct, "lv_style_t tgl_pr", & ((struct_closure_t){ &Blob_Type, (offsetof(lv_theme_t, style.btn.tgl_pr)-offsetof(lv_theme_t, style.btn)), sizeof(((lv_theme_t *)0)->style.btn.tgl_pr)})},
+    {"ina", (getter) struct_get_struct, (setter) struct_set_struct, "lv_style_t ina", & ((struct_closure_t){ &Blob_Type, (offsetof(lv_theme_t, style.btn.ina)-offsetof(lv_theme_t, style.btn)), sizeof(((lv_theme_t *)0)->style.btn.ina)})},
     {NULL}
 };
+
 
 static PyTypeObject pylv_theme_t_style_btn_Type = {
     PyVarObject_HEAD_INIT(NULL, 0)
@@ -3745,20 +5488,21 @@ static PyTypeObject pylv_theme_t_style_btn_Type = {
     .tp_new = NULL, // sub structs cannot be instantiated
     .tp_dealloc = (destructor) Struct_dealloc,
     .tp_getset = pylv_theme_t_style_btn_getset,
-    .tp_repr = (reprfunc) Struct_repr
+    .tp_repr = (reprfunc) Struct_repr,
+    .tp_as_buffer = &Struct_bufferprocs
 };
 
 
 
 static PyGetSetDef pylv_theme_t_style_imgbtn_getset[] = {
-    {"rel", (getter) struct_get_blob, (setter) struct_set_blob, "lv_style_t rel", (void*)offsetof(lv_theme_t, style.imgbtn.rel)},
-    {"pr", (getter) struct_get_blob, (setter) struct_set_blob, "lv_style_t pr", (void*)offsetof(lv_theme_t, style.imgbtn.pr)},
-    {"tgl_rel", (getter) struct_get_blob, (setter) struct_set_blob, "lv_style_t tgl_rel", (void*)offsetof(lv_theme_t, style.imgbtn.tgl_rel)},
-    {"tgl_pr", (getter) struct_get_blob, (setter) struct_set_blob, "lv_style_t tgl_pr", (void*)offsetof(lv_theme_t, style.imgbtn.tgl_pr)},
-    {"ina", (getter) struct_get_blob, (setter) struct_set_blob, "lv_style_t ina", (void*)offsetof(lv_theme_t, style.imgbtn.ina)},
-
+    {"rel", (getter) struct_get_struct, (setter) struct_set_struct, "lv_style_t rel", & ((struct_closure_t){ &Blob_Type, (offsetof(lv_theme_t, style.imgbtn.rel)-offsetof(lv_theme_t, style.imgbtn)), sizeof(((lv_theme_t *)0)->style.imgbtn.rel)})},
+    {"pr", (getter) struct_get_struct, (setter) struct_set_struct, "lv_style_t pr", & ((struct_closure_t){ &Blob_Type, (offsetof(lv_theme_t, style.imgbtn.pr)-offsetof(lv_theme_t, style.imgbtn)), sizeof(((lv_theme_t *)0)->style.imgbtn.pr)})},
+    {"tgl_rel", (getter) struct_get_struct, (setter) struct_set_struct, "lv_style_t tgl_rel", & ((struct_closure_t){ &Blob_Type, (offsetof(lv_theme_t, style.imgbtn.tgl_rel)-offsetof(lv_theme_t, style.imgbtn)), sizeof(((lv_theme_t *)0)->style.imgbtn.tgl_rel)})},
+    {"tgl_pr", (getter) struct_get_struct, (setter) struct_set_struct, "lv_style_t tgl_pr", & ((struct_closure_t){ &Blob_Type, (offsetof(lv_theme_t, style.imgbtn.tgl_pr)-offsetof(lv_theme_t, style.imgbtn)), sizeof(((lv_theme_t *)0)->style.imgbtn.tgl_pr)})},
+    {"ina", (getter) struct_get_struct, (setter) struct_set_struct, "lv_style_t ina", & ((struct_closure_t){ &Blob_Type, (offsetof(lv_theme_t, style.imgbtn.ina)-offsetof(lv_theme_t, style.imgbtn)), sizeof(((lv_theme_t *)0)->style.imgbtn.ina)})},
     {NULL}
 };
+
 
 static PyTypeObject pylv_theme_t_style_imgbtn_Type = {
     PyVarObject_HEAD_INIT(NULL, 0)
@@ -3770,18 +5514,19 @@ static PyTypeObject pylv_theme_t_style_imgbtn_Type = {
     .tp_new = NULL, // sub structs cannot be instantiated
     .tp_dealloc = (destructor) Struct_dealloc,
     .tp_getset = pylv_theme_t_style_imgbtn_getset,
-    .tp_repr = (reprfunc) Struct_repr
+    .tp_repr = (reprfunc) Struct_repr,
+    .tp_as_buffer = &Struct_bufferprocs
 };
 
 
 
 static PyGetSetDef pylv_theme_t_style_label_getset[] = {
-    {"prim", (getter) struct_get_blob, (setter) struct_set_blob, "lv_style_t prim", (void*)offsetof(lv_theme_t, style.label.prim)},
-    {"sec", (getter) struct_get_blob, (setter) struct_set_blob, "lv_style_t sec", (void*)offsetof(lv_theme_t, style.label.sec)},
-    {"hint", (getter) struct_get_blob, (setter) struct_set_blob, "lv_style_t hint", (void*)offsetof(lv_theme_t, style.label.hint)},
-
+    {"prim", (getter) struct_get_struct, (setter) struct_set_struct, "lv_style_t prim", & ((struct_closure_t){ &Blob_Type, (offsetof(lv_theme_t, style.label.prim)-offsetof(lv_theme_t, style.label)), sizeof(((lv_theme_t *)0)->style.label.prim)})},
+    {"sec", (getter) struct_get_struct, (setter) struct_set_struct, "lv_style_t sec", & ((struct_closure_t){ &Blob_Type, (offsetof(lv_theme_t, style.label.sec)-offsetof(lv_theme_t, style.label)), sizeof(((lv_theme_t *)0)->style.label.sec)})},
+    {"hint", (getter) struct_get_struct, (setter) struct_set_struct, "lv_style_t hint", & ((struct_closure_t){ &Blob_Type, (offsetof(lv_theme_t, style.label.hint)-offsetof(lv_theme_t, style.label)), sizeof(((lv_theme_t *)0)->style.label.hint)})},
     {NULL}
 };
+
 
 static PyTypeObject pylv_theme_t_style_label_Type = {
     PyVarObject_HEAD_INIT(NULL, 0)
@@ -3793,17 +5538,18 @@ static PyTypeObject pylv_theme_t_style_label_Type = {
     .tp_new = NULL, // sub structs cannot be instantiated
     .tp_dealloc = (destructor) Struct_dealloc,
     .tp_getset = pylv_theme_t_style_label_getset,
-    .tp_repr = (reprfunc) Struct_repr
+    .tp_repr = (reprfunc) Struct_repr,
+    .tp_as_buffer = &Struct_bufferprocs
 };
 
 
 
 static PyGetSetDef pylv_theme_t_style_img_getset[] = {
-    {"light", (getter) struct_get_blob, (setter) struct_set_blob, "lv_style_t light", (void*)offsetof(lv_theme_t, style.img.light)},
-    {"dark", (getter) struct_get_blob, (setter) struct_set_blob, "lv_style_t dark", (void*)offsetof(lv_theme_t, style.img.dark)},
-
+    {"light", (getter) struct_get_struct, (setter) struct_set_struct, "lv_style_t light", & ((struct_closure_t){ &Blob_Type, (offsetof(lv_theme_t, style.img.light)-offsetof(lv_theme_t, style.img)), sizeof(((lv_theme_t *)0)->style.img.light)})},
+    {"dark", (getter) struct_get_struct, (setter) struct_set_struct, "lv_style_t dark", & ((struct_closure_t){ &Blob_Type, (offsetof(lv_theme_t, style.img.dark)-offsetof(lv_theme_t, style.img)), sizeof(((lv_theme_t *)0)->style.img.dark)})},
     {NULL}
 };
+
 
 static PyTypeObject pylv_theme_t_style_img_Type = {
     PyVarObject_HEAD_INIT(NULL, 0)
@@ -3815,16 +5561,17 @@ static PyTypeObject pylv_theme_t_style_img_Type = {
     .tp_new = NULL, // sub structs cannot be instantiated
     .tp_dealloc = (destructor) Struct_dealloc,
     .tp_getset = pylv_theme_t_style_img_getset,
-    .tp_repr = (reprfunc) Struct_repr
+    .tp_repr = (reprfunc) Struct_repr,
+    .tp_as_buffer = &Struct_bufferprocs
 };
 
 
 
 static PyGetSetDef pylv_theme_t_style_line_getset[] = {
-    {"decor", (getter) struct_get_blob, (setter) struct_set_blob, "lv_style_t decor", (void*)offsetof(lv_theme_t, style.line.decor)},
-
+    {"decor", (getter) struct_get_struct, (setter) struct_set_struct, "lv_style_t decor", & ((struct_closure_t){ &Blob_Type, (offsetof(lv_theme_t, style.line.decor)-offsetof(lv_theme_t, style.line)), sizeof(((lv_theme_t *)0)->style.line.decor)})},
     {NULL}
 };
+
 
 static PyTypeObject pylv_theme_t_style_line_Type = {
     PyVarObject_HEAD_INIT(NULL, 0)
@@ -3836,17 +5583,18 @@ static PyTypeObject pylv_theme_t_style_line_Type = {
     .tp_new = NULL, // sub structs cannot be instantiated
     .tp_dealloc = (destructor) Struct_dealloc,
     .tp_getset = pylv_theme_t_style_line_getset,
-    .tp_repr = (reprfunc) Struct_repr
+    .tp_repr = (reprfunc) Struct_repr,
+    .tp_as_buffer = &Struct_bufferprocs
 };
 
 
 
 static PyGetSetDef pylv_theme_t_style_bar_getset[] = {
-    {"bg", (getter) struct_get_blob, (setter) struct_set_blob, "lv_style_t bg", (void*)offsetof(lv_theme_t, style.bar.bg)},
-    {"indic", (getter) struct_get_blob, (setter) struct_set_blob, "lv_style_t indic", (void*)offsetof(lv_theme_t, style.bar.indic)},
-
+    {"bg", (getter) struct_get_struct, (setter) struct_set_struct, "lv_style_t bg", & ((struct_closure_t){ &Blob_Type, (offsetof(lv_theme_t, style.bar.bg)-offsetof(lv_theme_t, style.bar)), sizeof(((lv_theme_t *)0)->style.bar.bg)})},
+    {"indic", (getter) struct_get_struct, (setter) struct_set_struct, "lv_style_t indic", & ((struct_closure_t){ &Blob_Type, (offsetof(lv_theme_t, style.bar.indic)-offsetof(lv_theme_t, style.bar)), sizeof(((lv_theme_t *)0)->style.bar.indic)})},
     {NULL}
 };
+
 
 static PyTypeObject pylv_theme_t_style_bar_Type = {
     PyVarObject_HEAD_INIT(NULL, 0)
@@ -3858,18 +5606,19 @@ static PyTypeObject pylv_theme_t_style_bar_Type = {
     .tp_new = NULL, // sub structs cannot be instantiated
     .tp_dealloc = (destructor) Struct_dealloc,
     .tp_getset = pylv_theme_t_style_bar_getset,
-    .tp_repr = (reprfunc) Struct_repr
+    .tp_repr = (reprfunc) Struct_repr,
+    .tp_as_buffer = &Struct_bufferprocs
 };
 
 
 
 static PyGetSetDef pylv_theme_t_style_slider_getset[] = {
-    {"bg", (getter) struct_get_blob, (setter) struct_set_blob, "lv_style_t bg", (void*)offsetof(lv_theme_t, style.slider.bg)},
-    {"indic", (getter) struct_get_blob, (setter) struct_set_blob, "lv_style_t indic", (void*)offsetof(lv_theme_t, style.slider.indic)},
-    {"knob", (getter) struct_get_blob, (setter) struct_set_blob, "lv_style_t knob", (void*)offsetof(lv_theme_t, style.slider.knob)},
-
+    {"bg", (getter) struct_get_struct, (setter) struct_set_struct, "lv_style_t bg", & ((struct_closure_t){ &Blob_Type, (offsetof(lv_theme_t, style.slider.bg)-offsetof(lv_theme_t, style.slider)), sizeof(((lv_theme_t *)0)->style.slider.bg)})},
+    {"indic", (getter) struct_get_struct, (setter) struct_set_struct, "lv_style_t indic", & ((struct_closure_t){ &Blob_Type, (offsetof(lv_theme_t, style.slider.indic)-offsetof(lv_theme_t, style.slider)), sizeof(((lv_theme_t *)0)->style.slider.indic)})},
+    {"knob", (getter) struct_get_struct, (setter) struct_set_struct, "lv_style_t knob", & ((struct_closure_t){ &Blob_Type, (offsetof(lv_theme_t, style.slider.knob)-offsetof(lv_theme_t, style.slider)), sizeof(((lv_theme_t *)0)->style.slider.knob)})},
     {NULL}
 };
+
 
 static PyTypeObject pylv_theme_t_style_slider_Type = {
     PyVarObject_HEAD_INIT(NULL, 0)
@@ -3881,19 +5630,20 @@ static PyTypeObject pylv_theme_t_style_slider_Type = {
     .tp_new = NULL, // sub structs cannot be instantiated
     .tp_dealloc = (destructor) Struct_dealloc,
     .tp_getset = pylv_theme_t_style_slider_getset,
-    .tp_repr = (reprfunc) Struct_repr
+    .tp_repr = (reprfunc) Struct_repr,
+    .tp_as_buffer = &Struct_bufferprocs
 };
 
 
 
 static PyGetSetDef pylv_theme_t_style_sw_getset[] = {
-    {"bg", (getter) struct_get_blob, (setter) struct_set_blob, "lv_style_t bg", (void*)offsetof(lv_theme_t, style.sw.bg)},
-    {"indic", (getter) struct_get_blob, (setter) struct_set_blob, "lv_style_t indic", (void*)offsetof(lv_theme_t, style.sw.indic)},
-    {"knob_off", (getter) struct_get_blob, (setter) struct_set_blob, "lv_style_t knob_off", (void*)offsetof(lv_theme_t, style.sw.knob_off)},
-    {"knob_on", (getter) struct_get_blob, (setter) struct_set_blob, "lv_style_t knob_on", (void*)offsetof(lv_theme_t, style.sw.knob_on)},
-
+    {"bg", (getter) struct_get_struct, (setter) struct_set_struct, "lv_style_t bg", & ((struct_closure_t){ &Blob_Type, (offsetof(lv_theme_t, style.sw.bg)-offsetof(lv_theme_t, style.sw)), sizeof(((lv_theme_t *)0)->style.sw.bg)})},
+    {"indic", (getter) struct_get_struct, (setter) struct_set_struct, "lv_style_t indic", & ((struct_closure_t){ &Blob_Type, (offsetof(lv_theme_t, style.sw.indic)-offsetof(lv_theme_t, style.sw)), sizeof(((lv_theme_t *)0)->style.sw.indic)})},
+    {"knob_off", (getter) struct_get_struct, (setter) struct_set_struct, "lv_style_t knob_off", & ((struct_closure_t){ &Blob_Type, (offsetof(lv_theme_t, style.sw.knob_off)-offsetof(lv_theme_t, style.sw)), sizeof(((lv_theme_t *)0)->style.sw.knob_off)})},
+    {"knob_on", (getter) struct_get_struct, (setter) struct_set_struct, "lv_style_t knob_on", & ((struct_closure_t){ &Blob_Type, (offsetof(lv_theme_t, style.sw.knob_on)-offsetof(lv_theme_t, style.sw)), sizeof(((lv_theme_t *)0)->style.sw.knob_on)})},
     {NULL}
 };
+
 
 static PyTypeObject pylv_theme_t_style_sw_Type = {
     PyVarObject_HEAD_INIT(NULL, 0)
@@ -3905,17 +5655,18 @@ static PyTypeObject pylv_theme_t_style_sw_Type = {
     .tp_new = NULL, // sub structs cannot be instantiated
     .tp_dealloc = (destructor) Struct_dealloc,
     .tp_getset = pylv_theme_t_style_sw_getset,
-    .tp_repr = (reprfunc) Struct_repr
+    .tp_repr = (reprfunc) Struct_repr,
+    .tp_as_buffer = &Struct_bufferprocs
 };
 
 
 
 static PyGetSetDef pylv_theme_t_style_cb_getset[] = {
-    {"bg", (getter) struct_get_blob, (setter) struct_set_blob, "lv_style_t bg", (void*)offsetof(lv_theme_t, style.cb.bg)},
-    {"box", (getter) struct_get_struct, (setter) struct_set_struct, "struct  {   lv_style_t *rel;   lv_style_t *pr;   lv_style_t *tgl_rel;   lv_style_t *tgl_pr;   lv_style_t *ina; } box", & ((struct_closure_t){ &pylv_theme_t_style_cb_box_Type, offsetof(lv_theme_t, style.cb.box), sizeof(((lv_theme_t *)0)->style.cb.box)})},
-
+    {"bg", (getter) struct_get_struct, (setter) struct_set_struct, "lv_style_t bg", & ((struct_closure_t){ &Blob_Type, (offsetof(lv_theme_t, style.cb.bg)-offsetof(lv_theme_t, style.cb)), sizeof(((lv_theme_t *)0)->style.cb.bg)})},
+    {"box", (getter) struct_get_struct, (setter) struct_set_struct, "struct  {   lv_style_t *rel;   lv_style_t *pr;   lv_style_t *tgl_rel;   lv_style_t *tgl_pr;   lv_style_t *ina; } box", & ((struct_closure_t){ &pylv_theme_t_style_cb_box_Type, (offsetof(lv_theme_t, style.cb.box)-offsetof(lv_theme_t, style.cb)), sizeof(((lv_theme_t *)0)->style.cb.box)})},
     {NULL}
 };
+
 
 static PyTypeObject pylv_theme_t_style_cb_Type = {
     PyVarObject_HEAD_INIT(NULL, 0)
@@ -3927,20 +5678,21 @@ static PyTypeObject pylv_theme_t_style_cb_Type = {
     .tp_new = NULL, // sub structs cannot be instantiated
     .tp_dealloc = (destructor) Struct_dealloc,
     .tp_getset = pylv_theme_t_style_cb_getset,
-    .tp_repr = (reprfunc) Struct_repr
+    .tp_repr = (reprfunc) Struct_repr,
+    .tp_as_buffer = &Struct_bufferprocs
 };
 
 
 
 static PyGetSetDef pylv_theme_t_style_cb_box_getset[] = {
-    {"rel", (getter) struct_get_blob, (setter) struct_set_blob, "lv_style_t rel", (void*)offsetof(lv_theme_t, style.cb.box.rel)},
-    {"pr", (getter) struct_get_blob, (setter) struct_set_blob, "lv_style_t pr", (void*)offsetof(lv_theme_t, style.cb.box.pr)},
-    {"tgl_rel", (getter) struct_get_blob, (setter) struct_set_blob, "lv_style_t tgl_rel", (void*)offsetof(lv_theme_t, style.cb.box.tgl_rel)},
-    {"tgl_pr", (getter) struct_get_blob, (setter) struct_set_blob, "lv_style_t tgl_pr", (void*)offsetof(lv_theme_t, style.cb.box.tgl_pr)},
-    {"ina", (getter) struct_get_blob, (setter) struct_set_blob, "lv_style_t ina", (void*)offsetof(lv_theme_t, style.cb.box.ina)},
-
+    {"rel", (getter) struct_get_struct, (setter) struct_set_struct, "lv_style_t rel", & ((struct_closure_t){ &Blob_Type, (offsetof(lv_theme_t, style.cb.box.rel)-offsetof(lv_theme_t, style.cb.box)), sizeof(((lv_theme_t *)0)->style.cb.box.rel)})},
+    {"pr", (getter) struct_get_struct, (setter) struct_set_struct, "lv_style_t pr", & ((struct_closure_t){ &Blob_Type, (offsetof(lv_theme_t, style.cb.box.pr)-offsetof(lv_theme_t, style.cb.box)), sizeof(((lv_theme_t *)0)->style.cb.box.pr)})},
+    {"tgl_rel", (getter) struct_get_struct, (setter) struct_set_struct, "lv_style_t tgl_rel", & ((struct_closure_t){ &Blob_Type, (offsetof(lv_theme_t, style.cb.box.tgl_rel)-offsetof(lv_theme_t, style.cb.box)), sizeof(((lv_theme_t *)0)->style.cb.box.tgl_rel)})},
+    {"tgl_pr", (getter) struct_get_struct, (setter) struct_set_struct, "lv_style_t tgl_pr", & ((struct_closure_t){ &Blob_Type, (offsetof(lv_theme_t, style.cb.box.tgl_pr)-offsetof(lv_theme_t, style.cb.box)), sizeof(((lv_theme_t *)0)->style.cb.box.tgl_pr)})},
+    {"ina", (getter) struct_get_struct, (setter) struct_set_struct, "lv_style_t ina", & ((struct_closure_t){ &Blob_Type, (offsetof(lv_theme_t, style.cb.box.ina)-offsetof(lv_theme_t, style.cb.box)), sizeof(((lv_theme_t *)0)->style.cb.box.ina)})},
     {NULL}
 };
+
 
 static PyTypeObject pylv_theme_t_style_cb_box_Type = {
     PyVarObject_HEAD_INIT(NULL, 0)
@@ -3952,17 +5704,18 @@ static PyTypeObject pylv_theme_t_style_cb_box_Type = {
     .tp_new = NULL, // sub structs cannot be instantiated
     .tp_dealloc = (destructor) Struct_dealloc,
     .tp_getset = pylv_theme_t_style_cb_box_getset,
-    .tp_repr = (reprfunc) Struct_repr
+    .tp_repr = (reprfunc) Struct_repr,
+    .tp_as_buffer = &Struct_bufferprocs
 };
 
 
 
 static PyGetSetDef pylv_theme_t_style_btnm_getset[] = {
-    {"bg", (getter) struct_get_blob, (setter) struct_set_blob, "lv_style_t bg", (void*)offsetof(lv_theme_t, style.btnm.bg)},
-    {"btn", (getter) struct_get_struct, (setter) struct_set_struct, "struct  {   lv_style_t *rel;   lv_style_t *pr;   lv_style_t *tgl_rel;   lv_style_t *tgl_pr;   lv_style_t *ina; } btn", & ((struct_closure_t){ &pylv_theme_t_style_btnm_btn_Type, offsetof(lv_theme_t, style.btnm.btn), sizeof(((lv_theme_t *)0)->style.btnm.btn)})},
-
+    {"bg", (getter) struct_get_struct, (setter) struct_set_struct, "lv_style_t bg", & ((struct_closure_t){ &Blob_Type, (offsetof(lv_theme_t, style.btnm.bg)-offsetof(lv_theme_t, style.btnm)), sizeof(((lv_theme_t *)0)->style.btnm.bg)})},
+    {"btn", (getter) struct_get_struct, (setter) struct_set_struct, "struct  {   lv_style_t *rel;   lv_style_t *pr;   lv_style_t *tgl_rel;   lv_style_t *tgl_pr;   lv_style_t *ina; } btn", & ((struct_closure_t){ &pylv_theme_t_style_btnm_btn_Type, (offsetof(lv_theme_t, style.btnm.btn)-offsetof(lv_theme_t, style.btnm)), sizeof(((lv_theme_t *)0)->style.btnm.btn)})},
     {NULL}
 };
+
 
 static PyTypeObject pylv_theme_t_style_btnm_Type = {
     PyVarObject_HEAD_INIT(NULL, 0)
@@ -3974,20 +5727,21 @@ static PyTypeObject pylv_theme_t_style_btnm_Type = {
     .tp_new = NULL, // sub structs cannot be instantiated
     .tp_dealloc = (destructor) Struct_dealloc,
     .tp_getset = pylv_theme_t_style_btnm_getset,
-    .tp_repr = (reprfunc) Struct_repr
+    .tp_repr = (reprfunc) Struct_repr,
+    .tp_as_buffer = &Struct_bufferprocs
 };
 
 
 
 static PyGetSetDef pylv_theme_t_style_btnm_btn_getset[] = {
-    {"rel", (getter) struct_get_blob, (setter) struct_set_blob, "lv_style_t rel", (void*)offsetof(lv_theme_t, style.btnm.btn.rel)},
-    {"pr", (getter) struct_get_blob, (setter) struct_set_blob, "lv_style_t pr", (void*)offsetof(lv_theme_t, style.btnm.btn.pr)},
-    {"tgl_rel", (getter) struct_get_blob, (setter) struct_set_blob, "lv_style_t tgl_rel", (void*)offsetof(lv_theme_t, style.btnm.btn.tgl_rel)},
-    {"tgl_pr", (getter) struct_get_blob, (setter) struct_set_blob, "lv_style_t tgl_pr", (void*)offsetof(lv_theme_t, style.btnm.btn.tgl_pr)},
-    {"ina", (getter) struct_get_blob, (setter) struct_set_blob, "lv_style_t ina", (void*)offsetof(lv_theme_t, style.btnm.btn.ina)},
-
+    {"rel", (getter) struct_get_struct, (setter) struct_set_struct, "lv_style_t rel", & ((struct_closure_t){ &Blob_Type, (offsetof(lv_theme_t, style.btnm.btn.rel)-offsetof(lv_theme_t, style.btnm.btn)), sizeof(((lv_theme_t *)0)->style.btnm.btn.rel)})},
+    {"pr", (getter) struct_get_struct, (setter) struct_set_struct, "lv_style_t pr", & ((struct_closure_t){ &Blob_Type, (offsetof(lv_theme_t, style.btnm.btn.pr)-offsetof(lv_theme_t, style.btnm.btn)), sizeof(((lv_theme_t *)0)->style.btnm.btn.pr)})},
+    {"tgl_rel", (getter) struct_get_struct, (setter) struct_set_struct, "lv_style_t tgl_rel", & ((struct_closure_t){ &Blob_Type, (offsetof(lv_theme_t, style.btnm.btn.tgl_rel)-offsetof(lv_theme_t, style.btnm.btn)), sizeof(((lv_theme_t *)0)->style.btnm.btn.tgl_rel)})},
+    {"tgl_pr", (getter) struct_get_struct, (setter) struct_set_struct, "lv_style_t tgl_pr", & ((struct_closure_t){ &Blob_Type, (offsetof(lv_theme_t, style.btnm.btn.tgl_pr)-offsetof(lv_theme_t, style.btnm.btn)), sizeof(((lv_theme_t *)0)->style.btnm.btn.tgl_pr)})},
+    {"ina", (getter) struct_get_struct, (setter) struct_set_struct, "lv_style_t ina", & ((struct_closure_t){ &Blob_Type, (offsetof(lv_theme_t, style.btnm.btn.ina)-offsetof(lv_theme_t, style.btnm.btn)), sizeof(((lv_theme_t *)0)->style.btnm.btn.ina)})},
     {NULL}
 };
+
 
 static PyTypeObject pylv_theme_t_style_btnm_btn_Type = {
     PyVarObject_HEAD_INIT(NULL, 0)
@@ -3999,17 +5753,18 @@ static PyTypeObject pylv_theme_t_style_btnm_btn_Type = {
     .tp_new = NULL, // sub structs cannot be instantiated
     .tp_dealloc = (destructor) Struct_dealloc,
     .tp_getset = pylv_theme_t_style_btnm_btn_getset,
-    .tp_repr = (reprfunc) Struct_repr
+    .tp_repr = (reprfunc) Struct_repr,
+    .tp_as_buffer = &Struct_bufferprocs
 };
 
 
 
 static PyGetSetDef pylv_theme_t_style_kb_getset[] = {
-    {"bg", (getter) struct_get_blob, (setter) struct_set_blob, "lv_style_t bg", (void*)offsetof(lv_theme_t, style.kb.bg)},
-    {"btn", (getter) struct_get_struct, (setter) struct_set_struct, "struct  {   lv_style_t *rel;   lv_style_t *pr;   lv_style_t *tgl_rel;   lv_style_t *tgl_pr;   lv_style_t *ina; } btn", & ((struct_closure_t){ &pylv_theme_t_style_kb_btn_Type, offsetof(lv_theme_t, style.kb.btn), sizeof(((lv_theme_t *)0)->style.kb.btn)})},
-
+    {"bg", (getter) struct_get_struct, (setter) struct_set_struct, "lv_style_t bg", & ((struct_closure_t){ &Blob_Type, (offsetof(lv_theme_t, style.kb.bg)-offsetof(lv_theme_t, style.kb)), sizeof(((lv_theme_t *)0)->style.kb.bg)})},
+    {"btn", (getter) struct_get_struct, (setter) struct_set_struct, "struct  {   lv_style_t *rel;   lv_style_t *pr;   lv_style_t *tgl_rel;   lv_style_t *tgl_pr;   lv_style_t *ina; } btn", & ((struct_closure_t){ &pylv_theme_t_style_kb_btn_Type, (offsetof(lv_theme_t, style.kb.btn)-offsetof(lv_theme_t, style.kb)), sizeof(((lv_theme_t *)0)->style.kb.btn)})},
     {NULL}
 };
+
 
 static PyTypeObject pylv_theme_t_style_kb_Type = {
     PyVarObject_HEAD_INIT(NULL, 0)
@@ -4021,20 +5776,21 @@ static PyTypeObject pylv_theme_t_style_kb_Type = {
     .tp_new = NULL, // sub structs cannot be instantiated
     .tp_dealloc = (destructor) Struct_dealloc,
     .tp_getset = pylv_theme_t_style_kb_getset,
-    .tp_repr = (reprfunc) Struct_repr
+    .tp_repr = (reprfunc) Struct_repr,
+    .tp_as_buffer = &Struct_bufferprocs
 };
 
 
 
 static PyGetSetDef pylv_theme_t_style_kb_btn_getset[] = {
-    {"rel", (getter) struct_get_blob, (setter) struct_set_blob, "lv_style_t rel", (void*)offsetof(lv_theme_t, style.kb.btn.rel)},
-    {"pr", (getter) struct_get_blob, (setter) struct_set_blob, "lv_style_t pr", (void*)offsetof(lv_theme_t, style.kb.btn.pr)},
-    {"tgl_rel", (getter) struct_get_blob, (setter) struct_set_blob, "lv_style_t tgl_rel", (void*)offsetof(lv_theme_t, style.kb.btn.tgl_rel)},
-    {"tgl_pr", (getter) struct_get_blob, (setter) struct_set_blob, "lv_style_t tgl_pr", (void*)offsetof(lv_theme_t, style.kb.btn.tgl_pr)},
-    {"ina", (getter) struct_get_blob, (setter) struct_set_blob, "lv_style_t ina", (void*)offsetof(lv_theme_t, style.kb.btn.ina)},
-
+    {"rel", (getter) struct_get_struct, (setter) struct_set_struct, "lv_style_t rel", & ((struct_closure_t){ &Blob_Type, (offsetof(lv_theme_t, style.kb.btn.rel)-offsetof(lv_theme_t, style.kb.btn)), sizeof(((lv_theme_t *)0)->style.kb.btn.rel)})},
+    {"pr", (getter) struct_get_struct, (setter) struct_set_struct, "lv_style_t pr", & ((struct_closure_t){ &Blob_Type, (offsetof(lv_theme_t, style.kb.btn.pr)-offsetof(lv_theme_t, style.kb.btn)), sizeof(((lv_theme_t *)0)->style.kb.btn.pr)})},
+    {"tgl_rel", (getter) struct_get_struct, (setter) struct_set_struct, "lv_style_t tgl_rel", & ((struct_closure_t){ &Blob_Type, (offsetof(lv_theme_t, style.kb.btn.tgl_rel)-offsetof(lv_theme_t, style.kb.btn)), sizeof(((lv_theme_t *)0)->style.kb.btn.tgl_rel)})},
+    {"tgl_pr", (getter) struct_get_struct, (setter) struct_set_struct, "lv_style_t tgl_pr", & ((struct_closure_t){ &Blob_Type, (offsetof(lv_theme_t, style.kb.btn.tgl_pr)-offsetof(lv_theme_t, style.kb.btn)), sizeof(((lv_theme_t *)0)->style.kb.btn.tgl_pr)})},
+    {"ina", (getter) struct_get_struct, (setter) struct_set_struct, "lv_style_t ina", & ((struct_closure_t){ &Blob_Type, (offsetof(lv_theme_t, style.kb.btn.ina)-offsetof(lv_theme_t, style.kb.btn)), sizeof(((lv_theme_t *)0)->style.kb.btn.ina)})},
     {NULL}
 };
+
 
 static PyTypeObject pylv_theme_t_style_kb_btn_Type = {
     PyVarObject_HEAD_INIT(NULL, 0)
@@ -4046,17 +5802,18 @@ static PyTypeObject pylv_theme_t_style_kb_btn_Type = {
     .tp_new = NULL, // sub structs cannot be instantiated
     .tp_dealloc = (destructor) Struct_dealloc,
     .tp_getset = pylv_theme_t_style_kb_btn_getset,
-    .tp_repr = (reprfunc) Struct_repr
+    .tp_repr = (reprfunc) Struct_repr,
+    .tp_as_buffer = &Struct_bufferprocs
 };
 
 
 
 static PyGetSetDef pylv_theme_t_style_mbox_getset[] = {
-    {"bg", (getter) struct_get_blob, (setter) struct_set_blob, "lv_style_t bg", (void*)offsetof(lv_theme_t, style.mbox.bg)},
-    {"btn", (getter) struct_get_struct, (setter) struct_set_struct, "struct  {   lv_style_t *bg;   lv_style_t *rel;   lv_style_t *pr; } btn", & ((struct_closure_t){ &pylv_theme_t_style_mbox_btn_Type, offsetof(lv_theme_t, style.mbox.btn), sizeof(((lv_theme_t *)0)->style.mbox.btn)})},
-
+    {"bg", (getter) struct_get_struct, (setter) struct_set_struct, "lv_style_t bg", & ((struct_closure_t){ &Blob_Type, (offsetof(lv_theme_t, style.mbox.bg)-offsetof(lv_theme_t, style.mbox)), sizeof(((lv_theme_t *)0)->style.mbox.bg)})},
+    {"btn", (getter) struct_get_struct, (setter) struct_set_struct, "struct  {   lv_style_t *bg;   lv_style_t *rel;   lv_style_t *pr; } btn", & ((struct_closure_t){ &pylv_theme_t_style_mbox_btn_Type, (offsetof(lv_theme_t, style.mbox.btn)-offsetof(lv_theme_t, style.mbox)), sizeof(((lv_theme_t *)0)->style.mbox.btn)})},
     {NULL}
 };
+
 
 static PyTypeObject pylv_theme_t_style_mbox_Type = {
     PyVarObject_HEAD_INIT(NULL, 0)
@@ -4068,18 +5825,19 @@ static PyTypeObject pylv_theme_t_style_mbox_Type = {
     .tp_new = NULL, // sub structs cannot be instantiated
     .tp_dealloc = (destructor) Struct_dealloc,
     .tp_getset = pylv_theme_t_style_mbox_getset,
-    .tp_repr = (reprfunc) Struct_repr
+    .tp_repr = (reprfunc) Struct_repr,
+    .tp_as_buffer = &Struct_bufferprocs
 };
 
 
 
 static PyGetSetDef pylv_theme_t_style_mbox_btn_getset[] = {
-    {"bg", (getter) struct_get_blob, (setter) struct_set_blob, "lv_style_t bg", (void*)offsetof(lv_theme_t, style.mbox.btn.bg)},
-    {"rel", (getter) struct_get_blob, (setter) struct_set_blob, "lv_style_t rel", (void*)offsetof(lv_theme_t, style.mbox.btn.rel)},
-    {"pr", (getter) struct_get_blob, (setter) struct_set_blob, "lv_style_t pr", (void*)offsetof(lv_theme_t, style.mbox.btn.pr)},
-
+    {"bg", (getter) struct_get_struct, (setter) struct_set_struct, "lv_style_t bg", & ((struct_closure_t){ &Blob_Type, (offsetof(lv_theme_t, style.mbox.btn.bg)-offsetof(lv_theme_t, style.mbox.btn)), sizeof(((lv_theme_t *)0)->style.mbox.btn.bg)})},
+    {"rel", (getter) struct_get_struct, (setter) struct_set_struct, "lv_style_t rel", & ((struct_closure_t){ &Blob_Type, (offsetof(lv_theme_t, style.mbox.btn.rel)-offsetof(lv_theme_t, style.mbox.btn)), sizeof(((lv_theme_t *)0)->style.mbox.btn.rel)})},
+    {"pr", (getter) struct_get_struct, (setter) struct_set_struct, "lv_style_t pr", & ((struct_closure_t){ &Blob_Type, (offsetof(lv_theme_t, style.mbox.btn.pr)-offsetof(lv_theme_t, style.mbox.btn)), sizeof(((lv_theme_t *)0)->style.mbox.btn.pr)})},
     {NULL}
 };
+
 
 static PyTypeObject pylv_theme_t_style_mbox_btn_Type = {
     PyVarObject_HEAD_INIT(NULL, 0)
@@ -4091,18 +5849,19 @@ static PyTypeObject pylv_theme_t_style_mbox_btn_Type = {
     .tp_new = NULL, // sub structs cannot be instantiated
     .tp_dealloc = (destructor) Struct_dealloc,
     .tp_getset = pylv_theme_t_style_mbox_btn_getset,
-    .tp_repr = (reprfunc) Struct_repr
+    .tp_repr = (reprfunc) Struct_repr,
+    .tp_as_buffer = &Struct_bufferprocs
 };
 
 
 
 static PyGetSetDef pylv_theme_t_style_page_getset[] = {
-    {"bg", (getter) struct_get_blob, (setter) struct_set_blob, "lv_style_t bg", (void*)offsetof(lv_theme_t, style.page.bg)},
-    {"scrl", (getter) struct_get_blob, (setter) struct_set_blob, "lv_style_t scrl", (void*)offsetof(lv_theme_t, style.page.scrl)},
-    {"sb", (getter) struct_get_blob, (setter) struct_set_blob, "lv_style_t sb", (void*)offsetof(lv_theme_t, style.page.sb)},
-
+    {"bg", (getter) struct_get_struct, (setter) struct_set_struct, "lv_style_t bg", & ((struct_closure_t){ &Blob_Type, (offsetof(lv_theme_t, style.page.bg)-offsetof(lv_theme_t, style.page)), sizeof(((lv_theme_t *)0)->style.page.bg)})},
+    {"scrl", (getter) struct_get_struct, (setter) struct_set_struct, "lv_style_t scrl", & ((struct_closure_t){ &Blob_Type, (offsetof(lv_theme_t, style.page.scrl)-offsetof(lv_theme_t, style.page)), sizeof(((lv_theme_t *)0)->style.page.scrl)})},
+    {"sb", (getter) struct_get_struct, (setter) struct_set_struct, "lv_style_t sb", & ((struct_closure_t){ &Blob_Type, (offsetof(lv_theme_t, style.page.sb)-offsetof(lv_theme_t, style.page)), sizeof(((lv_theme_t *)0)->style.page.sb)})},
     {NULL}
 };
+
 
 static PyTypeObject pylv_theme_t_style_page_Type = {
     PyVarObject_HEAD_INIT(NULL, 0)
@@ -4114,19 +5873,20 @@ static PyTypeObject pylv_theme_t_style_page_Type = {
     .tp_new = NULL, // sub structs cannot be instantiated
     .tp_dealloc = (destructor) Struct_dealloc,
     .tp_getset = pylv_theme_t_style_page_getset,
-    .tp_repr = (reprfunc) Struct_repr
+    .tp_repr = (reprfunc) Struct_repr,
+    .tp_as_buffer = &Struct_bufferprocs
 };
 
 
 
 static PyGetSetDef pylv_theme_t_style_ta_getset[] = {
-    {"area", (getter) struct_get_blob, (setter) struct_set_blob, "lv_style_t area", (void*)offsetof(lv_theme_t, style.ta.area)},
-    {"oneline", (getter) struct_get_blob, (setter) struct_set_blob, "lv_style_t oneline", (void*)offsetof(lv_theme_t, style.ta.oneline)},
-    {"cursor", (getter) struct_get_blob, (setter) struct_set_blob, "lv_style_t cursor", (void*)offsetof(lv_theme_t, style.ta.cursor)},
-    {"sb", (getter) struct_get_blob, (setter) struct_set_blob, "lv_style_t sb", (void*)offsetof(lv_theme_t, style.ta.sb)},
-
+    {"area", (getter) struct_get_struct, (setter) struct_set_struct, "lv_style_t area", & ((struct_closure_t){ &Blob_Type, (offsetof(lv_theme_t, style.ta.area)-offsetof(lv_theme_t, style.ta)), sizeof(((lv_theme_t *)0)->style.ta.area)})},
+    {"oneline", (getter) struct_get_struct, (setter) struct_set_struct, "lv_style_t oneline", & ((struct_closure_t){ &Blob_Type, (offsetof(lv_theme_t, style.ta.oneline)-offsetof(lv_theme_t, style.ta)), sizeof(((lv_theme_t *)0)->style.ta.oneline)})},
+    {"cursor", (getter) struct_get_struct, (setter) struct_set_struct, "lv_style_t cursor", & ((struct_closure_t){ &Blob_Type, (offsetof(lv_theme_t, style.ta.cursor)-offsetof(lv_theme_t, style.ta)), sizeof(((lv_theme_t *)0)->style.ta.cursor)})},
+    {"sb", (getter) struct_get_struct, (setter) struct_set_struct, "lv_style_t sb", & ((struct_closure_t){ &Blob_Type, (offsetof(lv_theme_t, style.ta.sb)-offsetof(lv_theme_t, style.ta)), sizeof(((lv_theme_t *)0)->style.ta.sb)})},
     {NULL}
 };
+
 
 static PyTypeObject pylv_theme_t_style_ta_Type = {
     PyVarObject_HEAD_INIT(NULL, 0)
@@ -4138,18 +5898,19 @@ static PyTypeObject pylv_theme_t_style_ta_Type = {
     .tp_new = NULL, // sub structs cannot be instantiated
     .tp_dealloc = (destructor) Struct_dealloc,
     .tp_getset = pylv_theme_t_style_ta_getset,
-    .tp_repr = (reprfunc) Struct_repr
+    .tp_repr = (reprfunc) Struct_repr,
+    .tp_as_buffer = &Struct_bufferprocs
 };
 
 
 
 static PyGetSetDef pylv_theme_t_style_spinbox_getset[] = {
-    {"bg", (getter) struct_get_blob, (setter) struct_set_blob, "lv_style_t bg", (void*)offsetof(lv_theme_t, style.spinbox.bg)},
-    {"cursor", (getter) struct_get_blob, (setter) struct_set_blob, "lv_style_t cursor", (void*)offsetof(lv_theme_t, style.spinbox.cursor)},
-    {"sb", (getter) struct_get_blob, (setter) struct_set_blob, "lv_style_t sb", (void*)offsetof(lv_theme_t, style.spinbox.sb)},
-
+    {"bg", (getter) struct_get_struct, (setter) struct_set_struct, "lv_style_t bg", & ((struct_closure_t){ &Blob_Type, (offsetof(lv_theme_t, style.spinbox.bg)-offsetof(lv_theme_t, style.spinbox)), sizeof(((lv_theme_t *)0)->style.spinbox.bg)})},
+    {"cursor", (getter) struct_get_struct, (setter) struct_set_struct, "lv_style_t cursor", & ((struct_closure_t){ &Blob_Type, (offsetof(lv_theme_t, style.spinbox.cursor)-offsetof(lv_theme_t, style.spinbox)), sizeof(((lv_theme_t *)0)->style.spinbox.cursor)})},
+    {"sb", (getter) struct_get_struct, (setter) struct_set_struct, "lv_style_t sb", & ((struct_closure_t){ &Blob_Type, (offsetof(lv_theme_t, style.spinbox.sb)-offsetof(lv_theme_t, style.spinbox)), sizeof(((lv_theme_t *)0)->style.spinbox.sb)})},
     {NULL}
 };
+
 
 static PyTypeObject pylv_theme_t_style_spinbox_Type = {
     PyVarObject_HEAD_INIT(NULL, 0)
@@ -4161,19 +5922,20 @@ static PyTypeObject pylv_theme_t_style_spinbox_Type = {
     .tp_new = NULL, // sub structs cannot be instantiated
     .tp_dealloc = (destructor) Struct_dealloc,
     .tp_getset = pylv_theme_t_style_spinbox_getset,
-    .tp_repr = (reprfunc) Struct_repr
+    .tp_repr = (reprfunc) Struct_repr,
+    .tp_as_buffer = &Struct_bufferprocs
 };
 
 
 
 static PyGetSetDef pylv_theme_t_style_list_getset[] = {
-    {"bg", (getter) struct_get_blob, (setter) struct_set_blob, "lv_style_t bg", (void*)offsetof(lv_theme_t, style.list.bg)},
-    {"scrl", (getter) struct_get_blob, (setter) struct_set_blob, "lv_style_t scrl", (void*)offsetof(lv_theme_t, style.list.scrl)},
-    {"sb", (getter) struct_get_blob, (setter) struct_set_blob, "lv_style_t sb", (void*)offsetof(lv_theme_t, style.list.sb)},
-    {"btn", (getter) struct_get_struct, (setter) struct_set_struct, "struct  {   lv_style_t *rel;   lv_style_t *pr;   lv_style_t *tgl_rel;   lv_style_t *tgl_pr;   lv_style_t *ina; } btn", & ((struct_closure_t){ &pylv_theme_t_style_list_btn_Type, offsetof(lv_theme_t, style.list.btn), sizeof(((lv_theme_t *)0)->style.list.btn)})},
-
+    {"bg", (getter) struct_get_struct, (setter) struct_set_struct, "lv_style_t bg", & ((struct_closure_t){ &Blob_Type, (offsetof(lv_theme_t, style.list.bg)-offsetof(lv_theme_t, style.list)), sizeof(((lv_theme_t *)0)->style.list.bg)})},
+    {"scrl", (getter) struct_get_struct, (setter) struct_set_struct, "lv_style_t scrl", & ((struct_closure_t){ &Blob_Type, (offsetof(lv_theme_t, style.list.scrl)-offsetof(lv_theme_t, style.list)), sizeof(((lv_theme_t *)0)->style.list.scrl)})},
+    {"sb", (getter) struct_get_struct, (setter) struct_set_struct, "lv_style_t sb", & ((struct_closure_t){ &Blob_Type, (offsetof(lv_theme_t, style.list.sb)-offsetof(lv_theme_t, style.list)), sizeof(((lv_theme_t *)0)->style.list.sb)})},
+    {"btn", (getter) struct_get_struct, (setter) struct_set_struct, "struct  {   lv_style_t *rel;   lv_style_t *pr;   lv_style_t *tgl_rel;   lv_style_t *tgl_pr;   lv_style_t *ina; } btn", & ((struct_closure_t){ &pylv_theme_t_style_list_btn_Type, (offsetof(lv_theme_t, style.list.btn)-offsetof(lv_theme_t, style.list)), sizeof(((lv_theme_t *)0)->style.list.btn)})},
     {NULL}
 };
+
 
 static PyTypeObject pylv_theme_t_style_list_Type = {
     PyVarObject_HEAD_INIT(NULL, 0)
@@ -4185,20 +5947,21 @@ static PyTypeObject pylv_theme_t_style_list_Type = {
     .tp_new = NULL, // sub structs cannot be instantiated
     .tp_dealloc = (destructor) Struct_dealloc,
     .tp_getset = pylv_theme_t_style_list_getset,
-    .tp_repr = (reprfunc) Struct_repr
+    .tp_repr = (reprfunc) Struct_repr,
+    .tp_as_buffer = &Struct_bufferprocs
 };
 
 
 
 static PyGetSetDef pylv_theme_t_style_list_btn_getset[] = {
-    {"rel", (getter) struct_get_blob, (setter) struct_set_blob, "lv_style_t rel", (void*)offsetof(lv_theme_t, style.list.btn.rel)},
-    {"pr", (getter) struct_get_blob, (setter) struct_set_blob, "lv_style_t pr", (void*)offsetof(lv_theme_t, style.list.btn.pr)},
-    {"tgl_rel", (getter) struct_get_blob, (setter) struct_set_blob, "lv_style_t tgl_rel", (void*)offsetof(lv_theme_t, style.list.btn.tgl_rel)},
-    {"tgl_pr", (getter) struct_get_blob, (setter) struct_set_blob, "lv_style_t tgl_pr", (void*)offsetof(lv_theme_t, style.list.btn.tgl_pr)},
-    {"ina", (getter) struct_get_blob, (setter) struct_set_blob, "lv_style_t ina", (void*)offsetof(lv_theme_t, style.list.btn.ina)},
-
+    {"rel", (getter) struct_get_struct, (setter) struct_set_struct, "lv_style_t rel", & ((struct_closure_t){ &Blob_Type, (offsetof(lv_theme_t, style.list.btn.rel)-offsetof(lv_theme_t, style.list.btn)), sizeof(((lv_theme_t *)0)->style.list.btn.rel)})},
+    {"pr", (getter) struct_get_struct, (setter) struct_set_struct, "lv_style_t pr", & ((struct_closure_t){ &Blob_Type, (offsetof(lv_theme_t, style.list.btn.pr)-offsetof(lv_theme_t, style.list.btn)), sizeof(((lv_theme_t *)0)->style.list.btn.pr)})},
+    {"tgl_rel", (getter) struct_get_struct, (setter) struct_set_struct, "lv_style_t tgl_rel", & ((struct_closure_t){ &Blob_Type, (offsetof(lv_theme_t, style.list.btn.tgl_rel)-offsetof(lv_theme_t, style.list.btn)), sizeof(((lv_theme_t *)0)->style.list.btn.tgl_rel)})},
+    {"tgl_pr", (getter) struct_get_struct, (setter) struct_set_struct, "lv_style_t tgl_pr", & ((struct_closure_t){ &Blob_Type, (offsetof(lv_theme_t, style.list.btn.tgl_pr)-offsetof(lv_theme_t, style.list.btn)), sizeof(((lv_theme_t *)0)->style.list.btn.tgl_pr)})},
+    {"ina", (getter) struct_get_struct, (setter) struct_set_struct, "lv_style_t ina", & ((struct_closure_t){ &Blob_Type, (offsetof(lv_theme_t, style.list.btn.ina)-offsetof(lv_theme_t, style.list.btn)), sizeof(((lv_theme_t *)0)->style.list.btn.ina)})},
     {NULL}
 };
+
 
 static PyTypeObject pylv_theme_t_style_list_btn_Type = {
     PyVarObject_HEAD_INIT(NULL, 0)
@@ -4210,18 +5973,19 @@ static PyTypeObject pylv_theme_t_style_list_btn_Type = {
     .tp_new = NULL, // sub structs cannot be instantiated
     .tp_dealloc = (destructor) Struct_dealloc,
     .tp_getset = pylv_theme_t_style_list_btn_getset,
-    .tp_repr = (reprfunc) Struct_repr
+    .tp_repr = (reprfunc) Struct_repr,
+    .tp_as_buffer = &Struct_bufferprocs
 };
 
 
 
 static PyGetSetDef pylv_theme_t_style_ddlist_getset[] = {
-    {"bg", (getter) struct_get_blob, (setter) struct_set_blob, "lv_style_t bg", (void*)offsetof(lv_theme_t, style.ddlist.bg)},
-    {"sel", (getter) struct_get_blob, (setter) struct_set_blob, "lv_style_t sel", (void*)offsetof(lv_theme_t, style.ddlist.sel)},
-    {"sb", (getter) struct_get_blob, (setter) struct_set_blob, "lv_style_t sb", (void*)offsetof(lv_theme_t, style.ddlist.sb)},
-
+    {"bg", (getter) struct_get_struct, (setter) struct_set_struct, "lv_style_t bg", & ((struct_closure_t){ &Blob_Type, (offsetof(lv_theme_t, style.ddlist.bg)-offsetof(lv_theme_t, style.ddlist)), sizeof(((lv_theme_t *)0)->style.ddlist.bg)})},
+    {"sel", (getter) struct_get_struct, (setter) struct_set_struct, "lv_style_t sel", & ((struct_closure_t){ &Blob_Type, (offsetof(lv_theme_t, style.ddlist.sel)-offsetof(lv_theme_t, style.ddlist)), sizeof(((lv_theme_t *)0)->style.ddlist.sel)})},
+    {"sb", (getter) struct_get_struct, (setter) struct_set_struct, "lv_style_t sb", & ((struct_closure_t){ &Blob_Type, (offsetof(lv_theme_t, style.ddlist.sb)-offsetof(lv_theme_t, style.ddlist)), sizeof(((lv_theme_t *)0)->style.ddlist.sb)})},
     {NULL}
 };
+
 
 static PyTypeObject pylv_theme_t_style_ddlist_Type = {
     PyVarObject_HEAD_INIT(NULL, 0)
@@ -4233,17 +5997,18 @@ static PyTypeObject pylv_theme_t_style_ddlist_Type = {
     .tp_new = NULL, // sub structs cannot be instantiated
     .tp_dealloc = (destructor) Struct_dealloc,
     .tp_getset = pylv_theme_t_style_ddlist_getset,
-    .tp_repr = (reprfunc) Struct_repr
+    .tp_repr = (reprfunc) Struct_repr,
+    .tp_as_buffer = &Struct_bufferprocs
 };
 
 
 
 static PyGetSetDef pylv_theme_t_style_roller_getset[] = {
-    {"bg", (getter) struct_get_blob, (setter) struct_set_blob, "lv_style_t bg", (void*)offsetof(lv_theme_t, style.roller.bg)},
-    {"sel", (getter) struct_get_blob, (setter) struct_set_blob, "lv_style_t sel", (void*)offsetof(lv_theme_t, style.roller.sel)},
-
+    {"bg", (getter) struct_get_struct, (setter) struct_set_struct, "lv_style_t bg", & ((struct_closure_t){ &Blob_Type, (offsetof(lv_theme_t, style.roller.bg)-offsetof(lv_theme_t, style.roller)), sizeof(((lv_theme_t *)0)->style.roller.bg)})},
+    {"sel", (getter) struct_get_struct, (setter) struct_set_struct, "lv_style_t sel", & ((struct_closure_t){ &Blob_Type, (offsetof(lv_theme_t, style.roller.sel)-offsetof(lv_theme_t, style.roller)), sizeof(((lv_theme_t *)0)->style.roller.sel)})},
     {NULL}
 };
+
 
 static PyTypeObject pylv_theme_t_style_roller_Type = {
     PyVarObject_HEAD_INIT(NULL, 0)
@@ -4255,18 +6020,19 @@ static PyTypeObject pylv_theme_t_style_roller_Type = {
     .tp_new = NULL, // sub structs cannot be instantiated
     .tp_dealloc = (destructor) Struct_dealloc,
     .tp_getset = pylv_theme_t_style_roller_getset,
-    .tp_repr = (reprfunc) Struct_repr
+    .tp_repr = (reprfunc) Struct_repr,
+    .tp_as_buffer = &Struct_bufferprocs
 };
 
 
 
 static PyGetSetDef pylv_theme_t_style_tabview_getset[] = {
-    {"bg", (getter) struct_get_blob, (setter) struct_set_blob, "lv_style_t bg", (void*)offsetof(lv_theme_t, style.tabview.bg)},
-    {"indic", (getter) struct_get_blob, (setter) struct_set_blob, "lv_style_t indic", (void*)offsetof(lv_theme_t, style.tabview.indic)},
-    {"btn", (getter) struct_get_struct, (setter) struct_set_struct, "struct  {   lv_style_t *bg;   lv_style_t *rel;   lv_style_t *pr;   lv_style_t *tgl_rel;   lv_style_t *tgl_pr; } btn", & ((struct_closure_t){ &pylv_theme_t_style_tabview_btn_Type, offsetof(lv_theme_t, style.tabview.btn), sizeof(((lv_theme_t *)0)->style.tabview.btn)})},
-
+    {"bg", (getter) struct_get_struct, (setter) struct_set_struct, "lv_style_t bg", & ((struct_closure_t){ &Blob_Type, (offsetof(lv_theme_t, style.tabview.bg)-offsetof(lv_theme_t, style.tabview)), sizeof(((lv_theme_t *)0)->style.tabview.bg)})},
+    {"indic", (getter) struct_get_struct, (setter) struct_set_struct, "lv_style_t indic", & ((struct_closure_t){ &Blob_Type, (offsetof(lv_theme_t, style.tabview.indic)-offsetof(lv_theme_t, style.tabview)), sizeof(((lv_theme_t *)0)->style.tabview.indic)})},
+    {"btn", (getter) struct_get_struct, (setter) struct_set_struct, "struct  {   lv_style_t *bg;   lv_style_t *rel;   lv_style_t *pr;   lv_style_t *tgl_rel;   lv_style_t *tgl_pr; } btn", & ((struct_closure_t){ &pylv_theme_t_style_tabview_btn_Type, (offsetof(lv_theme_t, style.tabview.btn)-offsetof(lv_theme_t, style.tabview)), sizeof(((lv_theme_t *)0)->style.tabview.btn)})},
     {NULL}
 };
+
 
 static PyTypeObject pylv_theme_t_style_tabview_Type = {
     PyVarObject_HEAD_INIT(NULL, 0)
@@ -4278,20 +6044,21 @@ static PyTypeObject pylv_theme_t_style_tabview_Type = {
     .tp_new = NULL, // sub structs cannot be instantiated
     .tp_dealloc = (destructor) Struct_dealloc,
     .tp_getset = pylv_theme_t_style_tabview_getset,
-    .tp_repr = (reprfunc) Struct_repr
+    .tp_repr = (reprfunc) Struct_repr,
+    .tp_as_buffer = &Struct_bufferprocs
 };
 
 
 
 static PyGetSetDef pylv_theme_t_style_tabview_btn_getset[] = {
-    {"bg", (getter) struct_get_blob, (setter) struct_set_blob, "lv_style_t bg", (void*)offsetof(lv_theme_t, style.tabview.btn.bg)},
-    {"rel", (getter) struct_get_blob, (setter) struct_set_blob, "lv_style_t rel", (void*)offsetof(lv_theme_t, style.tabview.btn.rel)},
-    {"pr", (getter) struct_get_blob, (setter) struct_set_blob, "lv_style_t pr", (void*)offsetof(lv_theme_t, style.tabview.btn.pr)},
-    {"tgl_rel", (getter) struct_get_blob, (setter) struct_set_blob, "lv_style_t tgl_rel", (void*)offsetof(lv_theme_t, style.tabview.btn.tgl_rel)},
-    {"tgl_pr", (getter) struct_get_blob, (setter) struct_set_blob, "lv_style_t tgl_pr", (void*)offsetof(lv_theme_t, style.tabview.btn.tgl_pr)},
-
+    {"bg", (getter) struct_get_struct, (setter) struct_set_struct, "lv_style_t bg", & ((struct_closure_t){ &Blob_Type, (offsetof(lv_theme_t, style.tabview.btn.bg)-offsetof(lv_theme_t, style.tabview.btn)), sizeof(((lv_theme_t *)0)->style.tabview.btn.bg)})},
+    {"rel", (getter) struct_get_struct, (setter) struct_set_struct, "lv_style_t rel", & ((struct_closure_t){ &Blob_Type, (offsetof(lv_theme_t, style.tabview.btn.rel)-offsetof(lv_theme_t, style.tabview.btn)), sizeof(((lv_theme_t *)0)->style.tabview.btn.rel)})},
+    {"pr", (getter) struct_get_struct, (setter) struct_set_struct, "lv_style_t pr", & ((struct_closure_t){ &Blob_Type, (offsetof(lv_theme_t, style.tabview.btn.pr)-offsetof(lv_theme_t, style.tabview.btn)), sizeof(((lv_theme_t *)0)->style.tabview.btn.pr)})},
+    {"tgl_rel", (getter) struct_get_struct, (setter) struct_set_struct, "lv_style_t tgl_rel", & ((struct_closure_t){ &Blob_Type, (offsetof(lv_theme_t, style.tabview.btn.tgl_rel)-offsetof(lv_theme_t, style.tabview.btn)), sizeof(((lv_theme_t *)0)->style.tabview.btn.tgl_rel)})},
+    {"tgl_pr", (getter) struct_get_struct, (setter) struct_set_struct, "lv_style_t tgl_pr", & ((struct_closure_t){ &Blob_Type, (offsetof(lv_theme_t, style.tabview.btn.tgl_pr)-offsetof(lv_theme_t, style.tabview.btn)), sizeof(((lv_theme_t *)0)->style.tabview.btn.tgl_pr)})},
     {NULL}
 };
+
 
 static PyTypeObject pylv_theme_t_style_tabview_btn_Type = {
     PyVarObject_HEAD_INIT(NULL, 0)
@@ -4303,18 +6070,19 @@ static PyTypeObject pylv_theme_t_style_tabview_btn_Type = {
     .tp_new = NULL, // sub structs cannot be instantiated
     .tp_dealloc = (destructor) Struct_dealloc,
     .tp_getset = pylv_theme_t_style_tabview_btn_getset,
-    .tp_repr = (reprfunc) Struct_repr
+    .tp_repr = (reprfunc) Struct_repr,
+    .tp_as_buffer = &Struct_bufferprocs
 };
 
 
 
 static PyGetSetDef pylv_theme_t_style_tileview_getset[] = {
-    {"bg", (getter) struct_get_blob, (setter) struct_set_blob, "lv_style_t bg", (void*)offsetof(lv_theme_t, style.tileview.bg)},
-    {"scrl", (getter) struct_get_blob, (setter) struct_set_blob, "lv_style_t scrl", (void*)offsetof(lv_theme_t, style.tileview.scrl)},
-    {"sb", (getter) struct_get_blob, (setter) struct_set_blob, "lv_style_t sb", (void*)offsetof(lv_theme_t, style.tileview.sb)},
-
+    {"bg", (getter) struct_get_struct, (setter) struct_set_struct, "lv_style_t bg", & ((struct_closure_t){ &Blob_Type, (offsetof(lv_theme_t, style.tileview.bg)-offsetof(lv_theme_t, style.tileview)), sizeof(((lv_theme_t *)0)->style.tileview.bg)})},
+    {"scrl", (getter) struct_get_struct, (setter) struct_set_struct, "lv_style_t scrl", & ((struct_closure_t){ &Blob_Type, (offsetof(lv_theme_t, style.tileview.scrl)-offsetof(lv_theme_t, style.tileview)), sizeof(((lv_theme_t *)0)->style.tileview.scrl)})},
+    {"sb", (getter) struct_get_struct, (setter) struct_set_struct, "lv_style_t sb", & ((struct_closure_t){ &Blob_Type, (offsetof(lv_theme_t, style.tileview.sb)-offsetof(lv_theme_t, style.tileview)), sizeof(((lv_theme_t *)0)->style.tileview.sb)})},
     {NULL}
 };
+
 
 static PyTypeObject pylv_theme_t_style_tileview_Type = {
     PyVarObject_HEAD_INIT(NULL, 0)
@@ -4326,17 +6094,18 @@ static PyTypeObject pylv_theme_t_style_tileview_Type = {
     .tp_new = NULL, // sub structs cannot be instantiated
     .tp_dealloc = (destructor) Struct_dealloc,
     .tp_getset = pylv_theme_t_style_tileview_getset,
-    .tp_repr = (reprfunc) Struct_repr
+    .tp_repr = (reprfunc) Struct_repr,
+    .tp_as_buffer = &Struct_bufferprocs
 };
 
 
 
 static PyGetSetDef pylv_theme_t_style_table_getset[] = {
-    {"bg", (getter) struct_get_blob, (setter) struct_set_blob, "lv_style_t bg", (void*)offsetof(lv_theme_t, style.table.bg)},
-    {"cell", (getter) struct_get_blob, (setter) struct_set_blob, "lv_style_t cell", (void*)offsetof(lv_theme_t, style.table.cell)},
-
+    {"bg", (getter) struct_get_struct, (setter) struct_set_struct, "lv_style_t bg", & ((struct_closure_t){ &Blob_Type, (offsetof(lv_theme_t, style.table.bg)-offsetof(lv_theme_t, style.table)), sizeof(((lv_theme_t *)0)->style.table.bg)})},
+    {"cell", (getter) struct_get_struct, (setter) struct_set_struct, "lv_style_t cell", & ((struct_closure_t){ &Blob_Type, (offsetof(lv_theme_t, style.table.cell)-offsetof(lv_theme_t, style.table)), sizeof(((lv_theme_t *)0)->style.table.cell)})},
     {NULL}
 };
+
 
 static PyTypeObject pylv_theme_t_style_table_Type = {
     PyVarObject_HEAD_INIT(NULL, 0)
@@ -4348,20 +6117,21 @@ static PyTypeObject pylv_theme_t_style_table_Type = {
     .tp_new = NULL, // sub structs cannot be instantiated
     .tp_dealloc = (destructor) Struct_dealloc,
     .tp_getset = pylv_theme_t_style_table_getset,
-    .tp_repr = (reprfunc) Struct_repr
+    .tp_repr = (reprfunc) Struct_repr,
+    .tp_as_buffer = &Struct_bufferprocs
 };
 
 
 
 static PyGetSetDef pylv_theme_t_style_win_getset[] = {
-    {"bg", (getter) struct_get_blob, (setter) struct_set_blob, "lv_style_t bg", (void*)offsetof(lv_theme_t, style.win.bg)},
-    {"sb", (getter) struct_get_blob, (setter) struct_set_blob, "lv_style_t sb", (void*)offsetof(lv_theme_t, style.win.sb)},
-    {"header", (getter) struct_get_blob, (setter) struct_set_blob, "lv_style_t header", (void*)offsetof(lv_theme_t, style.win.header)},
-    {"content", (getter) struct_get_struct, (setter) struct_set_struct, "struct  {   lv_style_t *bg;   lv_style_t *scrl; } content", & ((struct_closure_t){ &pylv_theme_t_style_win_content_Type, offsetof(lv_theme_t, style.win.content), sizeof(((lv_theme_t *)0)->style.win.content)})},
-    {"btn", (getter) struct_get_struct, (setter) struct_set_struct, "struct  {   lv_style_t *rel;   lv_style_t *pr; } btn", & ((struct_closure_t){ &pylv_theme_t_style_win_btn_Type, offsetof(lv_theme_t, style.win.btn), sizeof(((lv_theme_t *)0)->style.win.btn)})},
-
+    {"bg", (getter) struct_get_struct, (setter) struct_set_struct, "lv_style_t bg", & ((struct_closure_t){ &Blob_Type, (offsetof(lv_theme_t, style.win.bg)-offsetof(lv_theme_t, style.win)), sizeof(((lv_theme_t *)0)->style.win.bg)})},
+    {"sb", (getter) struct_get_struct, (setter) struct_set_struct, "lv_style_t sb", & ((struct_closure_t){ &Blob_Type, (offsetof(lv_theme_t, style.win.sb)-offsetof(lv_theme_t, style.win)), sizeof(((lv_theme_t *)0)->style.win.sb)})},
+    {"header", (getter) struct_get_struct, (setter) struct_set_struct, "lv_style_t header", & ((struct_closure_t){ &Blob_Type, (offsetof(lv_theme_t, style.win.header)-offsetof(lv_theme_t, style.win)), sizeof(((lv_theme_t *)0)->style.win.header)})},
+    {"content", (getter) struct_get_struct, (setter) struct_set_struct, "struct  {   lv_style_t *bg;   lv_style_t *scrl; } content", & ((struct_closure_t){ &pylv_theme_t_style_win_content_Type, (offsetof(lv_theme_t, style.win.content)-offsetof(lv_theme_t, style.win)), sizeof(((lv_theme_t *)0)->style.win.content)})},
+    {"btn", (getter) struct_get_struct, (setter) struct_set_struct, "struct  {   lv_style_t *rel;   lv_style_t *pr; } btn", & ((struct_closure_t){ &pylv_theme_t_style_win_btn_Type, (offsetof(lv_theme_t, style.win.btn)-offsetof(lv_theme_t, style.win)), sizeof(((lv_theme_t *)0)->style.win.btn)})},
     {NULL}
 };
+
 
 static PyTypeObject pylv_theme_t_style_win_Type = {
     PyVarObject_HEAD_INIT(NULL, 0)
@@ -4373,17 +6143,18 @@ static PyTypeObject pylv_theme_t_style_win_Type = {
     .tp_new = NULL, // sub structs cannot be instantiated
     .tp_dealloc = (destructor) Struct_dealloc,
     .tp_getset = pylv_theme_t_style_win_getset,
-    .tp_repr = (reprfunc) Struct_repr
+    .tp_repr = (reprfunc) Struct_repr,
+    .tp_as_buffer = &Struct_bufferprocs
 };
 
 
 
 static PyGetSetDef pylv_theme_t_style_win_content_getset[] = {
-    {"bg", (getter) struct_get_blob, (setter) struct_set_blob, "lv_style_t bg", (void*)offsetof(lv_theme_t, style.win.content.bg)},
-    {"scrl", (getter) struct_get_blob, (setter) struct_set_blob, "lv_style_t scrl", (void*)offsetof(lv_theme_t, style.win.content.scrl)},
-
+    {"bg", (getter) struct_get_struct, (setter) struct_set_struct, "lv_style_t bg", & ((struct_closure_t){ &Blob_Type, (offsetof(lv_theme_t, style.win.content.bg)-offsetof(lv_theme_t, style.win.content)), sizeof(((lv_theme_t *)0)->style.win.content.bg)})},
+    {"scrl", (getter) struct_get_struct, (setter) struct_set_struct, "lv_style_t scrl", & ((struct_closure_t){ &Blob_Type, (offsetof(lv_theme_t, style.win.content.scrl)-offsetof(lv_theme_t, style.win.content)), sizeof(((lv_theme_t *)0)->style.win.content.scrl)})},
     {NULL}
 };
+
 
 static PyTypeObject pylv_theme_t_style_win_content_Type = {
     PyVarObject_HEAD_INIT(NULL, 0)
@@ -4395,17 +6166,18 @@ static PyTypeObject pylv_theme_t_style_win_content_Type = {
     .tp_new = NULL, // sub structs cannot be instantiated
     .tp_dealloc = (destructor) Struct_dealloc,
     .tp_getset = pylv_theme_t_style_win_content_getset,
-    .tp_repr = (reprfunc) Struct_repr
+    .tp_repr = (reprfunc) Struct_repr,
+    .tp_as_buffer = &Struct_bufferprocs
 };
 
 
 
 static PyGetSetDef pylv_theme_t_style_win_btn_getset[] = {
-    {"rel", (getter) struct_get_blob, (setter) struct_set_blob, "lv_style_t rel", (void*)offsetof(lv_theme_t, style.win.btn.rel)},
-    {"pr", (getter) struct_get_blob, (setter) struct_set_blob, "lv_style_t pr", (void*)offsetof(lv_theme_t, style.win.btn.pr)},
-
+    {"rel", (getter) struct_get_struct, (setter) struct_set_struct, "lv_style_t rel", & ((struct_closure_t){ &Blob_Type, (offsetof(lv_theme_t, style.win.btn.rel)-offsetof(lv_theme_t, style.win.btn)), sizeof(((lv_theme_t *)0)->style.win.btn.rel)})},
+    {"pr", (getter) struct_get_struct, (setter) struct_set_struct, "lv_style_t pr", & ((struct_closure_t){ &Blob_Type, (offsetof(lv_theme_t, style.win.btn.pr)-offsetof(lv_theme_t, style.win.btn)), sizeof(((lv_theme_t *)0)->style.win.btn.pr)})},
     {NULL}
 };
+
 
 static PyTypeObject pylv_theme_t_style_win_btn_Type = {
     PyVarObject_HEAD_INIT(NULL, 0)
@@ -4417,17 +6189,18 @@ static PyTypeObject pylv_theme_t_style_win_btn_Type = {
     .tp_new = NULL, // sub structs cannot be instantiated
     .tp_dealloc = (destructor) Struct_dealloc,
     .tp_getset = pylv_theme_t_style_win_btn_getset,
-    .tp_repr = (reprfunc) Struct_repr
+    .tp_repr = (reprfunc) Struct_repr,
+    .tp_as_buffer = &Struct_bufferprocs
 };
 
 
 
 static PyGetSetDef pylv_theme_t_group_getset[] = {
-    {"style_mod", (getter) struct_get_blob, (setter) struct_set_blob, "lv_group_style_mod_func_t style_mod", (void*)offsetof(lv_theme_t, group.style_mod)},
-    {"style_mod_edit", (getter) struct_get_blob, (setter) struct_set_blob, "lv_group_style_mod_func_t style_mod_edit", (void*)offsetof(lv_theme_t, group.style_mod_edit)},
-
+    {"style_mod", (getter) struct_get_struct, (setter) struct_set_struct, "lv_group_style_mod_func_t style_mod", & ((struct_closure_t){ &Blob_Type, (offsetof(lv_theme_t, group.style_mod)-offsetof(lv_theme_t, group)), sizeof(((lv_theme_t *)0)->group.style_mod)})},
+    {"style_mod_edit", (getter) struct_get_struct, (setter) struct_set_struct, "lv_group_style_mod_func_t style_mod_edit", & ((struct_closure_t){ &Blob_Type, (offsetof(lv_theme_t, group.style_mod_edit)-offsetof(lv_theme_t, group)), sizeof(((lv_theme_t *)0)->group.style_mod_edit)})},
     {NULL}
 };
+
 
 static PyTypeObject pylv_theme_t_group_Type = {
     PyVarObject_HEAD_INIT(NULL, 0)
@@ -4439,21 +6212,73 @@ static PyTypeObject pylv_theme_t_group_Type = {
     .tp_new = NULL, // sub structs cannot be instantiated
     .tp_dealloc = (destructor) Struct_dealloc,
     .tp_getset = pylv_theme_t_group_getset,
-    .tp_repr = (reprfunc) Struct_repr
+    .tp_repr = (reprfunc) Struct_repr,
+    .tp_as_buffer = &Struct_bufferprocs
 };
 
 
+
+
+
+static PyObject *
+get_struct_bitfield_page_ext_t_sb_hor_draw(StructObject *self, void *closure)
+{
+    return PyLong_FromLong(((lv_page_ext_t*)(self->data))->sb.hor_draw );
+}
+
+static int
+set_struct_bitfield_page_ext_t_sb_hor_draw(StructObject *self, PyObject *value, void *closure)
+{
+    long v;
+    if (long_to_int(value, &v, 0, 1)) return -1;
+    ((lv_page_ext_t*)(self->data))->sb.hor_draw = v;
+    return 0;
+}
+
+
+
+static PyObject *
+get_struct_bitfield_page_ext_t_sb_ver_draw(StructObject *self, void *closure)
+{
+    return PyLong_FromLong(((lv_page_ext_t*)(self->data))->sb.ver_draw );
+}
+
+static int
+set_struct_bitfield_page_ext_t_sb_ver_draw(StructObject *self, PyObject *value, void *closure)
+{
+    long v;
+    if (long_to_int(value, &v, 0, 1)) return -1;
+    ((lv_page_ext_t*)(self->data))->sb.ver_draw = v;
+    return 0;
+}
+
+
+
+static PyObject *
+get_struct_bitfield_page_ext_t_sb_mode(StructObject *self, void *closure)
+{
+    return PyLong_FromLong(((lv_page_ext_t*)(self->data))->sb.mode );
+}
+
+static int
+set_struct_bitfield_page_ext_t_sb_mode(StructObject *self, PyObject *value, void *closure)
+{
+    long v;
+    if (long_to_int(value, &v, 0, 7)) return -1;
+    ((lv_page_ext_t*)(self->data))->sb.mode = v;
+    return 0;
+}
 
 static PyGetSetDef pylv_page_ext_t_sb_getset[] = {
-    {"style", (getter) struct_get_blob, (setter) struct_set_blob, "lv_style_t style", (void*)offsetof(lv_page_ext_t, sb.style)},
-    {"hor_area", (getter) struct_get_blob, (setter) struct_set_blob, "lv_area_t hor_area", (void*)offsetof(lv_page_ext_t, sb.hor_area)},
-    {"ver_area", (getter) struct_get_blob, (setter) struct_set_blob, "lv_area_t ver_area", (void*)offsetof(lv_page_ext_t, sb.ver_area)},
-    {"hor_draw", (getter) NULL, (setter) NULL, "uint8_t hor_draw", NULL},
-    {"ver_draw", (getter) NULL, (setter) NULL, "uint8_t ver_draw", NULL},
-    {"mode", (getter) NULL, (setter) NULL, "lv_sb_mode_t mode", NULL},
-
+    {"style", (getter) struct_get_struct, (setter) struct_set_struct, "lv_style_t style", & ((struct_closure_t){ &Blob_Type, (offsetof(lv_page_ext_t, sb.style)-offsetof(lv_page_ext_t, sb)), sizeof(((lv_page_ext_t *)0)->sb.style)})},
+    {"hor_area", (getter) struct_get_struct, (setter) struct_set_struct, "lv_area_t hor_area", & ((struct_closure_t){ &pylv_area_t_Type, (offsetof(lv_page_ext_t, sb.hor_area)-offsetof(lv_page_ext_t, sb)), sizeof(lv_area_t)})},
+    {"ver_area", (getter) struct_get_struct, (setter) struct_set_struct, "lv_area_t ver_area", & ((struct_closure_t){ &pylv_area_t_Type, (offsetof(lv_page_ext_t, sb.ver_area)-offsetof(lv_page_ext_t, sb)), sizeof(lv_area_t)})},
+    {"hor_draw", (getter) get_struct_bitfield_page_ext_t_sb_hor_draw, (setter) set_struct_bitfield_page_ext_t_sb_hor_draw, "uint8_t:1 hor_draw", NULL},
+    {"ver_draw", (getter) get_struct_bitfield_page_ext_t_sb_ver_draw, (setter) set_struct_bitfield_page_ext_t_sb_ver_draw, "uint8_t:1 ver_draw", NULL},
+    {"mode", (getter) get_struct_bitfield_page_ext_t_sb_mode, (setter) set_struct_bitfield_page_ext_t_sb_mode, "lv_sb_mode_t:3 mode", NULL},
     {NULL}
 };
+
 
 static PyTypeObject pylv_page_ext_t_sb_Type = {
     PyVarObject_HEAD_INIT(NULL, 0)
@@ -4465,22 +6290,108 @@ static PyTypeObject pylv_page_ext_t_sb_Type = {
     .tp_new = NULL, // sub structs cannot be instantiated
     .tp_dealloc = (destructor) Struct_dealloc,
     .tp_getset = pylv_page_ext_t_sb_getset,
-    .tp_repr = (reprfunc) Struct_repr
+    .tp_repr = (reprfunc) Struct_repr,
+    .tp_as_buffer = &Struct_bufferprocs
 };
 
 
+
+
+
+static PyObject *
+get_struct_bitfield_page_ext_t_edge_flash_enabled(StructObject *self, void *closure)
+{
+    return PyLong_FromLong(((lv_page_ext_t*)(self->data))->edge_flash.enabled );
+}
+
+static int
+set_struct_bitfield_page_ext_t_edge_flash_enabled(StructObject *self, PyObject *value, void *closure)
+{
+    long v;
+    if (long_to_int(value, &v, 0, 1)) return -1;
+    ((lv_page_ext_t*)(self->data))->edge_flash.enabled = v;
+    return 0;
+}
+
+
+
+static PyObject *
+get_struct_bitfield_page_ext_t_edge_flash_top_ip(StructObject *self, void *closure)
+{
+    return PyLong_FromLong(((lv_page_ext_t*)(self->data))->edge_flash.top_ip );
+}
+
+static int
+set_struct_bitfield_page_ext_t_edge_flash_top_ip(StructObject *self, PyObject *value, void *closure)
+{
+    long v;
+    if (long_to_int(value, &v, 0, 1)) return -1;
+    ((lv_page_ext_t*)(self->data))->edge_flash.top_ip = v;
+    return 0;
+}
+
+
+
+static PyObject *
+get_struct_bitfield_page_ext_t_edge_flash_bottom_ip(StructObject *self, void *closure)
+{
+    return PyLong_FromLong(((lv_page_ext_t*)(self->data))->edge_flash.bottom_ip );
+}
+
+static int
+set_struct_bitfield_page_ext_t_edge_flash_bottom_ip(StructObject *self, PyObject *value, void *closure)
+{
+    long v;
+    if (long_to_int(value, &v, 0, 1)) return -1;
+    ((lv_page_ext_t*)(self->data))->edge_flash.bottom_ip = v;
+    return 0;
+}
+
+
+
+static PyObject *
+get_struct_bitfield_page_ext_t_edge_flash_right_ip(StructObject *self, void *closure)
+{
+    return PyLong_FromLong(((lv_page_ext_t*)(self->data))->edge_flash.right_ip );
+}
+
+static int
+set_struct_bitfield_page_ext_t_edge_flash_right_ip(StructObject *self, PyObject *value, void *closure)
+{
+    long v;
+    if (long_to_int(value, &v, 0, 1)) return -1;
+    ((lv_page_ext_t*)(self->data))->edge_flash.right_ip = v;
+    return 0;
+}
+
+
+
+static PyObject *
+get_struct_bitfield_page_ext_t_edge_flash_left_ip(StructObject *self, void *closure)
+{
+    return PyLong_FromLong(((lv_page_ext_t*)(self->data))->edge_flash.left_ip );
+}
+
+static int
+set_struct_bitfield_page_ext_t_edge_flash_left_ip(StructObject *self, PyObject *value, void *closure)
+{
+    long v;
+    if (long_to_int(value, &v, 0, 1)) return -1;
+    ((lv_page_ext_t*)(self->data))->edge_flash.left_ip = v;
+    return 0;
+}
 
 static PyGetSetDef pylv_page_ext_t_edge_flash_getset[] = {
-    {"state", (getter) struct_get_uint16, (setter) struct_set_uint16, "uint16_t state", (void*)offsetof(lv_page_ext_t, edge_flash.state)},
-    {"style", (getter) struct_get_blob, (setter) struct_set_blob, "lv_style_t style", (void*)offsetof(lv_page_ext_t, edge_flash.style)},
-    {"enabled", (getter) NULL, (setter) NULL, "uint8_t enabled", NULL},
-    {"top_ip", (getter) NULL, (setter) NULL, "uint8_t top_ip", NULL},
-    {"bottom_ip", (getter) NULL, (setter) NULL, "uint8_t bottom_ip", NULL},
-    {"right_ip", (getter) NULL, (setter) NULL, "uint8_t right_ip", NULL},
-    {"left_ip", (getter) NULL, (setter) NULL, "uint8_t left_ip", NULL},
-
+    {"state", (getter) struct_get_uint16, (setter) struct_set_uint16, "uint16_t state", (void*)(offsetof(lv_page_ext_t, edge_flash.state)-offsetof(lv_page_ext_t, edge_flash))},
+    {"style", (getter) struct_get_struct, (setter) struct_set_struct, "lv_style_t style", & ((struct_closure_t){ &Blob_Type, (offsetof(lv_page_ext_t, edge_flash.style)-offsetof(lv_page_ext_t, edge_flash)), sizeof(((lv_page_ext_t *)0)->edge_flash.style)})},
+    {"enabled", (getter) get_struct_bitfield_page_ext_t_edge_flash_enabled, (setter) set_struct_bitfield_page_ext_t_edge_flash_enabled, "uint8_t:1 enabled", NULL},
+    {"top_ip", (getter) get_struct_bitfield_page_ext_t_edge_flash_top_ip, (setter) set_struct_bitfield_page_ext_t_edge_flash_top_ip, "uint8_t:1 top_ip", NULL},
+    {"bottom_ip", (getter) get_struct_bitfield_page_ext_t_edge_flash_bottom_ip, (setter) set_struct_bitfield_page_ext_t_edge_flash_bottom_ip, "uint8_t:1 bottom_ip", NULL},
+    {"right_ip", (getter) get_struct_bitfield_page_ext_t_edge_flash_right_ip, (setter) set_struct_bitfield_page_ext_t_edge_flash_right_ip, "uint8_t:1 right_ip", NULL},
+    {"left_ip", (getter) get_struct_bitfield_page_ext_t_edge_flash_left_ip, (setter) set_struct_bitfield_page_ext_t_edge_flash_left_ip, "uint8_t:1 left_ip", NULL},
     {NULL}
 };
+
 
 static PyTypeObject pylv_page_ext_t_edge_flash_Type = {
     PyVarObject_HEAD_INIT(NULL, 0)
@@ -4492,19 +6403,20 @@ static PyTypeObject pylv_page_ext_t_edge_flash_Type = {
     .tp_new = NULL, // sub structs cannot be instantiated
     .tp_dealloc = (destructor) Struct_dealloc,
     .tp_getset = pylv_page_ext_t_edge_flash_getset,
-    .tp_repr = (reprfunc) Struct_repr
+    .tp_repr = (reprfunc) Struct_repr,
+    .tp_as_buffer = &Struct_bufferprocs
 };
 
 
 
 static PyGetSetDef pylv_chart_ext_t_series_getset[] = {
-    {"width", (getter) struct_get_int16, (setter) struct_set_int16, "lv_coord_t width", (void*)offsetof(lv_chart_ext_t, series.width)},
-    {"num", (getter) struct_get_uint8, (setter) struct_set_uint8, "uint8_t num", (void*)offsetof(lv_chart_ext_t, series.num)},
-    {"opa", (getter) struct_get_uint8, (setter) struct_set_uint8, "lv_opa_t opa", (void*)offsetof(lv_chart_ext_t, series.opa)},
-    {"dark", (getter) struct_get_uint8, (setter) struct_set_uint8, "lv_opa_t dark", (void*)offsetof(lv_chart_ext_t, series.dark)},
-
+    {"width", (getter) struct_get_int16, (setter) struct_set_int16, "lv_coord_t width", (void*)(offsetof(lv_chart_ext_t, series.width)-offsetof(lv_chart_ext_t, series))},
+    {"num", (getter) struct_get_uint8, (setter) struct_set_uint8, "uint8_t num", (void*)(offsetof(lv_chart_ext_t, series.num)-offsetof(lv_chart_ext_t, series))},
+    {"opa", (getter) struct_get_uint8, (setter) struct_set_uint8, "lv_opa_t opa", (void*)(offsetof(lv_chart_ext_t, series.opa)-offsetof(lv_chart_ext_t, series))},
+    {"dark", (getter) struct_get_uint8, (setter) struct_set_uint8, "lv_opa_t dark", (void*)(offsetof(lv_chart_ext_t, series.dark)-offsetof(lv_chart_ext_t, series))},
     {NULL}
 };
+
 
 static PyTypeObject pylv_chart_ext_t_series_Type = {
     PyVarObject_HEAD_INIT(NULL, 0)
@@ -4516,22 +6428,57 @@ static PyTypeObject pylv_chart_ext_t_series_Type = {
     .tp_new = NULL, // sub structs cannot be instantiated
     .tp_dealloc = (destructor) Struct_dealloc,
     .tp_getset = pylv_chart_ext_t_series_getset,
-    .tp_repr = (reprfunc) Struct_repr
+    .tp_repr = (reprfunc) Struct_repr,
+    .tp_as_buffer = &Struct_bufferprocs
 };
 
 
+
+
+
+static PyObject *
+get_struct_bitfield_ta_ext_t_cursor_type(StructObject *self, void *closure)
+{
+    return PyLong_FromLong(((lv_ta_ext_t*)(self->data))->cursor.type );
+}
+
+static int
+set_struct_bitfield_ta_ext_t_cursor_type(StructObject *self, PyObject *value, void *closure)
+{
+    long v;
+    if (long_to_int(value, &v, 0, 15)) return -1;
+    ((lv_ta_ext_t*)(self->data))->cursor.type = v;
+    return 0;
+}
+
+
+
+static PyObject *
+get_struct_bitfield_ta_ext_t_cursor_state(StructObject *self, void *closure)
+{
+    return PyLong_FromLong(((lv_ta_ext_t*)(self->data))->cursor.state );
+}
+
+static int
+set_struct_bitfield_ta_ext_t_cursor_state(StructObject *self, PyObject *value, void *closure)
+{
+    long v;
+    if (long_to_int(value, &v, 0, 1)) return -1;
+    ((lv_ta_ext_t*)(self->data))->cursor.state = v;
+    return 0;
+}
 
 static PyGetSetDef pylv_ta_ext_t_cursor_getset[] = {
-    {"style", (getter) struct_get_blob, (setter) struct_set_blob, "lv_style_t style", (void*)offsetof(lv_ta_ext_t, cursor.style)},
-    {"valid_x", (getter) struct_get_int16, (setter) struct_set_int16, "lv_coord_t valid_x", (void*)offsetof(lv_ta_ext_t, cursor.valid_x)},
-    {"pos", (getter) struct_get_uint16, (setter) struct_set_uint16, "uint16_t pos", (void*)offsetof(lv_ta_ext_t, cursor.pos)},
-    {"area", (getter) struct_get_blob, (setter) struct_set_blob, "lv_area_t area", (void*)offsetof(lv_ta_ext_t, cursor.area)},
-    {"txt_byte_pos", (getter) struct_get_uint16, (setter) struct_set_uint16, "uint16_t txt_byte_pos", (void*)offsetof(lv_ta_ext_t, cursor.txt_byte_pos)},
-    {"type", (getter) NULL, (setter) NULL, "lv_cursor_type_t type", NULL},
-    {"state", (getter) NULL, (setter) NULL, "uint8_t state", NULL},
-
+    {"style", (getter) struct_get_struct, (setter) struct_set_struct, "lv_style_t style", & ((struct_closure_t){ &Blob_Type, (offsetof(lv_ta_ext_t, cursor.style)-offsetof(lv_ta_ext_t, cursor)), sizeof(((lv_ta_ext_t *)0)->cursor.style)})},
+    {"valid_x", (getter) struct_get_int16, (setter) struct_set_int16, "lv_coord_t valid_x", (void*)(offsetof(lv_ta_ext_t, cursor.valid_x)-offsetof(lv_ta_ext_t, cursor))},
+    {"pos", (getter) struct_get_uint16, (setter) struct_set_uint16, "uint16_t pos", (void*)(offsetof(lv_ta_ext_t, cursor.pos)-offsetof(lv_ta_ext_t, cursor))},
+    {"area", (getter) struct_get_struct, (setter) struct_set_struct, "lv_area_t area", & ((struct_closure_t){ &pylv_area_t_Type, (offsetof(lv_ta_ext_t, cursor.area)-offsetof(lv_ta_ext_t, cursor)), sizeof(lv_area_t)})},
+    {"txt_byte_pos", (getter) struct_get_uint16, (setter) struct_set_uint16, "uint16_t txt_byte_pos", (void*)(offsetof(lv_ta_ext_t, cursor.txt_byte_pos)-offsetof(lv_ta_ext_t, cursor))},
+    {"type", (getter) get_struct_bitfield_ta_ext_t_cursor_type, (setter) set_struct_bitfield_ta_ext_t_cursor_type, "lv_cursor_type_t:4 type", NULL},
+    {"state", (getter) get_struct_bitfield_ta_ext_t_cursor_state, (setter) set_struct_bitfield_ta_ext_t_cursor_state, "uint8_t:1 state", NULL},
     {NULL}
 };
+
 
 static PyTypeObject pylv_ta_ext_t_cursor_Type = {
     PyVarObject_HEAD_INIT(NULL, 0)
@@ -4543,7 +6490,8 @@ static PyTypeObject pylv_ta_ext_t_cursor_Type = {
     .tp_new = NULL, // sub structs cannot be instantiated
     .tp_dealloc = (destructor) Struct_dealloc,
     .tp_getset = pylv_ta_ext_t_cursor_getset,
-    .tp_repr = (reprfunc) Struct_repr
+    .tp_repr = (reprfunc) Struct_repr,
+    .tp_as_buffer = &Struct_bufferprocs
 };
 
 

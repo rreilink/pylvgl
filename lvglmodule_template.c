@@ -177,12 +177,13 @@ error:
 typedef struct {
     PyObject_HEAD
     void *data;
+    size_t size;
     PyObject *owner; // NULL = reference to global C data, self=allocated @ init, other object=sharing from that object; decref when we are deallocated
 } StructObject;
 
 static PyObject*
 Struct_repr(StructObject *self) {
-    return PyUnicode_FromFormat("<%s struct at %p data = %p owner = %p>", Py_TYPE(self)->tp_name, self, self->data, self->owner);
+    return PyUnicode_FromFormat("<%s struct at %p data = %p (%d bytes) owner = %p>", Py_TYPE(self)->tp_name, self, self->data, self->size, self->owner);
 }
 
 static void
@@ -196,6 +197,18 @@ Struct_dealloc(StructObject *self)
     Py_TYPE(self)->tp_free((PyObject *) self);
 }
 
+// Provide a read-write buffer to the binary data in this struct
+static int Struct_getbuffer(PyObject *exporter, Py_buffer *view, int flags) {
+    return PyBuffer_FillInfo(view, exporter, ((StructObject*)exporter)->data, ((StructObject*)exporter)->size, 0, flags);
+}
+
+static PyBufferProcs Struct_bufferprocs = {
+    (getbufferproc)Struct_getbuffer,
+    NULL,
+};
+
+
+
 // Struct members whose type is unsupported, get / set a 'blob', which stores
 // a reference to the data, which can be copied but not accessed otherwise
 
@@ -208,7 +221,8 @@ static PyTypeObject Blob_Type = {
     .tp_flags = Py_TPFLAGS_DEFAULT | Py_TPFLAGS_BASETYPE,
     .tp_new = NULL, // cannot be instantiated
     .tp_repr = (reprfunc) Struct_repr,
-    .tp_dealloc = (destructor) Struct_dealloc
+    .tp_dealloc = (destructor) Struct_dealloc,
+    .tp_as_buffer = &Struct_bufferprocs
 };
 
 
@@ -246,59 +260,40 @@ struct_set_{type}(StructObject *self, PyObject *value, void *closure)
 /* struct member getter/setter for type 'struct' for sub-structs and unions */
 typedef struct {
   PyTypeObject *type;
-  size_t offset_from_base;
+  size_t offset;
   size_t size;
 } struct_closure_t;
 
 static PyObject *
-struct_get_struct(StructObject *self, void *closure) {
-    StructObject *ret;
-    
-    ret = (StructObject*)PyObject_New(StructObject, ((struct_closure_t*)closure)->type);
+struct_get_struct(StructObject *self, struct_closure_t *closure) {
+    StructObject *ret;    
+    ret = (StructObject*)PyObject_New(StructObject, closure->type);
     if (ret) {
         ret->owner = self->owner;
         Py_INCREF(self->owner);
-        ret->data = self->data;
+        ret->data = self->data + closure->offset;
+        ret->size = closure->size;
     }
     return (PyObject*)ret;
 
 }
 
 static int
-struct_set_struct(StructObject *self, PyObject *value, void *closure_voidp) {
-    struct_closure_t *closure = closure_voidp; // cast to struct_closure_t for convenience
-    
+struct_set_struct(StructObject *self, PyObject *value, struct_closure_t *closure) {
     int isinstance = PyObject_IsInstance(value, (PyObject *)closure->type);
     if (isinstance == -1) return -1; // error
     if (!isinstance) {
-        return PyErr_Format(PyExc_TypeError, "value should be an instance of '%s'", closure->type->tp_name);
+        PyErr_Format(PyExc_TypeError, "value should be an instance of '%s'", closure->type->tp_name);
+        return -1;
     }
-    memcpy(self->data + closure->offset_from_base, ((StructObject *)value)->data + closure->offset_from_base, closure->size);
+    if(closure->size != ((StructObject *)value)->size) {
+        // Should only happen in case of Blob type; but just check always to be sure
+        PyErr_SetString(PyExc_ValueError, "data size mismatch");
+        return -1;
+    }
+    memcpy(self->data + closure->offset, ((StructObject *)value)->data, closure->size);
     return 0;
 }
-
-
-/* struct member getters/setter for type 'blob' for unknown data */
-static PyObject *
-struct_get_blob(StructObject *self, void *closure)
-{
-    StructObject *ret;
-    ret = (StructObject*)PyObject_New(StructObject, &Blob_Type);
-    if (ret) {
-        ret->owner = self->owner;
-        Py_INCREF(self->owner);
-        ret->data = self->data + (int)closure; // TODO: stash the size in there, too
-    }
-    return (PyObject*)ret;
-}
-
-static int
-struct_set_blob(StructObject *self, PyObject *value, void *closure)
-{
-    PyErr_SetString(PyExc_NotImplementedError, "setting this data type is not supported");
-    return -1;
-}
-
 
 
 
@@ -307,20 +302,17 @@ struct_set_blob(StructObject *self, PyObject *value, void *closure)
 static int
 pylv_{name}_init(StructObject *self, PyObject *args, PyObject *kwds) 
 {{
-
-    self->data = PyMem_Malloc(sizeof(lv_{name}));
+    self->size = sizeof(lv_{name});
+    self->data = PyMem_Malloc(self->size);
     if (!self->data) return -1;
     
-    memset(self->data, 0, sizeof(lv_{name}));
+    memset(self->data, 0, self->size);
     self->owner = (PyObject *)self;
 
     return 0;
 }}
 
-static PyGetSetDef pylv_{name}_getset[] = {{
 {getset}
-    {{NULL}}
-}};
 
 static PyTypeObject pylv_{name}_Type = {{
     PyVarObject_HEAD_INIT(NULL, 0)
@@ -333,18 +325,15 @@ static PyTypeObject pylv_{name}_Type = {{
     .tp_init = (initproc) pylv_{name}_init,
     .tp_dealloc = (destructor) Struct_dealloc,
     .tp_getset = pylv_{name}_getset,
-    .tp_repr = (reprfunc) Struct_repr
-
+    .tp_repr = (reprfunc) Struct_repr,
+    .tp_as_buffer = &Struct_bufferprocs
 }};
 
 >>>
 
 <<<substructs:
 
-static PyGetSetDef pylv_{name}_getset[] = {{
 {getset}
-    {{NULL}}
-}};
 
 static PyTypeObject pylv_{name}_Type = {{
     PyVarObject_HEAD_INIT(NULL, 0)
@@ -356,7 +345,8 @@ static PyTypeObject pylv_{name}_Type = {{
     .tp_new = NULL, // sub structs cannot be instantiated
     .tp_dealloc = (destructor) Struct_dealloc,
     .tp_getset = pylv_{name}_getset,
-    .tp_repr = (reprfunc) Struct_repr
+    .tp_repr = (reprfunc) Struct_repr,
+    .tp_as_buffer = &Struct_bufferprocs
 }};
 
 >>>

@@ -341,33 +341,72 @@ class PythonStruct(Struct):
     def getset(self):
    
         
-        code = ''
+        code = f'static PyGetSetDef pylv_{self.name}_getset[] = {{\n'
+        bitfieldscode = ''
+        
+
         for decl in self.get_flattened_decls():
             assert decl.name
-            offsetcode = f'offsetof(lv_{self.basename}, {self.subpath}{decl.name})'
+            if self.subpath:
+                offsetcode = f'(offsetof(lv_{self.basename}, {self.subpath}{decl.name})-offsetof(lv_{self.basename}, {self.subpath[:-1]}))'
+            else:
+                offsetcode = f'offsetof(lv_{self.basename}, {decl.name})'
+            
+ 
             
             if isinstance(decl.type.type, (c_ast.Struct, c_ast.Union)):
                 getter, setter = 'struct_get_struct', 'struct_set_struct'
-                # the closure is a struct of PyTypObject*, offset (w.r.t. base type), size (in bytes)
+                # the closure for struct & blob is a struct of PyTypObject*, offset (w.r.t. base type), size (in bytes)
                 closure = f'& ((struct_closure_t){{ &pylv_{self.name}_{decl.name}_Type, {offsetcode}, sizeof(((lv_{self.basename} *)0)->{self.subpath}{decl.name})}})'
+            elif decl.bitsize is not None:
+                # Needs a custom getter & setter function
+                getsetname = f'struct_bitfield_{self.name}_{decl.name}'
+                getter, setter = 'get_' + getsetname, 'set_' + getsetname
+                closure = 'NULL'
+                assert(self.bindingsgenerator.deref_typedef(generate_c(decl.type.type)) in ('uint8_t', 'uint16_t', 'uint32_t')) # the following only supports unsigned values for bitfields
+                bitfieldscode += f'''
+
+static PyObject *
+{getter}(StructObject *self, void *closure)
+{{
+    return PyLong_FromLong(((lv_{self.basename}*)(self->data))->{self.subpath}{decl.name} );
+}}
+
+static int
+{setter}(StructObject *self, PyObject *value, void *closure)
+{{
+    long v;
+    if (long_to_int(value, &v, 0, {2**int(decl.bitsize.value)-1})) return -1;
+    ((lv_{self.basename}*)(self->data))->{self.subpath}{decl.name} = v;
+    return 0;
+}}
+
+'''
+                    
             else:
                 typestr = self.bindingsgenerator.deref_typedef(type_repr(decl.type))
-                if decl.bitsize is None:
-                    try:
-                        getter, setter = self.TYPES[typestr]
-                    except KeyError:
-                        print(typestr)
-                        getter, setter = 'struct_get_blob', 'struct_set_blob'
-                        
+
+                if typestr in self.TYPES:
+                    getter, setter = self.TYPES[typestr]
                     closure = f'(void*){offsetcode}'
+                elif typestr.startswith('lv_') and (stripstart(typestr,'lv_') in self.bindingsgenerator.structs):
+                    getter, setter = 'struct_get_struct', 'struct_set_struct'
+                    closure = f'& ((struct_closure_t){{ &py{typestr}_Type, {offsetcode}, sizeof({typestr})}})'
+                else:
+                    # default: blob type
+                    getter, setter = 'struct_get_struct', 'struct_set_struct'
+                    closure = f'& ((struct_closure_t){{ &Blob_Type, {offsetcode}, sizeof(((lv_{self.basename} *)0)->{self.subpath}{decl.name})}})'
+
+                    print(self.name, typestr)
                     
-                else: # bit fields unsupported so far
-                    getter, setter, closure = 'NULL', 'NULL', 'NULL'
             
-            typedoc = generate_c(decl.type).replace('\n', ' ')
+            typedoc = generate_c(decl.type).replace('\n', ' ') + (f':{decl.bitsize.value}' if decl.bitsize else '')
             code += f'    {{"{decl.name}", (getter) {getter}, (setter) {setter}, "{typedoc} {decl.name}", {closure}}},\n'
-            
-        return code
+        
+        code += '    {NULL}\n};\n'
+
+        
+        return bitfieldscode + code
 
 
 class PythonBindingsGenerator(BindingsGenerator):
