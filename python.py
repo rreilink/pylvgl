@@ -397,8 +397,6 @@ static int
                     getter, setter = 'struct_get_struct', 'struct_set_struct'
                     closure = f'& ((struct_closure_t){{ &Blob_Type, {offsetcode}, sizeof(((lv_{self.basename} *)0)->{self.subpath}{decl.name})}})'
 
-                    print(self.name, typestr)
-                    
             
             typedoc = generate_c(decl.type).replace('\n', ' ') + (f':{decl.bitsize.value}' if decl.bitsize else '')
             code += f'    {{"{decl.name}", (getter) {getter}, (setter) {setter}, "{typedoc} {decl.name}", {closure}}},\n'
@@ -474,7 +472,14 @@ class PythonBindingsGenerator(BindingsGenerator):
             for name in self.parseresult.defines
             if name.startswith('SYMBOL_')
             )
-
+            
+    def get_GLOBALS_ASSIGNMENTS(self):
+        code = ''
+        for name, type in self.parseresult.declarations.items():
+            typename = type_repr(type)
+            code += f'   PyModule_AddObject(module, "{name}", Struct_fromglobal(&py{typename}_Type, &{type.declname}, sizeof({typename})));\n'
+            
+        return code
 
 if __name__ == '__main__':
     import sourceparser

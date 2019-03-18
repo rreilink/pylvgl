@@ -207,6 +207,19 @@ static PyBufferProcs Struct_bufferprocs = {
     NULL,
 };
 
+// Helper to create struct object for global lvgl variables
+static PyObject *
+Struct_fromglobal(PyTypeObject *type, void* ptr, size_t size) {
+    StructObject *ret;    
+    ret = (StructObject*)PyObject_New(StructObject, type);
+    if (ret) {
+        ret->owner = NULL; // owner = NULL means: global data, do not free
+        ret->data = ptr;
+        ret->size = size;
+    }
+    return (PyObject*)ret;
+
+}
 
 
 // Struct members whose type is unsupported, get / set a 'blob', which stores
@@ -731,6 +744,8 @@ PyInit_lvgl(void) {
 <<ENUM_ASSIGNMENTS>>
 
 <<SYMBOL_ASSIGNMENTS>>
+
+<<GLOBALS_ASSIGNMENTS>>
 
     // refcount for typesdict is initally 1; it is used by pyobj_from_lv
     // refcounts to py{name}_Type objects are incremented due to "O" format

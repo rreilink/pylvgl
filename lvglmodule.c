@@ -558,6 +558,19 @@ static PyBufferProcs Struct_bufferprocs = {
     NULL,
 };
 
+// Helper to create struct object for global lvgl variables
+static PyObject *
+Struct_fromglobal(PyTypeObject *type, void* ptr, size_t size) {
+    StructObject *ret;    
+    ret = (StructObject*)PyObject_New(StructObject, type);
+    if (ret) {
+        ret->owner = NULL; // owner = NULL means: global data, do not free
+        ret->data = ptr;
+        ret->size = size;
+    }
+    return (PyObject*)ret;
+
+}
 
 
 // Struct members whose type is unsupported, get / set a 'blob', which stores
@@ -14402,6 +14415,25 @@ PyInit_lvgl(void) {
     PyModule_AddObject(module, "SPINBOX_STYLE", build_enum("SPINBOX_STYLE", "BG", LV_SPINBOX_STYLE_BG, "SB", LV_SPINBOX_STYLE_SB, "CURSOR", LV_SPINBOX_STYLE_CURSOR, NULL));
 
 
+
+
+   PyModule_AddObject(module, "font_dejavu_20", Struct_fromglobal(&pylv_font_t_Type, &lv_font_dejavu_20, sizeof(lv_font_t)));
+   PyModule_AddObject(module, "font_dejavu_20_latin_sup", Struct_fromglobal(&pylv_font_t_Type, &lv_font_dejavu_20_latin_sup, sizeof(lv_font_t)));
+   PyModule_AddObject(module, "font_dejavu_20_cyrillic", Struct_fromglobal(&pylv_font_t_Type, &lv_font_dejavu_20_cyrillic, sizeof(lv_font_t)));
+   PyModule_AddObject(module, "font_symbol_20", Struct_fromglobal(&pylv_font_t_Type, &lv_font_symbol_20, sizeof(lv_font_t)));
+   PyModule_AddObject(module, "style_scr", Struct_fromglobal(&pylv_style_t_Type, &lv_style_scr, sizeof(lv_style_t)));
+   PyModule_AddObject(module, "style_transp", Struct_fromglobal(&pylv_style_t_Type, &lv_style_transp, sizeof(lv_style_t)));
+   PyModule_AddObject(module, "style_transp_fit", Struct_fromglobal(&pylv_style_t_Type, &lv_style_transp_fit, sizeof(lv_style_t)));
+   PyModule_AddObject(module, "style_transp_tight", Struct_fromglobal(&pylv_style_t_Type, &lv_style_transp_tight, sizeof(lv_style_t)));
+   PyModule_AddObject(module, "style_plain", Struct_fromglobal(&pylv_style_t_Type, &lv_style_plain, sizeof(lv_style_t)));
+   PyModule_AddObject(module, "style_plain_color", Struct_fromglobal(&pylv_style_t_Type, &lv_style_plain_color, sizeof(lv_style_t)));
+   PyModule_AddObject(module, "style_pretty", Struct_fromglobal(&pylv_style_t_Type, &lv_style_pretty, sizeof(lv_style_t)));
+   PyModule_AddObject(module, "style_pretty_color", Struct_fromglobal(&pylv_style_t_Type, &lv_style_pretty_color, sizeof(lv_style_t)));
+   PyModule_AddObject(module, "style_btn_rel", Struct_fromglobal(&pylv_style_t_Type, &lv_style_btn_rel, sizeof(lv_style_t)));
+   PyModule_AddObject(module, "style_btn_pr", Struct_fromglobal(&pylv_style_t_Type, &lv_style_btn_pr, sizeof(lv_style_t)));
+   PyModule_AddObject(module, "style_btn_tgl_rel", Struct_fromglobal(&pylv_style_t_Type, &lv_style_btn_tgl_rel, sizeof(lv_style_t)));
+   PyModule_AddObject(module, "style_btn_tgl_pr", Struct_fromglobal(&pylv_style_t_Type, &lv_style_btn_tgl_pr, sizeof(lv_style_t)));
+   PyModule_AddObject(module, "style_btn_ina", Struct_fromglobal(&pylv_style_t_Type, &lv_style_btn_ina, sizeof(lv_style_t)));
 
 
     // refcount for typesdict is initally 1; it is used by pyobj_from_lv

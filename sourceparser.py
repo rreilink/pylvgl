@@ -133,7 +133,7 @@ class LvglSourceParser:
                                             
                     
             elif isinstance(item, c_ast.Decl) and isinstance(item.type, c_ast.TypeDecl):
-                declarations[item.type.declname] = item.type
+                declarations[stripstart(item.type.declname, 'lv_')] = item.type
 
             previous_item = item
     
