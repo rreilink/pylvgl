@@ -57,28 +57,27 @@ lst.set_height(200)
 lst.set_sb_mode(lvgl.SB_MODE.AUTO)
 
 # No spacing between items
-st1 = lst.get_style(lvgl.LIST_STYLE.SCRL).copy()
-st1.body_padding_inner = 0
+st1 = lvgl.style_t(lst.get_style(lvgl.LIST_STYLE.SCRL))
+st1.body.padding.inner = 0
 lst.set_style(lvgl.LIST_STYLE.SCRL, st1)
 
-style = lvgl.style_plain.copy() # copy
-style.body_main_color = 0xffff
-style.body_grad_color = 0xffff
-style.text_color = 0
-style.body_padding_ver = 0
+style = lvgl.style_t(lvgl.style_plain)
+style.body.main_color = {'full' : 0xffff}
+style.body.grad_color = {'full' : 0xffff}
+style.text.color = {'full': 0}
+style.body.padding.ver = 0
 
 for st in [lvgl.LIST_STYLE.BTN_PR, lvgl.LIST_STYLE.BTN_REL, lvgl.LIST_STYLE.BTN_TGL_PR, lvgl.LIST_STYLE.BTN_TGL_REL]:
-    lst.set_style(st, style)
-
+    lst.set_style(st, lvgl.style_plain)
 
 
 items = [lst.add(None, f'Btn {i}', None) for i in range(20)]
 
 
 
-symbolstyle = lvgl.style_plain
-symbolstyle.text_font = lvgl.font_symbol_40
-symbolstyle.text_color = 0xffff
+symbolstyle = lvgl.style_t(lvgl.style_plain)
+#symbolstyle.text_font = lvgl.font_symbol_40
+symbolstyle.text.color = {'full' : 0xffff}
 
 class SymbolButton(lvgl.Btn):
     def __init__(self, symbol, text, *args, **kwds):
@@ -120,7 +119,12 @@ class MainMenu(lvgl.Obj):
         self.lblStatus.set_text('\uf026 heating')
         self.lblStatus.align(self, lvgl.ALIGN.IN_BOTTOM_LEFT, 5, -5)
         
-        
+# TODO: replace this
+lvgl.SYMBOL_PLAY = '\uf812'
+lvgl.SYMBOL_SHUFFLE = '\uf81c'
+lvgl.SYMBOL_CHARGE = '\uf826'
+lvgl.SYMBOL_SETTINGS = '\uf806'
+
         
 s3 = MainMenu()
 
@@ -128,10 +132,11 @@ s4 = lvgl.Obj()
 kb = lvgl.Kb(s4)
 lvgl.scr_load(s2)
 
-s3.btnPrint.set_action(lvgl.BTN_ACTION.CLICK, lambda: print('click'))
-s3.btnPrint.set_action(lvgl.BTN_ACTION.PR, lambda: print('press'))
-s3.btnPrint.set_action(lvgl.BTN_ACTION.LONG_PR, lambda: print('long press'))
-s3.btnPrint.set_action(lvgl.BTN_ACTION.LONG_PR_REPEAT, lambda: print('long press repeat'))
+# todo: support for event handlers
+# s3.btnPrint.set_action(lvgl.BTN_ACTION.CLICK, lambda: print('click'))
+# s3.btnPrint.set_action(lvgl.BTN_ACTION.PR, lambda: print('press'))
+# s3.btnPrint.set_action(lvgl.BTN_ACTION.LONG_PR, lambda: print('long press'))
+# s3.btnPrint.set_action(lvgl.BTN_ACTION.LONG_PR_REPEAT, lambda: print('long press repeat'))
 
 print(s3.btnPrint.get_type())
 

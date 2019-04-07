@@ -94,9 +94,7 @@ PyObject * pyobj_from_lv(lv_obj_t *obj) {
     
     pyobj = *lv_obj_get_user_data(obj);
     
-    if (pyobj) {
-        Py_INCREF(pyobj); // increase reference count of returned object
-    } else {
+    if (!pyobj) {
         // Python object for this lv object does not yet exist. Create a new one
         // Be sure to zero out the memory
         
@@ -113,11 +111,43 @@ PyObject * pyobj_from_lv(lv_obj_t *obj) {
         PyObject_Init((PyObject *)pyobj, tp);
         pyobj -> ref = obj;
         *lv_obj_get_user_data(obj) = pyobj;
+        // reference count for pyobj is 1 -- the reference stored in the lvgl object user_data
     }
+
+    Py_INCREF(pyobj); // increase reference count of returned object
     
     return (PyObject *)pyobj;
 }
 
+/* Given a pointer to a c struct, return the Python struct object
+ * of that struct.
+ *
+ * This is only possible for struct pointers that already have an
+ * associated Python object, i.e. the global ones and those
+ * created from Python
+ *
+ * The module global struct_dict dictionary stores all struct
+ * objects known
+ */
+ 
+static PyObject* struct_dict;
+
+static PyObject *pystruct_from_lv(void *c_struct) {
+    PyObject *ret;
+    PyObject *ptr;
+    ptr = PyLong_FromVoidPtr(c_struct);
+    if (!ptr) return NULL;
+    
+    ret = PyDict_GetItem(struct_dict, ptr);
+    Py_DECREF(ptr);
+
+    if (ret) {
+        Py_INCREF(ret); // ret is a borrowed reference; so need to increase ref count
+    } else {
+        PyErr_SetString(PyExc_RuntimeError, "the returned c struct is unknown to Python");
+    }
+    return ret;
+}
 
 
 /****************************************************************
@@ -178,8 +208,9 @@ typedef struct {
     PyObject_HEAD
     void *data;
     size_t size;
-    PyObject *owner; // NULL = reference to global C data, self=allocated @ init, other object=sharing from that object; decref when we are deallocated
+    PyObject *owner; // NULL = reference to global C data, self=allocated @ init, other object=sharing from that object; decref owner when we are deallocated
 } StructObject;
+
 
 static PyObject*
 Struct_repr(StructObject *self) {
@@ -208,16 +239,36 @@ static PyBufferProcs Struct_bufferprocs = {
 };
 
 // Helper to create struct object for global lvgl variables
+// This also adds those Python objects to struct_dict so that they can be
+// returned from object calls
 static PyObject *
 Struct_fromglobal(PyTypeObject *type, void* ptr, size_t size) {
-    StructObject *ret;    
+    StructObject *ret = 0;
+    PyObject *ptr_long = 0;
     ret = (StructObject*)PyObject_New(StructObject, type);
-    if (ret) {
-        ret->owner = NULL; // owner = NULL means: global data, do not free
-        ret->data = ptr;
-        ret->size = size;
+    if (!ret) return NULL;
+
+    ptr_long = PyLong_FromVoidPtr(ptr);
+    
+    if (!ptr_long) {
+        Py_DECREF(ret);
+        return NULL;
     }
+    
+    if (PyDict_SetItem(struct_dict, ptr_long, (PyObject*) ret)) { // todo: use weak references
+        Py_DECREF(ret);
+        Py_DECREF(ptr_long);
+        return NULL;
+    }
+
+    Py_DECREF(ptr_long);
+
+    ret->owner = NULL; // owner = NULL means: global data, do not free
+    ret->data = ptr;
+    ret->size = size;
+
     return (PyObject*)ret;
+
 
 }
 
@@ -291,12 +342,46 @@ struct_get_struct(StructObject *self, struct_closure_t *closure) {
 
 }
 
+
+/* Generic setter for atrributes which are a struct
+ *
+ * Setting can be via either an object of the same type, or via a dict,
+ * which is passed as a keyword argument dict to a constructor of the struct
+ * for the appropriate type
+ *
+ * NOTE: if setting items via a dict fails, some items may have been set already
+ */
 static int
 struct_set_struct(StructObject *self, PyObject *value, struct_closure_t *closure) {
+
+    PyObject *attr = NULL;
+    if (PyDict_Check(value)) {
+        // Set attribute sub-items from dictionary items
+    
+        // get a struct object for the attribute we are setting
+        attr = struct_get_struct(self, closure);
+        if (!attr) return -1;
+        
+        // Iterate over the value dictionary
+        PyObject *dict_key, *dict_value;
+        Py_ssize_t pos = 0;
+        
+        while (PyDict_Next(value, &pos, &dict_key, &dict_value)) {
+            // Set the attribute on the attr attribute
+            if (PyObject_SetAttr(attr, dict_key, dict_value)) return -1;
+        }  
+        
+        Py_DECREF(attr);
+        return 0;
+        
+    }
+    
+    
     int isinstance = PyObject_IsInstance(value, (PyObject *)closure->type);
+    
     if (isinstance == -1) return -1; // error
     if (!isinstance) {
-        PyErr_Format(PyExc_TypeError, "value should be an instance of '%s'", closure->type->tp_name);
+        PyErr_Format(PyExc_TypeError, "value should be an instance of '%s' or a dict", closure->type->tp_name);
         return -1;
     }
     if(closure->size != ((StructObject *)value)->size) {
@@ -305,6 +390,7 @@ struct_set_struct(StructObject *self, PyObject *value, struct_closure_t *closure
         return -1;
     }
     memcpy(self->data + closure->offset, ((StructObject *)value)->data, closure->size);
+    
     return 0;
 }
 
@@ -315,12 +401,32 @@ struct_set_struct(StructObject *self, PyObject *value, struct_closure_t *closure
 static int
 pylv_{name}_init(StructObject *self, PyObject *args, PyObject *kwds) 
 {{
+    StructObject *copy = NULL;
+    // copy is a positional-only argument
+    if (!PyArg_ParseTuple(args, "|O!", &pylv_{name}_Type, &copy)) return -1;
+    
     self->size = sizeof(lv_{name});
     self->data = PyMem_Malloc(self->size);
     if (!self->data) return -1;
     
-    memset(self->data, 0, self->size);
+    if (copy) {{
+        assert(self->size == copy->size); // should be same size, since same type
+        memcpy(self->data, copy->data, self->size);
+    }} else {{
+        memset(self->data, 0, self->size);
+    }}
+    
     self->owner = (PyObject *)self;
+
+    if (kwds) {{
+        // all keyword arguments are attribute-assignments
+        PyObject *key, *value;
+        Py_ssize_t pos = 0;
+        
+        while (PyDict_Next(kwds, &pos, &key, &value)) {{
+            if (PyObject_SetAttr((PyObject*)self, key, value)) return -1;
+        }}   
+    }}
 
     return 0;
 }}
@@ -341,6 +447,23 @@ static PyTypeObject pylv_{name}_Type = {{
     .tp_repr = (reprfunc) Struct_repr,
     .tp_as_buffer = &Struct_bufferprocs
 }};
+
+static int pylv_{name}_arg_converter(PyObject *obj, void* target) {{
+    int isinst;
+    // TODO: support dictionary as argument; create a new struct object in that case
+    isinst = PyObject_IsInstance(obj, (PyObject*)&pylv_{name}_Type);
+    if (isinst == 0) {{
+        PyErr_Format(PyExc_TypeError, "argument should be of type lv_{name}");
+    }}
+    if (isinst != 1) {{
+        return 0;
+    }}
+    *(lv_{name} **)target = ((StructObject*)obj) -> data;
+    Py_INCREF(obj); // Required since **target now uses the data. TODO: this leaks a reference; also support Py_CLEANUP_SUPPORTED
+    return 1;
+
+}}
+
 
 >>>
 
@@ -729,6 +852,10 @@ PyInit_lvgl(void) {
     if (PyType_Ready(&pylv_{name}_Type) < 0) return NULL;
 >>>
 
+    struct_dict = PyDict_New();
+    if (!struct_dict) return NULL;
+    //TODO: remove
+    PyModule_AddObject(module, "_structs_", struct_dict);
 
 <<<objects:
     Py_INCREF(&pylv_{name}_Type);

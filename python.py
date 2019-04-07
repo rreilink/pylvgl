@@ -38,9 +38,13 @@ class PythonObject(Object):
         'uint32_t':  ('I', 'unsigned int'),
         'int32_t':  ('I', 'int'),
         }
-    
+    # TODO: from structs!
+
+    TYPECONV.update({'lv_style_t*':     ('O&', 'lv_style_t *')})
+
     TYPECONV_PARAMETER = TYPECONV.copy()
     TYPECONV_PARAMETER.update({'const lv_obj_t*': ('O!', 'pylv_Obj *')})
+
     
     TYPECONV_RETURN = TYPECONV.copy()
     TYPECONV_RETURN.update({'char*':     ('s', 'char *')})
@@ -79,7 +83,7 @@ py{method.decl.name}(pylv_Obj *self, PyObject *args, PyObject *kwds)
        
         paramnames = []
         paramctypes = []
-        paramfmt = ''
+        paramfmts = []
         for param in method.decl.type.args.params:
             paramtype = type_repr(param.type)
             paramtype_derefed = self.bindingsgenerator.deref_typedef(paramtype)
@@ -94,7 +98,7 @@ py{method.decl.name}(pylv_Obj *self, PyObject *args, PyObject *kwds)
             
             paramnames.append(param.name)
             paramctypes.append(ctype)
-            paramfmt += fmt
+            paramfmts.append(fmt)
         
         restype = type_repr(method.decl.type.type)
         
@@ -110,7 +114,7 @@ py{method.decl.name}(pylv_Obj *self, PyObject *args, PyObject *kwds)
         assert paramctypes and paramctypes[0] == 'pylv_Obj *'
         paramnames.pop(0)
         paramctypes.pop(0)
-        paramfmt = paramfmt[2:]
+        paramfmts.pop(0)
         
         code = startCode
         kwlist = ''.join('"%s", ' % name for name in paramnames)
@@ -118,17 +122,19 @@ py{method.decl.name}(pylv_Obj *self, PyObject *args, PyObject *kwds)
         
         crefvarlist = ''
         cvarlist = ''
-        for name, ctype in zip(paramnames, paramctypes):
+        for name, ctype, fmt in zip(paramnames, paramctypes, paramfmts):
             code += f'    {ctype} {name};\n'
             if ctype == 'pylv_Obj *' : # Object, convert from Python
                 crefvarlist += f', &pylv_obj_Type, &{name}'
                 cvarlist += f', {name}->ref'
-                
+            elif fmt == 'O&': # struct
+                crefvarlist += f', py{ctype.rstrip(" *")}_arg_converter, &{name}'
+                cvarlist += f', {name}'
             else:
                 crefvarlist += f', &{name}'
                 cvarlist += f', {name}'
         
-        code += f'    if (!PyArg_ParseTupleAndKeywords(args, kwds, "{paramfmt}", kwlist {crefvarlist})) return NULL;\n'
+        code += f'    if (!PyArg_ParseTupleAndKeywords(args, kwds, "{"".join(paramfmts)}", kwlist {crefvarlist})) return NULL;\n'
         
         callcode = f'{method.decl.name}(self->ref{cvarlist})'
         
@@ -151,6 +157,14 @@ py{method.decl.name}(pylv_Obj *self, PyObject *args, PyObject *kwds)
     LVGL_UNLOCK
     Py_RETURN_NONE;
 '''
+        elif resfmt == 'O&':
+            code += f'''
+    LVGL_LOCK        
+    {resctype} result = {callcode};
+    LVGL_UNLOCK
+    return pystruct_from_lv(result);            
+'''
+
         else:
             code += f'''
     LVGL_LOCK        
@@ -483,10 +497,10 @@ class PythonBindingsGenerator(BindingsGenerator):
 
 if __name__ == '__main__':
     import sourceparser
-    try:
-        parseresult
-    except NameError:
-        parseresult = sourceparser.LvglSourceParser().parse_sources('lvgl')
+    #try:
+    #    parseresult
+    #except NameError:
+    parseresult = sourceparser.LvglSourceParser().parse_sources('lvgl')
     
     g = PythonBindingsGenerator(parseresult)
     g.generate()

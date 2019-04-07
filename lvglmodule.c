@@ -445,9 +445,7 @@ PyObject * pyobj_from_lv(lv_obj_t *obj) {
     
     pyobj = *lv_obj_get_user_data(obj);
     
-    if (pyobj) {
-        Py_INCREF(pyobj); // increase reference count of returned object
-    } else {
+    if (!pyobj) {
         // Python object for this lv object does not yet exist. Create a new one
         // Be sure to zero out the memory
         
@@ -464,11 +462,43 @@ PyObject * pyobj_from_lv(lv_obj_t *obj) {
         PyObject_Init((PyObject *)pyobj, tp);
         pyobj -> ref = obj;
         *lv_obj_get_user_data(obj) = pyobj;
+        // reference count for pyobj is 1 -- the reference stored in the lvgl object user_data
     }
+
+    Py_INCREF(pyobj); // increase reference count of returned object
     
     return (PyObject *)pyobj;
 }
 
+/* Given a pointer to a c struct, return the Python struct object
+ * of that struct.
+ *
+ * This is only possible for struct pointers that already have an
+ * associated Python object, i.e. the global ones and those
+ * created from Python
+ *
+ * The module global struct_dict dictionary stores all struct
+ * objects known
+ */
+ 
+static PyObject* struct_dict;
+
+static PyObject *pystruct_from_lv(void *c_struct) {
+    PyObject *ret;
+    PyObject *ptr;
+    ptr = PyLong_FromVoidPtr(c_struct);
+    if (!ptr) return NULL;
+    
+    ret = PyDict_GetItem(struct_dict, ptr);
+    Py_DECREF(ptr);
+
+    if (ret) {
+        Py_INCREF(ret); // ret is a borrowed reference; so need to increase ref count
+    } else {
+        PyErr_SetString(PyExc_RuntimeError, "the returned c struct is unknown to Python");
+    }
+    return ret;
+}
 
 
 /****************************************************************
@@ -529,8 +559,9 @@ typedef struct {
     PyObject_HEAD
     void *data;
     size_t size;
-    PyObject *owner; // NULL = reference to global C data, self=allocated @ init, other object=sharing from that object; decref when we are deallocated
+    PyObject *owner; // NULL = reference to global C data, self=allocated @ init, other object=sharing from that object; decref owner when we are deallocated
 } StructObject;
+
 
 static PyObject*
 Struct_repr(StructObject *self) {
@@ -559,16 +590,36 @@ static PyBufferProcs Struct_bufferprocs = {
 };
 
 // Helper to create struct object for global lvgl variables
+// This also adds those Python objects to struct_dict so that they can be
+// returned from object calls
 static PyObject *
 Struct_fromglobal(PyTypeObject *type, void* ptr, size_t size) {
-    StructObject *ret;    
+    StructObject *ret = 0;
+    PyObject *ptr_long = 0;
     ret = (StructObject*)PyObject_New(StructObject, type);
-    if (ret) {
-        ret->owner = NULL; // owner = NULL means: global data, do not free
-        ret->data = ptr;
-        ret->size = size;
+    if (!ret) return NULL;
+
+    ptr_long = PyLong_FromVoidPtr(ptr);
+    
+    if (!ptr_long) {
+        Py_DECREF(ret);
+        return NULL;
     }
+    
+    if (PyDict_SetItem(struct_dict, ptr_long, (PyObject*) ret)) { // todo: use weak references
+        Py_DECREF(ret);
+        Py_DECREF(ptr_long);
+        return NULL;
+    }
+
+    Py_DECREF(ptr_long);
+
+    ret->owner = NULL; // owner = NULL means: global data, do not free
+    ret->data = ptr;
+    ret->size = size;
+
     return (PyObject*)ret;
+
 
 }
 
@@ -722,12 +773,46 @@ struct_get_struct(StructObject *self, struct_closure_t *closure) {
 
 }
 
+
+/* Generic setter for atrributes which are a struct
+ *
+ * Setting can be via either an object of the same type, or via a dict,
+ * which is passed as a keyword argument dict to a constructor of the struct
+ * for the appropriate type
+ *
+ * NOTE: if setting items via a dict fails, some items may have been set already
+ */
 static int
 struct_set_struct(StructObject *self, PyObject *value, struct_closure_t *closure) {
+
+    PyObject *attr = NULL;
+    if (PyDict_Check(value)) {
+        // Set attribute sub-items from dictionary items
+    
+        // get a struct object for the attribute we are setting
+        attr = struct_get_struct(self, closure);
+        if (!attr) return -1;
+        
+        // Iterate over the value dictionary
+        PyObject *dict_key, *dict_value;
+        Py_ssize_t pos = 0;
+        
+        while (PyDict_Next(value, &pos, &dict_key, &dict_value)) {
+            // Set the attribute on the attr attribute
+            if (PyObject_SetAttr(attr, dict_key, dict_value)) return -1;
+        }  
+        
+        Py_DECREF(attr);
+        return 0;
+        
+    }
+    
+    
     int isinstance = PyObject_IsInstance(value, (PyObject *)closure->type);
+    
     if (isinstance == -1) return -1; // error
     if (!isinstance) {
-        PyErr_Format(PyExc_TypeError, "value should be an instance of '%s'", closure->type->tp_name);
+        PyErr_Format(PyExc_TypeError, "value should be an instance of '%s' or a dict", closure->type->tp_name);
         return -1;
     }
     if(closure->size != ((StructObject *)value)->size) {
@@ -736,6 +821,7 @@ struct_set_struct(StructObject *self, PyObject *value, struct_closure_t *closure
         return -1;
     }
     memcpy(self->data + closure->offset, ((StructObject *)value)->data, closure->size);
+    
     return 0;
 }
 
@@ -746,12 +832,32 @@ struct_set_struct(StructObject *self, PyObject *value, struct_closure_t *closure
 static int
 pylv_mem_monitor_t_init(StructObject *self, PyObject *args, PyObject *kwds) 
 {
+    StructObject *copy = NULL;
+    // copy is a positional-only argument
+    if (!PyArg_ParseTuple(args, "|O!", &pylv_mem_monitor_t_Type, &copy)) return -1;
+    
     self->size = sizeof(lv_mem_monitor_t);
     self->data = PyMem_Malloc(self->size);
     if (!self->data) return -1;
     
-    memset(self->data, 0, self->size);
+    if (copy) {
+        assert(self->size == copy->size); // should be same size, since same type
+        memcpy(self->data, copy->data, self->size);
+    } else {
+        memset(self->data, 0, self->size);
+    }
+    
     self->owner = (PyObject *)self;
+
+    if (kwds) {
+        // all keyword arguments are attribute-assignments
+        PyObject *key, *value;
+        Py_ssize_t pos = 0;
+        
+        while (PyDict_Next(kwds, &pos, &key, &value)) {
+            if (PyObject_SetAttr((PyObject*)self, key, value)) return -1;
+        }   
+    }
 
     return 0;
 }
@@ -783,17 +889,54 @@ static PyTypeObject pylv_mem_monitor_t_Type = {
     .tp_as_buffer = &Struct_bufferprocs
 };
 
+static int pylv_mem_monitor_t_arg_converter(PyObject *obj, void* target) {
+    int isinst;
+    // TODO: support dictionary as argument; create a new struct object in that case
+    isinst = PyObject_IsInstance(obj, (PyObject*)&pylv_mem_monitor_t_Type);
+    if (isinst == 0) {
+        PyErr_Format(PyExc_TypeError, "argument should be of type lv_mem_monitor_t");
+    }
+    if (isinst != 1) {
+        return 0;
+    }
+    *(lv_mem_monitor_t **)target = ((StructObject*)obj) -> data;
+    Py_INCREF(obj); // Required since **target now uses the data. TODO: this leaks a reference; also support Py_CLEANUP_SUPPORTED
+    return 1;
+
+}
+
+
 
 
 static int
 pylv_ll_t_init(StructObject *self, PyObject *args, PyObject *kwds) 
 {
+    StructObject *copy = NULL;
+    // copy is a positional-only argument
+    if (!PyArg_ParseTuple(args, "|O!", &pylv_ll_t_Type, &copy)) return -1;
+    
     self->size = sizeof(lv_ll_t);
     self->data = PyMem_Malloc(self->size);
     if (!self->data) return -1;
     
-    memset(self->data, 0, self->size);
+    if (copy) {
+        assert(self->size == copy->size); // should be same size, since same type
+        memcpy(self->data, copy->data, self->size);
+    } else {
+        memset(self->data, 0, self->size);
+    }
+    
     self->owner = (PyObject *)self;
+
+    if (kwds) {
+        // all keyword arguments are attribute-assignments
+        PyObject *key, *value;
+        Py_ssize_t pos = 0;
+        
+        while (PyDict_Next(kwds, &pos, &key, &value)) {
+            if (PyObject_SetAttr((PyObject*)self, key, value)) return -1;
+        }   
+    }
 
     return 0;
 }
@@ -821,17 +964,54 @@ static PyTypeObject pylv_ll_t_Type = {
     .tp_as_buffer = &Struct_bufferprocs
 };
 
+static int pylv_ll_t_arg_converter(PyObject *obj, void* target) {
+    int isinst;
+    // TODO: support dictionary as argument; create a new struct object in that case
+    isinst = PyObject_IsInstance(obj, (PyObject*)&pylv_ll_t_Type);
+    if (isinst == 0) {
+        PyErr_Format(PyExc_TypeError, "argument should be of type lv_ll_t");
+    }
+    if (isinst != 1) {
+        return 0;
+    }
+    *(lv_ll_t **)target = ((StructObject*)obj) -> data;
+    Py_INCREF(obj); // Required since **target now uses the data. TODO: this leaks a reference; also support Py_CLEANUP_SUPPORTED
+    return 1;
+
+}
+
+
 
 
 static int
 pylv_task_t_init(StructObject *self, PyObject *args, PyObject *kwds) 
 {
+    StructObject *copy = NULL;
+    // copy is a positional-only argument
+    if (!PyArg_ParseTuple(args, "|O!", &pylv_task_t_Type, &copy)) return -1;
+    
     self->size = sizeof(lv_task_t);
     self->data = PyMem_Malloc(self->size);
     if (!self->data) return -1;
     
-    memset(self->data, 0, self->size);
+    if (copy) {
+        assert(self->size == copy->size); // should be same size, since same type
+        memcpy(self->data, copy->data, self->size);
+    } else {
+        memset(self->data, 0, self->size);
+    }
+    
     self->owner = (PyObject *)self;
+
+    if (kwds) {
+        // all keyword arguments are attribute-assignments
+        PyObject *key, *value;
+        Py_ssize_t pos = 0;
+        
+        while (PyDict_Next(kwds, &pos, &key, &value)) {
+            if (PyObject_SetAttr((PyObject*)self, key, value)) return -1;
+        }   
+    }
 
     return 0;
 }
@@ -896,17 +1076,54 @@ static PyTypeObject pylv_task_t_Type = {
     .tp_as_buffer = &Struct_bufferprocs
 };
 
+static int pylv_task_t_arg_converter(PyObject *obj, void* target) {
+    int isinst;
+    // TODO: support dictionary as argument; create a new struct object in that case
+    isinst = PyObject_IsInstance(obj, (PyObject*)&pylv_task_t_Type);
+    if (isinst == 0) {
+        PyErr_Format(PyExc_TypeError, "argument should be of type lv_task_t");
+    }
+    if (isinst != 1) {
+        return 0;
+    }
+    *(lv_task_t **)target = ((StructObject*)obj) -> data;
+    Py_INCREF(obj); // Required since **target now uses the data. TODO: this leaks a reference; also support Py_CLEANUP_SUPPORTED
+    return 1;
+
+}
+
+
 
 
 static int
 pylv_color1_t_init(StructObject *self, PyObject *args, PyObject *kwds) 
 {
+    StructObject *copy = NULL;
+    // copy is a positional-only argument
+    if (!PyArg_ParseTuple(args, "|O!", &pylv_color1_t_Type, &copy)) return -1;
+    
     self->size = sizeof(lv_color1_t);
     self->data = PyMem_Malloc(self->size);
     if (!self->data) return -1;
     
-    memset(self->data, 0, self->size);
+    if (copy) {
+        assert(self->size == copy->size); // should be same size, since same type
+        memcpy(self->data, copy->data, self->size);
+    } else {
+        memset(self->data, 0, self->size);
+    }
+    
     self->owner = (PyObject *)self;
+
+    if (kwds) {
+        // all keyword arguments are attribute-assignments
+        PyObject *key, *value;
+        Py_ssize_t pos = 0;
+        
+        while (PyDict_Next(kwds, &pos, &key, &value)) {
+            if (PyObject_SetAttr((PyObject*)self, key, value)) return -1;
+        }   
+    }
 
     return 0;
 }
@@ -1003,17 +1220,54 @@ static PyTypeObject pylv_color1_t_Type = {
     .tp_as_buffer = &Struct_bufferprocs
 };
 
+static int pylv_color1_t_arg_converter(PyObject *obj, void* target) {
+    int isinst;
+    // TODO: support dictionary as argument; create a new struct object in that case
+    isinst = PyObject_IsInstance(obj, (PyObject*)&pylv_color1_t_Type);
+    if (isinst == 0) {
+        PyErr_Format(PyExc_TypeError, "argument should be of type lv_color1_t");
+    }
+    if (isinst != 1) {
+        return 0;
+    }
+    *(lv_color1_t **)target = ((StructObject*)obj) -> data;
+    Py_INCREF(obj); // Required since **target now uses the data. TODO: this leaks a reference; also support Py_CLEANUP_SUPPORTED
+    return 1;
+
+}
+
+
 
 
 static int
 pylv_color8_t_init(StructObject *self, PyObject *args, PyObject *kwds) 
 {
+    StructObject *copy = NULL;
+    // copy is a positional-only argument
+    if (!PyArg_ParseTuple(args, "|O!", &pylv_color8_t_Type, &copy)) return -1;
+    
     self->size = sizeof(lv_color8_t);
     self->data = PyMem_Malloc(self->size);
     if (!self->data) return -1;
     
-    memset(self->data, 0, self->size);
+    if (copy) {
+        assert(self->size == copy->size); // should be same size, since same type
+        memcpy(self->data, copy->data, self->size);
+    } else {
+        memset(self->data, 0, self->size);
+    }
+    
     self->owner = (PyObject *)self;
+
+    if (kwds) {
+        // all keyword arguments are attribute-assignments
+        PyObject *key, *value;
+        Py_ssize_t pos = 0;
+        
+        while (PyDict_Next(kwds, &pos, &key, &value)) {
+            if (PyObject_SetAttr((PyObject*)self, key, value)) return -1;
+        }   
+    }
 
     return 0;
 }
@@ -1040,17 +1294,54 @@ static PyTypeObject pylv_color8_t_Type = {
     .tp_as_buffer = &Struct_bufferprocs
 };
 
+static int pylv_color8_t_arg_converter(PyObject *obj, void* target) {
+    int isinst;
+    // TODO: support dictionary as argument; create a new struct object in that case
+    isinst = PyObject_IsInstance(obj, (PyObject*)&pylv_color8_t_Type);
+    if (isinst == 0) {
+        PyErr_Format(PyExc_TypeError, "argument should be of type lv_color8_t");
+    }
+    if (isinst != 1) {
+        return 0;
+    }
+    *(lv_color8_t **)target = ((StructObject*)obj) -> data;
+    Py_INCREF(obj); // Required since **target now uses the data. TODO: this leaks a reference; also support Py_CLEANUP_SUPPORTED
+    return 1;
+
+}
+
+
 
 
 static int
 pylv_color16_t_init(StructObject *self, PyObject *args, PyObject *kwds) 
 {
+    StructObject *copy = NULL;
+    // copy is a positional-only argument
+    if (!PyArg_ParseTuple(args, "|O!", &pylv_color16_t_Type, &copy)) return -1;
+    
     self->size = sizeof(lv_color16_t);
     self->data = PyMem_Malloc(self->size);
     if (!self->data) return -1;
     
-    memset(self->data, 0, self->size);
+    if (copy) {
+        assert(self->size == copy->size); // should be same size, since same type
+        memcpy(self->data, copy->data, self->size);
+    } else {
+        memset(self->data, 0, self->size);
+    }
+    
     self->owner = (PyObject *)self;
+
+    if (kwds) {
+        // all keyword arguments are attribute-assignments
+        PyObject *key, *value;
+        Py_ssize_t pos = 0;
+        
+        while (PyDict_Next(kwds, &pos, &key, &value)) {
+            if (PyObject_SetAttr((PyObject*)self, key, value)) return -1;
+        }   
+    }
 
     return 0;
 }
@@ -1077,17 +1368,54 @@ static PyTypeObject pylv_color16_t_Type = {
     .tp_as_buffer = &Struct_bufferprocs
 };
 
+static int pylv_color16_t_arg_converter(PyObject *obj, void* target) {
+    int isinst;
+    // TODO: support dictionary as argument; create a new struct object in that case
+    isinst = PyObject_IsInstance(obj, (PyObject*)&pylv_color16_t_Type);
+    if (isinst == 0) {
+        PyErr_Format(PyExc_TypeError, "argument should be of type lv_color16_t");
+    }
+    if (isinst != 1) {
+        return 0;
+    }
+    *(lv_color16_t **)target = ((StructObject*)obj) -> data;
+    Py_INCREF(obj); // Required since **target now uses the data. TODO: this leaks a reference; also support Py_CLEANUP_SUPPORTED
+    return 1;
+
+}
+
+
 
 
 static int
 pylv_color32_t_init(StructObject *self, PyObject *args, PyObject *kwds) 
 {
+    StructObject *copy = NULL;
+    // copy is a positional-only argument
+    if (!PyArg_ParseTuple(args, "|O!", &pylv_color32_t_Type, &copy)) return -1;
+    
     self->size = sizeof(lv_color32_t);
     self->data = PyMem_Malloc(self->size);
     if (!self->data) return -1;
     
-    memset(self->data, 0, self->size);
+    if (copy) {
+        assert(self->size == copy->size); // should be same size, since same type
+        memcpy(self->data, copy->data, self->size);
+    } else {
+        memset(self->data, 0, self->size);
+    }
+    
     self->owner = (PyObject *)self;
+
+    if (kwds) {
+        // all keyword arguments are attribute-assignments
+        PyObject *key, *value;
+        Py_ssize_t pos = 0;
+        
+        while (PyDict_Next(kwds, &pos, &key, &value)) {
+            if (PyObject_SetAttr((PyObject*)self, key, value)) return -1;
+        }   
+    }
 
     return 0;
 }
@@ -1114,17 +1442,54 @@ static PyTypeObject pylv_color32_t_Type = {
     .tp_as_buffer = &Struct_bufferprocs
 };
 
+static int pylv_color32_t_arg_converter(PyObject *obj, void* target) {
+    int isinst;
+    // TODO: support dictionary as argument; create a new struct object in that case
+    isinst = PyObject_IsInstance(obj, (PyObject*)&pylv_color32_t_Type);
+    if (isinst == 0) {
+        PyErr_Format(PyExc_TypeError, "argument should be of type lv_color32_t");
+    }
+    if (isinst != 1) {
+        return 0;
+    }
+    *(lv_color32_t **)target = ((StructObject*)obj) -> data;
+    Py_INCREF(obj); // Required since **target now uses the data. TODO: this leaks a reference; also support Py_CLEANUP_SUPPORTED
+    return 1;
+
+}
+
+
 
 
 static int
 pylv_color_hsv_t_init(StructObject *self, PyObject *args, PyObject *kwds) 
 {
+    StructObject *copy = NULL;
+    // copy is a positional-only argument
+    if (!PyArg_ParseTuple(args, "|O!", &pylv_color_hsv_t_Type, &copy)) return -1;
+    
     self->size = sizeof(lv_color_hsv_t);
     self->data = PyMem_Malloc(self->size);
     if (!self->data) return -1;
     
-    memset(self->data, 0, self->size);
+    if (copy) {
+        assert(self->size == copy->size); // should be same size, since same type
+        memcpy(self->data, copy->data, self->size);
+    } else {
+        memset(self->data, 0, self->size);
+    }
+    
     self->owner = (PyObject *)self;
+
+    if (kwds) {
+        // all keyword arguments are attribute-assignments
+        PyObject *key, *value;
+        Py_ssize_t pos = 0;
+        
+        while (PyDict_Next(kwds, &pos, &key, &value)) {
+            if (PyObject_SetAttr((PyObject*)self, key, value)) return -1;
+        }   
+    }
 
     return 0;
 }
@@ -1152,17 +1517,54 @@ static PyTypeObject pylv_color_hsv_t_Type = {
     .tp_as_buffer = &Struct_bufferprocs
 };
 
+static int pylv_color_hsv_t_arg_converter(PyObject *obj, void* target) {
+    int isinst;
+    // TODO: support dictionary as argument; create a new struct object in that case
+    isinst = PyObject_IsInstance(obj, (PyObject*)&pylv_color_hsv_t_Type);
+    if (isinst == 0) {
+        PyErr_Format(PyExc_TypeError, "argument should be of type lv_color_hsv_t");
+    }
+    if (isinst != 1) {
+        return 0;
+    }
+    *(lv_color_hsv_t **)target = ((StructObject*)obj) -> data;
+    Py_INCREF(obj); // Required since **target now uses the data. TODO: this leaks a reference; also support Py_CLEANUP_SUPPORTED
+    return 1;
+
+}
+
+
 
 
 static int
 pylv_point_t_init(StructObject *self, PyObject *args, PyObject *kwds) 
 {
+    StructObject *copy = NULL;
+    // copy is a positional-only argument
+    if (!PyArg_ParseTuple(args, "|O!", &pylv_point_t_Type, &copy)) return -1;
+    
     self->size = sizeof(lv_point_t);
     self->data = PyMem_Malloc(self->size);
     if (!self->data) return -1;
     
-    memset(self->data, 0, self->size);
+    if (copy) {
+        assert(self->size == copy->size); // should be same size, since same type
+        memcpy(self->data, copy->data, self->size);
+    } else {
+        memset(self->data, 0, self->size);
+    }
+    
     self->owner = (PyObject *)self;
+
+    if (kwds) {
+        // all keyword arguments are attribute-assignments
+        PyObject *key, *value;
+        Py_ssize_t pos = 0;
+        
+        while (PyDict_Next(kwds, &pos, &key, &value)) {
+            if (PyObject_SetAttr((PyObject*)self, key, value)) return -1;
+        }   
+    }
 
     return 0;
 }
@@ -1189,17 +1591,54 @@ static PyTypeObject pylv_point_t_Type = {
     .tp_as_buffer = &Struct_bufferprocs
 };
 
+static int pylv_point_t_arg_converter(PyObject *obj, void* target) {
+    int isinst;
+    // TODO: support dictionary as argument; create a new struct object in that case
+    isinst = PyObject_IsInstance(obj, (PyObject*)&pylv_point_t_Type);
+    if (isinst == 0) {
+        PyErr_Format(PyExc_TypeError, "argument should be of type lv_point_t");
+    }
+    if (isinst != 1) {
+        return 0;
+    }
+    *(lv_point_t **)target = ((StructObject*)obj) -> data;
+    Py_INCREF(obj); // Required since **target now uses the data. TODO: this leaks a reference; also support Py_CLEANUP_SUPPORTED
+    return 1;
+
+}
+
+
 
 
 static int
 pylv_area_t_init(StructObject *self, PyObject *args, PyObject *kwds) 
 {
+    StructObject *copy = NULL;
+    // copy is a positional-only argument
+    if (!PyArg_ParseTuple(args, "|O!", &pylv_area_t_Type, &copy)) return -1;
+    
     self->size = sizeof(lv_area_t);
     self->data = PyMem_Malloc(self->size);
     if (!self->data) return -1;
     
-    memset(self->data, 0, self->size);
+    if (copy) {
+        assert(self->size == copy->size); // should be same size, since same type
+        memcpy(self->data, copy->data, self->size);
+    } else {
+        memset(self->data, 0, self->size);
+    }
+    
     self->owner = (PyObject *)self;
+
+    if (kwds) {
+        // all keyword arguments are attribute-assignments
+        PyObject *key, *value;
+        Py_ssize_t pos = 0;
+        
+        while (PyDict_Next(kwds, &pos, &key, &value)) {
+            if (PyObject_SetAttr((PyObject*)self, key, value)) return -1;
+        }   
+    }
 
     return 0;
 }
@@ -1228,17 +1667,54 @@ static PyTypeObject pylv_area_t_Type = {
     .tp_as_buffer = &Struct_bufferprocs
 };
 
+static int pylv_area_t_arg_converter(PyObject *obj, void* target) {
+    int isinst;
+    // TODO: support dictionary as argument; create a new struct object in that case
+    isinst = PyObject_IsInstance(obj, (PyObject*)&pylv_area_t_Type);
+    if (isinst == 0) {
+        PyErr_Format(PyExc_TypeError, "argument should be of type lv_area_t");
+    }
+    if (isinst != 1) {
+        return 0;
+    }
+    *(lv_area_t **)target = ((StructObject*)obj) -> data;
+    Py_INCREF(obj); // Required since **target now uses the data. TODO: this leaks a reference; also support Py_CLEANUP_SUPPORTED
+    return 1;
+
+}
+
+
 
 
 static int
 pylv_disp_buf_t_init(StructObject *self, PyObject *args, PyObject *kwds) 
 {
+    StructObject *copy = NULL;
+    // copy is a positional-only argument
+    if (!PyArg_ParseTuple(args, "|O!", &pylv_disp_buf_t_Type, &copy)) return -1;
+    
     self->size = sizeof(lv_disp_buf_t);
     self->data = PyMem_Malloc(self->size);
     if (!self->data) return -1;
     
-    memset(self->data, 0, self->size);
+    if (copy) {
+        assert(self->size == copy->size); // should be same size, since same type
+        memcpy(self->data, copy->data, self->size);
+    } else {
+        memset(self->data, 0, self->size);
+    }
+    
     self->owner = (PyObject *)self;
+
+    if (kwds) {
+        // all keyword arguments are attribute-assignments
+        PyObject *key, *value;
+        Py_ssize_t pos = 0;
+        
+        while (PyDict_Next(kwds, &pos, &key, &value)) {
+            if (PyObject_SetAttr((PyObject*)self, key, value)) return -1;
+        }   
+    }
 
     return 0;
 }
@@ -1286,17 +1762,54 @@ static PyTypeObject pylv_disp_buf_t_Type = {
     .tp_as_buffer = &Struct_bufferprocs
 };
 
+static int pylv_disp_buf_t_arg_converter(PyObject *obj, void* target) {
+    int isinst;
+    // TODO: support dictionary as argument; create a new struct object in that case
+    isinst = PyObject_IsInstance(obj, (PyObject*)&pylv_disp_buf_t_Type);
+    if (isinst == 0) {
+        PyErr_Format(PyExc_TypeError, "argument should be of type lv_disp_buf_t");
+    }
+    if (isinst != 1) {
+        return 0;
+    }
+    *(lv_disp_buf_t **)target = ((StructObject*)obj) -> data;
+    Py_INCREF(obj); // Required since **target now uses the data. TODO: this leaks a reference; also support Py_CLEANUP_SUPPORTED
+    return 1;
+
+}
+
+
 
 
 static int
 pylv_disp_drv_t_init(StructObject *self, PyObject *args, PyObject *kwds) 
 {
+    StructObject *copy = NULL;
+    // copy is a positional-only argument
+    if (!PyArg_ParseTuple(args, "|O!", &pylv_disp_drv_t_Type, &copy)) return -1;
+    
     self->size = sizeof(lv_disp_drv_t);
     self->data = PyMem_Malloc(self->size);
     if (!self->data) return -1;
     
-    memset(self->data, 0, self->size);
+    if (copy) {
+        assert(self->size == copy->size); // should be same size, since same type
+        memcpy(self->data, copy->data, self->size);
+    } else {
+        memset(self->data, 0, self->size);
+    }
+    
     self->owner = (PyObject *)self;
+
+    if (kwds) {
+        // all keyword arguments are attribute-assignments
+        PyObject *key, *value;
+        Py_ssize_t pos = 0;
+        
+        while (PyDict_Next(kwds, &pos, &key, &value)) {
+            if (PyObject_SetAttr((PyObject*)self, key, value)) return -1;
+        }   
+    }
 
     return 0;
 }
@@ -1331,17 +1844,54 @@ static PyTypeObject pylv_disp_drv_t_Type = {
     .tp_as_buffer = &Struct_bufferprocs
 };
 
+static int pylv_disp_drv_t_arg_converter(PyObject *obj, void* target) {
+    int isinst;
+    // TODO: support dictionary as argument; create a new struct object in that case
+    isinst = PyObject_IsInstance(obj, (PyObject*)&pylv_disp_drv_t_Type);
+    if (isinst == 0) {
+        PyErr_Format(PyExc_TypeError, "argument should be of type lv_disp_drv_t");
+    }
+    if (isinst != 1) {
+        return 0;
+    }
+    *(lv_disp_drv_t **)target = ((StructObject*)obj) -> data;
+    Py_INCREF(obj); // Required since **target now uses the data. TODO: this leaks a reference; also support Py_CLEANUP_SUPPORTED
+    return 1;
+
+}
+
+
 
 
 static int
 pylv_disp_t_init(StructObject *self, PyObject *args, PyObject *kwds) 
 {
+    StructObject *copy = NULL;
+    // copy is a positional-only argument
+    if (!PyArg_ParseTuple(args, "|O!", &pylv_disp_t_Type, &copy)) return -1;
+    
     self->size = sizeof(lv_disp_t);
     self->data = PyMem_Malloc(self->size);
     if (!self->data) return -1;
     
-    memset(self->data, 0, self->size);
+    if (copy) {
+        assert(self->size == copy->size); // should be same size, since same type
+        memcpy(self->data, copy->data, self->size);
+    } else {
+        memset(self->data, 0, self->size);
+    }
+    
     self->owner = (PyObject *)self;
+
+    if (kwds) {
+        // all keyword arguments are attribute-assignments
+        PyObject *key, *value;
+        Py_ssize_t pos = 0;
+        
+        while (PyDict_Next(kwds, &pos, &key, &value)) {
+            if (PyObject_SetAttr((PyObject*)self, key, value)) return -1;
+        }   
+    }
 
     return 0;
 }
@@ -1391,17 +1941,54 @@ static PyTypeObject pylv_disp_t_Type = {
     .tp_as_buffer = &Struct_bufferprocs
 };
 
+static int pylv_disp_t_arg_converter(PyObject *obj, void* target) {
+    int isinst;
+    // TODO: support dictionary as argument; create a new struct object in that case
+    isinst = PyObject_IsInstance(obj, (PyObject*)&pylv_disp_t_Type);
+    if (isinst == 0) {
+        PyErr_Format(PyExc_TypeError, "argument should be of type lv_disp_t");
+    }
+    if (isinst != 1) {
+        return 0;
+    }
+    *(lv_disp_t **)target = ((StructObject*)obj) -> data;
+    Py_INCREF(obj); // Required since **target now uses the data. TODO: this leaks a reference; also support Py_CLEANUP_SUPPORTED
+    return 1;
+
+}
+
+
 
 
 static int
 pylv_indev_data_t_init(StructObject *self, PyObject *args, PyObject *kwds) 
 {
+    StructObject *copy = NULL;
+    // copy is a positional-only argument
+    if (!PyArg_ParseTuple(args, "|O!", &pylv_indev_data_t_Type, &copy)) return -1;
+    
     self->size = sizeof(lv_indev_data_t);
     self->data = PyMem_Malloc(self->size);
     if (!self->data) return -1;
     
-    memset(self->data, 0, self->size);
+    if (copy) {
+        assert(self->size == copy->size); // should be same size, since same type
+        memcpy(self->data, copy->data, self->size);
+    } else {
+        memset(self->data, 0, self->size);
+    }
+    
     self->owner = (PyObject *)self;
+
+    if (kwds) {
+        // all keyword arguments are attribute-assignments
+        PyObject *key, *value;
+        Py_ssize_t pos = 0;
+        
+        while (PyDict_Next(kwds, &pos, &key, &value)) {
+            if (PyObject_SetAttr((PyObject*)self, key, value)) return -1;
+        }   
+    }
 
     return 0;
 }
@@ -1431,17 +2018,54 @@ static PyTypeObject pylv_indev_data_t_Type = {
     .tp_as_buffer = &Struct_bufferprocs
 };
 
+static int pylv_indev_data_t_arg_converter(PyObject *obj, void* target) {
+    int isinst;
+    // TODO: support dictionary as argument; create a new struct object in that case
+    isinst = PyObject_IsInstance(obj, (PyObject*)&pylv_indev_data_t_Type);
+    if (isinst == 0) {
+        PyErr_Format(PyExc_TypeError, "argument should be of type lv_indev_data_t");
+    }
+    if (isinst != 1) {
+        return 0;
+    }
+    *(lv_indev_data_t **)target = ((StructObject*)obj) -> data;
+    Py_INCREF(obj); // Required since **target now uses the data. TODO: this leaks a reference; also support Py_CLEANUP_SUPPORTED
+    return 1;
+
+}
+
+
 
 
 static int
 pylv_indev_drv_t_init(StructObject *self, PyObject *args, PyObject *kwds) 
 {
+    StructObject *copy = NULL;
+    // copy is a positional-only argument
+    if (!PyArg_ParseTuple(args, "|O!", &pylv_indev_drv_t_Type, &copy)) return -1;
+    
     self->size = sizeof(lv_indev_drv_t);
     self->data = PyMem_Malloc(self->size);
     if (!self->data) return -1;
     
-    memset(self->data, 0, self->size);
+    if (copy) {
+        assert(self->size == copy->size); // should be same size, since same type
+        memcpy(self->data, copy->data, self->size);
+    } else {
+        memset(self->data, 0, self->size);
+    }
+    
     self->owner = (PyObject *)self;
+
+    if (kwds) {
+        // all keyword arguments are attribute-assignments
+        PyObject *key, *value;
+        Py_ssize_t pos = 0;
+        
+        while (PyDict_Next(kwds, &pos, &key, &value)) {
+            if (PyObject_SetAttr((PyObject*)self, key, value)) return -1;
+        }   
+    }
 
     return 0;
 }
@@ -1470,17 +2094,54 @@ static PyTypeObject pylv_indev_drv_t_Type = {
     .tp_as_buffer = &Struct_bufferprocs
 };
 
+static int pylv_indev_drv_t_arg_converter(PyObject *obj, void* target) {
+    int isinst;
+    // TODO: support dictionary as argument; create a new struct object in that case
+    isinst = PyObject_IsInstance(obj, (PyObject*)&pylv_indev_drv_t_Type);
+    if (isinst == 0) {
+        PyErr_Format(PyExc_TypeError, "argument should be of type lv_indev_drv_t");
+    }
+    if (isinst != 1) {
+        return 0;
+    }
+    *(lv_indev_drv_t **)target = ((StructObject*)obj) -> data;
+    Py_INCREF(obj); // Required since **target now uses the data. TODO: this leaks a reference; also support Py_CLEANUP_SUPPORTED
+    return 1;
+
+}
+
+
 
 
 static int
 pylv_indev_proc_t_init(StructObject *self, PyObject *args, PyObject *kwds) 
 {
+    StructObject *copy = NULL;
+    // copy is a positional-only argument
+    if (!PyArg_ParseTuple(args, "|O!", &pylv_indev_proc_t_Type, &copy)) return -1;
+    
     self->size = sizeof(lv_indev_proc_t);
     self->data = PyMem_Malloc(self->size);
     if (!self->data) return -1;
     
-    memset(self->data, 0, self->size);
+    if (copy) {
+        assert(self->size == copy->size); // should be same size, since same type
+        memcpy(self->data, copy->data, self->size);
+    } else {
+        memset(self->data, 0, self->size);
+    }
+    
     self->owner = (PyObject *)self;
+
+    if (kwds) {
+        // all keyword arguments are attribute-assignments
+        PyObject *key, *value;
+        Py_ssize_t pos = 0;
+        
+        while (PyDict_Next(kwds, &pos, &key, &value)) {
+            if (PyObject_SetAttr((PyObject*)self, key, value)) return -1;
+        }   
+    }
 
     return 0;
 }
@@ -1563,17 +2224,54 @@ static PyTypeObject pylv_indev_proc_t_Type = {
     .tp_as_buffer = &Struct_bufferprocs
 };
 
+static int pylv_indev_proc_t_arg_converter(PyObject *obj, void* target) {
+    int isinst;
+    // TODO: support dictionary as argument; create a new struct object in that case
+    isinst = PyObject_IsInstance(obj, (PyObject*)&pylv_indev_proc_t_Type);
+    if (isinst == 0) {
+        PyErr_Format(PyExc_TypeError, "argument should be of type lv_indev_proc_t");
+    }
+    if (isinst != 1) {
+        return 0;
+    }
+    *(lv_indev_proc_t **)target = ((StructObject*)obj) -> data;
+    Py_INCREF(obj); // Required since **target now uses the data. TODO: this leaks a reference; also support Py_CLEANUP_SUPPORTED
+    return 1;
+
+}
+
+
 
 
 static int
 pylv_indev_t_init(StructObject *self, PyObject *args, PyObject *kwds) 
 {
+    StructObject *copy = NULL;
+    // copy is a positional-only argument
+    if (!PyArg_ParseTuple(args, "|O!", &pylv_indev_t_Type, &copy)) return -1;
+    
     self->size = sizeof(lv_indev_t);
     self->data = PyMem_Malloc(self->size);
     if (!self->data) return -1;
     
-    memset(self->data, 0, self->size);
+    if (copy) {
+        assert(self->size == copy->size); // should be same size, since same type
+        memcpy(self->data, copy->data, self->size);
+    } else {
+        memset(self->data, 0, self->size);
+    }
+    
     self->owner = (PyObject *)self;
+
+    if (kwds) {
+        // all keyword arguments are attribute-assignments
+        PyObject *key, *value;
+        Py_ssize_t pos = 0;
+        
+        while (PyDict_Next(kwds, &pos, &key, &value)) {
+            if (PyObject_SetAttr((PyObject*)self, key, value)) return -1;
+        }   
+    }
 
     return 0;
 }
@@ -1605,17 +2303,54 @@ static PyTypeObject pylv_indev_t_Type = {
     .tp_as_buffer = &Struct_bufferprocs
 };
 
+static int pylv_indev_t_arg_converter(PyObject *obj, void* target) {
+    int isinst;
+    // TODO: support dictionary as argument; create a new struct object in that case
+    isinst = PyObject_IsInstance(obj, (PyObject*)&pylv_indev_t_Type);
+    if (isinst == 0) {
+        PyErr_Format(PyExc_TypeError, "argument should be of type lv_indev_t");
+    }
+    if (isinst != 1) {
+        return 0;
+    }
+    *(lv_indev_t **)target = ((StructObject*)obj) -> data;
+    Py_INCREF(obj); // Required since **target now uses the data. TODO: this leaks a reference; also support Py_CLEANUP_SUPPORTED
+    return 1;
+
+}
+
+
 
 
 static int
 pylv_font_glyph_dsc_t_init(StructObject *self, PyObject *args, PyObject *kwds) 
 {
+    StructObject *copy = NULL;
+    // copy is a positional-only argument
+    if (!PyArg_ParseTuple(args, "|O!", &pylv_font_glyph_dsc_t_Type, &copy)) return -1;
+    
     self->size = sizeof(lv_font_glyph_dsc_t);
     self->data = PyMem_Malloc(self->size);
     if (!self->data) return -1;
     
-    memset(self->data, 0, self->size);
+    if (copy) {
+        assert(self->size == copy->size); // should be same size, since same type
+        memcpy(self->data, copy->data, self->size);
+    } else {
+        memset(self->data, 0, self->size);
+    }
+    
     self->owner = (PyObject *)self;
+
+    if (kwds) {
+        // all keyword arguments are attribute-assignments
+        PyObject *key, *value;
+        Py_ssize_t pos = 0;
+        
+        while (PyDict_Next(kwds, &pos, &key, &value)) {
+            if (PyObject_SetAttr((PyObject*)self, key, value)) return -1;
+        }   
+    }
 
     return 0;
 }
@@ -1676,17 +2411,54 @@ static PyTypeObject pylv_font_glyph_dsc_t_Type = {
     .tp_as_buffer = &Struct_bufferprocs
 };
 
+static int pylv_font_glyph_dsc_t_arg_converter(PyObject *obj, void* target) {
+    int isinst;
+    // TODO: support dictionary as argument; create a new struct object in that case
+    isinst = PyObject_IsInstance(obj, (PyObject*)&pylv_font_glyph_dsc_t_Type);
+    if (isinst == 0) {
+        PyErr_Format(PyExc_TypeError, "argument should be of type lv_font_glyph_dsc_t");
+    }
+    if (isinst != 1) {
+        return 0;
+    }
+    *(lv_font_glyph_dsc_t **)target = ((StructObject*)obj) -> data;
+    Py_INCREF(obj); // Required since **target now uses the data. TODO: this leaks a reference; also support Py_CLEANUP_SUPPORTED
+    return 1;
+
+}
+
+
 
 
 static int
 pylv_font_unicode_map_t_init(StructObject *self, PyObject *args, PyObject *kwds) 
 {
+    StructObject *copy = NULL;
+    // copy is a positional-only argument
+    if (!PyArg_ParseTuple(args, "|O!", &pylv_font_unicode_map_t_Type, &copy)) return -1;
+    
     self->size = sizeof(lv_font_unicode_map_t);
     self->data = PyMem_Malloc(self->size);
     if (!self->data) return -1;
     
-    memset(self->data, 0, self->size);
+    if (copy) {
+        assert(self->size == copy->size); // should be same size, since same type
+        memcpy(self->data, copy->data, self->size);
+    } else {
+        memset(self->data, 0, self->size);
+    }
+    
     self->owner = (PyObject *)self;
+
+    if (kwds) {
+        // all keyword arguments are attribute-assignments
+        PyObject *key, *value;
+        Py_ssize_t pos = 0;
+        
+        while (PyDict_Next(kwds, &pos, &key, &value)) {
+            if (PyObject_SetAttr((PyObject*)self, key, value)) return -1;
+        }   
+    }
 
     return 0;
 }
@@ -1747,17 +2519,54 @@ static PyTypeObject pylv_font_unicode_map_t_Type = {
     .tp_as_buffer = &Struct_bufferprocs
 };
 
+static int pylv_font_unicode_map_t_arg_converter(PyObject *obj, void* target) {
+    int isinst;
+    // TODO: support dictionary as argument; create a new struct object in that case
+    isinst = PyObject_IsInstance(obj, (PyObject*)&pylv_font_unicode_map_t_Type);
+    if (isinst == 0) {
+        PyErr_Format(PyExc_TypeError, "argument should be of type lv_font_unicode_map_t");
+    }
+    if (isinst != 1) {
+        return 0;
+    }
+    *(lv_font_unicode_map_t **)target = ((StructObject*)obj) -> data;
+    Py_INCREF(obj); // Required since **target now uses the data. TODO: this leaks a reference; also support Py_CLEANUP_SUPPORTED
+    return 1;
+
+}
+
+
 
 
 static int
 pylv_font_t_init(StructObject *self, PyObject *args, PyObject *kwds) 
 {
+    StructObject *copy = NULL;
+    // copy is a positional-only argument
+    if (!PyArg_ParseTuple(args, "|O!", &pylv_font_t_Type, &copy)) return -1;
+    
     self->size = sizeof(lv_font_t);
     self->data = PyMem_Malloc(self->size);
     if (!self->data) return -1;
     
-    memset(self->data, 0, self->size);
+    if (copy) {
+        assert(self->size == copy->size); // should be same size, since same type
+        memcpy(self->data, copy->data, self->size);
+    } else {
+        memset(self->data, 0, self->size);
+    }
+    
     self->owner = (PyObject *)self;
+
+    if (kwds) {
+        // all keyword arguments are attribute-assignments
+        PyObject *key, *value;
+        Py_ssize_t pos = 0;
+        
+        while (PyDict_Next(kwds, &pos, &key, &value)) {
+            if (PyObject_SetAttr((PyObject*)self, key, value)) return -1;
+        }   
+    }
 
     return 0;
 }
@@ -1845,17 +2654,54 @@ static PyTypeObject pylv_font_t_Type = {
     .tp_as_buffer = &Struct_bufferprocs
 };
 
+static int pylv_font_t_arg_converter(PyObject *obj, void* target) {
+    int isinst;
+    // TODO: support dictionary as argument; create a new struct object in that case
+    isinst = PyObject_IsInstance(obj, (PyObject*)&pylv_font_t_Type);
+    if (isinst == 0) {
+        PyErr_Format(PyExc_TypeError, "argument should be of type lv_font_t");
+    }
+    if (isinst != 1) {
+        return 0;
+    }
+    *(lv_font_t **)target = ((StructObject*)obj) -> data;
+    Py_INCREF(obj); // Required since **target now uses the data. TODO: this leaks a reference; also support Py_CLEANUP_SUPPORTED
+    return 1;
+
+}
+
+
 
 
 static int
 pylv_anim_t_init(StructObject *self, PyObject *args, PyObject *kwds) 
 {
+    StructObject *copy = NULL;
+    // copy is a positional-only argument
+    if (!PyArg_ParseTuple(args, "|O!", &pylv_anim_t_Type, &copy)) return -1;
+    
     self->size = sizeof(lv_anim_t);
     self->data = PyMem_Malloc(self->size);
     if (!self->data) return -1;
     
-    memset(self->data, 0, self->size);
+    if (copy) {
+        assert(self->size == copy->size); // should be same size, since same type
+        memcpy(self->data, copy->data, self->size);
+    } else {
+        memset(self->data, 0, self->size);
+    }
+    
     self->owner = (PyObject *)self;
+
+    if (kwds) {
+        // all keyword arguments are attribute-assignments
+        PyObject *key, *value;
+        Py_ssize_t pos = 0;
+        
+        while (PyDict_Next(kwds, &pos, &key, &value)) {
+            if (PyObject_SetAttr((PyObject*)self, key, value)) return -1;
+        }   
+    }
 
     return 0;
 }
@@ -1962,17 +2808,54 @@ static PyTypeObject pylv_anim_t_Type = {
     .tp_as_buffer = &Struct_bufferprocs
 };
 
+static int pylv_anim_t_arg_converter(PyObject *obj, void* target) {
+    int isinst;
+    // TODO: support dictionary as argument; create a new struct object in that case
+    isinst = PyObject_IsInstance(obj, (PyObject*)&pylv_anim_t_Type);
+    if (isinst == 0) {
+        PyErr_Format(PyExc_TypeError, "argument should be of type lv_anim_t");
+    }
+    if (isinst != 1) {
+        return 0;
+    }
+    *(lv_anim_t **)target = ((StructObject*)obj) -> data;
+    Py_INCREF(obj); // Required since **target now uses the data. TODO: this leaks a reference; also support Py_CLEANUP_SUPPORTED
+    return 1;
+
+}
+
+
 
 
 static int
 pylv_style_t_init(StructObject *self, PyObject *args, PyObject *kwds) 
 {
+    StructObject *copy = NULL;
+    // copy is a positional-only argument
+    if (!PyArg_ParseTuple(args, "|O!", &pylv_style_t_Type, &copy)) return -1;
+    
     self->size = sizeof(lv_style_t);
     self->data = PyMem_Malloc(self->size);
     if (!self->data) return -1;
     
-    memset(self->data, 0, self->size);
+    if (copy) {
+        assert(self->size == copy->size); // should be same size, since same type
+        memcpy(self->data, copy->data, self->size);
+    } else {
+        memset(self->data, 0, self->size);
+    }
+    
     self->owner = (PyObject *)self;
+
+    if (kwds) {
+        // all keyword arguments are attribute-assignments
+        PyObject *key, *value;
+        Py_ssize_t pos = 0;
+        
+        while (PyDict_Next(kwds, &pos, &key, &value)) {
+            if (PyObject_SetAttr((PyObject*)self, key, value)) return -1;
+        }   
+    }
 
     return 0;
 }
@@ -2019,17 +2902,54 @@ static PyTypeObject pylv_style_t_Type = {
     .tp_as_buffer = &Struct_bufferprocs
 };
 
+static int pylv_style_t_arg_converter(PyObject *obj, void* target) {
+    int isinst;
+    // TODO: support dictionary as argument; create a new struct object in that case
+    isinst = PyObject_IsInstance(obj, (PyObject*)&pylv_style_t_Type);
+    if (isinst == 0) {
+        PyErr_Format(PyExc_TypeError, "argument should be of type lv_style_t");
+    }
+    if (isinst != 1) {
+        return 0;
+    }
+    *(lv_style_t **)target = ((StructObject*)obj) -> data;
+    Py_INCREF(obj); // Required since **target now uses the data. TODO: this leaks a reference; also support Py_CLEANUP_SUPPORTED
+    return 1;
+
+}
+
+
 
 
 static int
 pylv_style_anim_t_init(StructObject *self, PyObject *args, PyObject *kwds) 
 {
+    StructObject *copy = NULL;
+    // copy is a positional-only argument
+    if (!PyArg_ParseTuple(args, "|O!", &pylv_style_anim_t_Type, &copy)) return -1;
+    
     self->size = sizeof(lv_style_anim_t);
     self->data = PyMem_Malloc(self->size);
     if (!self->data) return -1;
     
-    memset(self->data, 0, self->size);
+    if (copy) {
+        assert(self->size == copy->size); // should be same size, since same type
+        memcpy(self->data, copy->data, self->size);
+    } else {
+        memset(self->data, 0, self->size);
+    }
+    
     self->owner = (PyObject *)self;
+
+    if (kwds) {
+        // all keyword arguments are attribute-assignments
+        PyObject *key, *value;
+        Py_ssize_t pos = 0;
+        
+        while (PyDict_Next(kwds, &pos, &key, &value)) {
+            if (PyObject_SetAttr((PyObject*)self, key, value)) return -1;
+        }   
+    }
 
     return 0;
 }
@@ -2098,17 +3018,54 @@ static PyTypeObject pylv_style_anim_t_Type = {
     .tp_as_buffer = &Struct_bufferprocs
 };
 
+static int pylv_style_anim_t_arg_converter(PyObject *obj, void* target) {
+    int isinst;
+    // TODO: support dictionary as argument; create a new struct object in that case
+    isinst = PyObject_IsInstance(obj, (PyObject*)&pylv_style_anim_t_Type);
+    if (isinst == 0) {
+        PyErr_Format(PyExc_TypeError, "argument should be of type lv_style_anim_t");
+    }
+    if (isinst != 1) {
+        return 0;
+    }
+    *(lv_style_anim_t **)target = ((StructObject*)obj) -> data;
+    Py_INCREF(obj); // Required since **target now uses the data. TODO: this leaks a reference; also support Py_CLEANUP_SUPPORTED
+    return 1;
+
+}
+
+
 
 
 static int
 pylv_obj_t_init(StructObject *self, PyObject *args, PyObject *kwds) 
 {
+    StructObject *copy = NULL;
+    // copy is a positional-only argument
+    if (!PyArg_ParseTuple(args, "|O!", &pylv_obj_t_Type, &copy)) return -1;
+    
     self->size = sizeof(lv_obj_t);
     self->data = PyMem_Malloc(self->size);
     if (!self->data) return -1;
     
-    memset(self->data, 0, self->size);
+    if (copy) {
+        assert(self->size == copy->size); // should be same size, since same type
+        memcpy(self->data, copy->data, self->size);
+    } else {
+        memset(self->data, 0, self->size);
+    }
+    
     self->owner = (PyObject *)self;
+
+    if (kwds) {
+        // all keyword arguments are attribute-assignments
+        PyObject *key, *value;
+        Py_ssize_t pos = 0;
+        
+        while (PyDict_Next(kwds, &pos, &key, &value)) {
+            if (PyObject_SetAttr((PyObject*)self, key, value)) return -1;
+        }   
+    }
 
     return 0;
 }
@@ -2290,17 +3247,54 @@ static PyTypeObject pylv_obj_t_Type = {
     .tp_as_buffer = &Struct_bufferprocs
 };
 
+static int pylv_obj_t_arg_converter(PyObject *obj, void* target) {
+    int isinst;
+    // TODO: support dictionary as argument; create a new struct object in that case
+    isinst = PyObject_IsInstance(obj, (PyObject*)&pylv_obj_t_Type);
+    if (isinst == 0) {
+        PyErr_Format(PyExc_TypeError, "argument should be of type lv_obj_t");
+    }
+    if (isinst != 1) {
+        return 0;
+    }
+    *(lv_obj_t **)target = ((StructObject*)obj) -> data;
+    Py_INCREF(obj); // Required since **target now uses the data. TODO: this leaks a reference; also support Py_CLEANUP_SUPPORTED
+    return 1;
+
+}
+
+
 
 
 static int
 pylv_obj_type_t_init(StructObject *self, PyObject *args, PyObject *kwds) 
 {
+    StructObject *copy = NULL;
+    // copy is a positional-only argument
+    if (!PyArg_ParseTuple(args, "|O!", &pylv_obj_type_t_Type, &copy)) return -1;
+    
     self->size = sizeof(lv_obj_type_t);
     self->data = PyMem_Malloc(self->size);
     if (!self->data) return -1;
     
-    memset(self->data, 0, self->size);
+    if (copy) {
+        assert(self->size == copy->size); // should be same size, since same type
+        memcpy(self->data, copy->data, self->size);
+    } else {
+        memset(self->data, 0, self->size);
+    }
+    
     self->owner = (PyObject *)self;
+
+    if (kwds) {
+        // all keyword arguments are attribute-assignments
+        PyObject *key, *value;
+        Py_ssize_t pos = 0;
+        
+        while (PyDict_Next(kwds, &pos, &key, &value)) {
+            if (PyObject_SetAttr((PyObject*)self, key, value)) return -1;
+        }   
+    }
 
     return 0;
 }
@@ -2326,17 +3320,54 @@ static PyTypeObject pylv_obj_type_t_Type = {
     .tp_as_buffer = &Struct_bufferprocs
 };
 
+static int pylv_obj_type_t_arg_converter(PyObject *obj, void* target) {
+    int isinst;
+    // TODO: support dictionary as argument; create a new struct object in that case
+    isinst = PyObject_IsInstance(obj, (PyObject*)&pylv_obj_type_t_Type);
+    if (isinst == 0) {
+        PyErr_Format(PyExc_TypeError, "argument should be of type lv_obj_type_t");
+    }
+    if (isinst != 1) {
+        return 0;
+    }
+    *(lv_obj_type_t **)target = ((StructObject*)obj) -> data;
+    Py_INCREF(obj); // Required since **target now uses the data. TODO: this leaks a reference; also support Py_CLEANUP_SUPPORTED
+    return 1;
+
+}
+
+
 
 
 static int
 pylv_group_t_init(StructObject *self, PyObject *args, PyObject *kwds) 
 {
+    StructObject *copy = NULL;
+    // copy is a positional-only argument
+    if (!PyArg_ParseTuple(args, "|O!", &pylv_group_t_Type, &copy)) return -1;
+    
     self->size = sizeof(lv_group_t);
     self->data = PyMem_Malloc(self->size);
     if (!self->data) return -1;
     
-    memset(self->data, 0, self->size);
+    if (copy) {
+        assert(self->size == copy->size); // should be same size, since same type
+        memcpy(self->data, copy->data, self->size);
+    } else {
+        memset(self->data, 0, self->size);
+    }
+    
     self->owner = (PyObject *)self;
+
+    if (kwds) {
+        // all keyword arguments are attribute-assignments
+        PyObject *key, *value;
+        Py_ssize_t pos = 0;
+        
+        while (PyDict_Next(kwds, &pos, &key, &value)) {
+            if (PyObject_SetAttr((PyObject*)self, key, value)) return -1;
+        }   
+    }
 
     return 0;
 }
@@ -2458,17 +3489,54 @@ static PyTypeObject pylv_group_t_Type = {
     .tp_as_buffer = &Struct_bufferprocs
 };
 
+static int pylv_group_t_arg_converter(PyObject *obj, void* target) {
+    int isinst;
+    // TODO: support dictionary as argument; create a new struct object in that case
+    isinst = PyObject_IsInstance(obj, (PyObject*)&pylv_group_t_Type);
+    if (isinst == 0) {
+        PyErr_Format(PyExc_TypeError, "argument should be of type lv_group_t");
+    }
+    if (isinst != 1) {
+        return 0;
+    }
+    *(lv_group_t **)target = ((StructObject*)obj) -> data;
+    Py_INCREF(obj); // Required since **target now uses the data. TODO: this leaks a reference; also support Py_CLEANUP_SUPPORTED
+    return 1;
+
+}
+
+
 
 
 static int
 pylv_theme_t_init(StructObject *self, PyObject *args, PyObject *kwds) 
 {
+    StructObject *copy = NULL;
+    // copy is a positional-only argument
+    if (!PyArg_ParseTuple(args, "|O!", &pylv_theme_t_Type, &copy)) return -1;
+    
     self->size = sizeof(lv_theme_t);
     self->data = PyMem_Malloc(self->size);
     if (!self->data) return -1;
     
-    memset(self->data, 0, self->size);
+    if (copy) {
+        assert(self->size == copy->size); // should be same size, since same type
+        memcpy(self->data, copy->data, self->size);
+    } else {
+        memset(self->data, 0, self->size);
+    }
+    
     self->owner = (PyObject *)self;
+
+    if (kwds) {
+        // all keyword arguments are attribute-assignments
+        PyObject *key, *value;
+        Py_ssize_t pos = 0;
+        
+        while (PyDict_Next(kwds, &pos, &key, &value)) {
+            if (PyObject_SetAttr((PyObject*)self, key, value)) return -1;
+        }   
+    }
 
     return 0;
 }
@@ -2495,17 +3563,54 @@ static PyTypeObject pylv_theme_t_Type = {
     .tp_as_buffer = &Struct_bufferprocs
 };
 
+static int pylv_theme_t_arg_converter(PyObject *obj, void* target) {
+    int isinst;
+    // TODO: support dictionary as argument; create a new struct object in that case
+    isinst = PyObject_IsInstance(obj, (PyObject*)&pylv_theme_t_Type);
+    if (isinst == 0) {
+        PyErr_Format(PyExc_TypeError, "argument should be of type lv_theme_t");
+    }
+    if (isinst != 1) {
+        return 0;
+    }
+    *(lv_theme_t **)target = ((StructObject*)obj) -> data;
+    Py_INCREF(obj); // Required since **target now uses the data. TODO: this leaks a reference; also support Py_CLEANUP_SUPPORTED
+    return 1;
+
+}
+
+
 
 
 static int
 pylv_cont_ext_t_init(StructObject *self, PyObject *args, PyObject *kwds) 
 {
+    StructObject *copy = NULL;
+    // copy is a positional-only argument
+    if (!PyArg_ParseTuple(args, "|O!", &pylv_cont_ext_t_Type, &copy)) return -1;
+    
     self->size = sizeof(lv_cont_ext_t);
     self->data = PyMem_Malloc(self->size);
     if (!self->data) return -1;
     
-    memset(self->data, 0, self->size);
+    if (copy) {
+        assert(self->size == copy->size); // should be same size, since same type
+        memcpy(self->data, copy->data, self->size);
+    } else {
+        memset(self->data, 0, self->size);
+    }
+    
     self->owner = (PyObject *)self;
+
+    if (kwds) {
+        // all keyword arguments are attribute-assignments
+        PyObject *key, *value;
+        Py_ssize_t pos = 0;
+        
+        while (PyDict_Next(kwds, &pos, &key, &value)) {
+            if (PyObject_SetAttr((PyObject*)self, key, value)) return -1;
+        }   
+    }
 
     return 0;
 }
@@ -2620,17 +3725,54 @@ static PyTypeObject pylv_cont_ext_t_Type = {
     .tp_as_buffer = &Struct_bufferprocs
 };
 
+static int pylv_cont_ext_t_arg_converter(PyObject *obj, void* target) {
+    int isinst;
+    // TODO: support dictionary as argument; create a new struct object in that case
+    isinst = PyObject_IsInstance(obj, (PyObject*)&pylv_cont_ext_t_Type);
+    if (isinst == 0) {
+        PyErr_Format(PyExc_TypeError, "argument should be of type lv_cont_ext_t");
+    }
+    if (isinst != 1) {
+        return 0;
+    }
+    *(lv_cont_ext_t **)target = ((StructObject*)obj) -> data;
+    Py_INCREF(obj); // Required since **target now uses the data. TODO: this leaks a reference; also support Py_CLEANUP_SUPPORTED
+    return 1;
+
+}
+
+
 
 
 static int
 pylv_btn_ext_t_init(StructObject *self, PyObject *args, PyObject *kwds) 
 {
+    StructObject *copy = NULL;
+    // copy is a positional-only argument
+    if (!PyArg_ParseTuple(args, "|O!", &pylv_btn_ext_t_Type, &copy)) return -1;
+    
     self->size = sizeof(lv_btn_ext_t);
     self->data = PyMem_Malloc(self->size);
     if (!self->data) return -1;
     
-    memset(self->data, 0, self->size);
+    if (copy) {
+        assert(self->size == copy->size); // should be same size, since same type
+        memcpy(self->data, copy->data, self->size);
+    } else {
+        memset(self->data, 0, self->size);
+    }
+    
     self->owner = (PyObject *)self;
+
+    if (kwds) {
+        // all keyword arguments are attribute-assignments
+        PyObject *key, *value;
+        Py_ssize_t pos = 0;
+        
+        while (PyDict_Next(kwds, &pos, &key, &value)) {
+            if (PyObject_SetAttr((PyObject*)self, key, value)) return -1;
+        }   
+    }
 
     return 0;
 }
@@ -2679,17 +3821,54 @@ static PyTypeObject pylv_btn_ext_t_Type = {
     .tp_as_buffer = &Struct_bufferprocs
 };
 
+static int pylv_btn_ext_t_arg_converter(PyObject *obj, void* target) {
+    int isinst;
+    // TODO: support dictionary as argument; create a new struct object in that case
+    isinst = PyObject_IsInstance(obj, (PyObject*)&pylv_btn_ext_t_Type);
+    if (isinst == 0) {
+        PyErr_Format(PyExc_TypeError, "argument should be of type lv_btn_ext_t");
+    }
+    if (isinst != 1) {
+        return 0;
+    }
+    *(lv_btn_ext_t **)target = ((StructObject*)obj) -> data;
+    Py_INCREF(obj); // Required since **target now uses the data. TODO: this leaks a reference; also support Py_CLEANUP_SUPPORTED
+    return 1;
+
+}
+
+
 
 
 static int
 pylv_img_header_t_init(StructObject *self, PyObject *args, PyObject *kwds) 
 {
+    StructObject *copy = NULL;
+    // copy is a positional-only argument
+    if (!PyArg_ParseTuple(args, "|O!", &pylv_img_header_t_Type, &copy)) return -1;
+    
     self->size = sizeof(lv_img_header_t);
     self->data = PyMem_Malloc(self->size);
     if (!self->data) return -1;
     
-    memset(self->data, 0, self->size);
+    if (copy) {
+        assert(self->size == copy->size); // should be same size, since same type
+        memcpy(self->data, copy->data, self->size);
+    } else {
+        memset(self->data, 0, self->size);
+    }
+    
     self->owner = (PyObject *)self;
+
+    if (kwds) {
+        // all keyword arguments are attribute-assignments
+        PyObject *key, *value;
+        Py_ssize_t pos = 0;
+        
+        while (PyDict_Next(kwds, &pos, &key, &value)) {
+            if (PyObject_SetAttr((PyObject*)self, key, value)) return -1;
+        }   
+    }
 
     return 0;
 }
@@ -2804,17 +3983,54 @@ static PyTypeObject pylv_img_header_t_Type = {
     .tp_as_buffer = &Struct_bufferprocs
 };
 
+static int pylv_img_header_t_arg_converter(PyObject *obj, void* target) {
+    int isinst;
+    // TODO: support dictionary as argument; create a new struct object in that case
+    isinst = PyObject_IsInstance(obj, (PyObject*)&pylv_img_header_t_Type);
+    if (isinst == 0) {
+        PyErr_Format(PyExc_TypeError, "argument should be of type lv_img_header_t");
+    }
+    if (isinst != 1) {
+        return 0;
+    }
+    *(lv_img_header_t **)target = ((StructObject*)obj) -> data;
+    Py_INCREF(obj); // Required since **target now uses the data. TODO: this leaks a reference; also support Py_CLEANUP_SUPPORTED
+    return 1;
+
+}
+
+
 
 
 static int
 pylv_img_dsc_t_init(StructObject *self, PyObject *args, PyObject *kwds) 
 {
+    StructObject *copy = NULL;
+    // copy is a positional-only argument
+    if (!PyArg_ParseTuple(args, "|O!", &pylv_img_dsc_t_Type, &copy)) return -1;
+    
     self->size = sizeof(lv_img_dsc_t);
     self->data = PyMem_Malloc(self->size);
     if (!self->data) return -1;
     
-    memset(self->data, 0, self->size);
+    if (copy) {
+        assert(self->size == copy->size); // should be same size, since same type
+        memcpy(self->data, copy->data, self->size);
+    } else {
+        memset(self->data, 0, self->size);
+    }
+    
     self->owner = (PyObject *)self;
+
+    if (kwds) {
+        // all keyword arguments are attribute-assignments
+        PyObject *key, *value;
+        Py_ssize_t pos = 0;
+        
+        while (PyDict_Next(kwds, &pos, &key, &value)) {
+            if (PyObject_SetAttr((PyObject*)self, key, value)) return -1;
+        }   
+    }
 
     return 0;
 }
@@ -2842,17 +4058,54 @@ static PyTypeObject pylv_img_dsc_t_Type = {
     .tp_as_buffer = &Struct_bufferprocs
 };
 
+static int pylv_img_dsc_t_arg_converter(PyObject *obj, void* target) {
+    int isinst;
+    // TODO: support dictionary as argument; create a new struct object in that case
+    isinst = PyObject_IsInstance(obj, (PyObject*)&pylv_img_dsc_t_Type);
+    if (isinst == 0) {
+        PyErr_Format(PyExc_TypeError, "argument should be of type lv_img_dsc_t");
+    }
+    if (isinst != 1) {
+        return 0;
+    }
+    *(lv_img_dsc_t **)target = ((StructObject*)obj) -> data;
+    Py_INCREF(obj); // Required since **target now uses the data. TODO: this leaks a reference; also support Py_CLEANUP_SUPPORTED
+    return 1;
+
+}
+
+
 
 
 static int
 pylv_imgbtn_ext_t_init(StructObject *self, PyObject *args, PyObject *kwds) 
 {
+    StructObject *copy = NULL;
+    // copy is a positional-only argument
+    if (!PyArg_ParseTuple(args, "|O!", &pylv_imgbtn_ext_t_Type, &copy)) return -1;
+    
     self->size = sizeof(lv_imgbtn_ext_t);
     self->data = PyMem_Malloc(self->size);
     if (!self->data) return -1;
     
-    memset(self->data, 0, self->size);
+    if (copy) {
+        assert(self->size == copy->size); // should be same size, since same type
+        memcpy(self->data, copy->data, self->size);
+    } else {
+        memset(self->data, 0, self->size);
+    }
+    
     self->owner = (PyObject *)self;
+
+    if (kwds) {
+        // all keyword arguments are attribute-assignments
+        PyObject *key, *value;
+        Py_ssize_t pos = 0;
+        
+        while (PyDict_Next(kwds, &pos, &key, &value)) {
+            if (PyObject_SetAttr((PyObject*)self, key, value)) return -1;
+        }   
+    }
 
     return 0;
 }
@@ -2880,17 +4133,54 @@ static PyTypeObject pylv_imgbtn_ext_t_Type = {
     .tp_as_buffer = &Struct_bufferprocs
 };
 
+static int pylv_imgbtn_ext_t_arg_converter(PyObject *obj, void* target) {
+    int isinst;
+    // TODO: support dictionary as argument; create a new struct object in that case
+    isinst = PyObject_IsInstance(obj, (PyObject*)&pylv_imgbtn_ext_t_Type);
+    if (isinst == 0) {
+        PyErr_Format(PyExc_TypeError, "argument should be of type lv_imgbtn_ext_t");
+    }
+    if (isinst != 1) {
+        return 0;
+    }
+    *(lv_imgbtn_ext_t **)target = ((StructObject*)obj) -> data;
+    Py_INCREF(obj); // Required since **target now uses the data. TODO: this leaks a reference; also support Py_CLEANUP_SUPPORTED
+    return 1;
+
+}
+
+
 
 
 static int
 pylv_fs_file_t_init(StructObject *self, PyObject *args, PyObject *kwds) 
 {
+    StructObject *copy = NULL;
+    // copy is a positional-only argument
+    if (!PyArg_ParseTuple(args, "|O!", &pylv_fs_file_t_Type, &copy)) return -1;
+    
     self->size = sizeof(lv_fs_file_t);
     self->data = PyMem_Malloc(self->size);
     if (!self->data) return -1;
     
-    memset(self->data, 0, self->size);
+    if (copy) {
+        assert(self->size == copy->size); // should be same size, since same type
+        memcpy(self->data, copy->data, self->size);
+    } else {
+        memset(self->data, 0, self->size);
+    }
+    
     self->owner = (PyObject *)self;
+
+    if (kwds) {
+        // all keyword arguments are attribute-assignments
+        PyObject *key, *value;
+        Py_ssize_t pos = 0;
+        
+        while (PyDict_Next(kwds, &pos, &key, &value)) {
+            if (PyObject_SetAttr((PyObject*)self, key, value)) return -1;
+        }   
+    }
 
     return 0;
 }
@@ -2917,17 +4207,54 @@ static PyTypeObject pylv_fs_file_t_Type = {
     .tp_as_buffer = &Struct_bufferprocs
 };
 
+static int pylv_fs_file_t_arg_converter(PyObject *obj, void* target) {
+    int isinst;
+    // TODO: support dictionary as argument; create a new struct object in that case
+    isinst = PyObject_IsInstance(obj, (PyObject*)&pylv_fs_file_t_Type);
+    if (isinst == 0) {
+        PyErr_Format(PyExc_TypeError, "argument should be of type lv_fs_file_t");
+    }
+    if (isinst != 1) {
+        return 0;
+    }
+    *(lv_fs_file_t **)target = ((StructObject*)obj) -> data;
+    Py_INCREF(obj); // Required since **target now uses the data. TODO: this leaks a reference; also support Py_CLEANUP_SUPPORTED
+    return 1;
+
+}
+
+
 
 
 static int
 pylv_fs_dir_t_init(StructObject *self, PyObject *args, PyObject *kwds) 
 {
+    StructObject *copy = NULL;
+    // copy is a positional-only argument
+    if (!PyArg_ParseTuple(args, "|O!", &pylv_fs_dir_t_Type, &copy)) return -1;
+    
     self->size = sizeof(lv_fs_dir_t);
     self->data = PyMem_Malloc(self->size);
     if (!self->data) return -1;
     
-    memset(self->data, 0, self->size);
+    if (copy) {
+        assert(self->size == copy->size); // should be same size, since same type
+        memcpy(self->data, copy->data, self->size);
+    } else {
+        memset(self->data, 0, self->size);
+    }
+    
     self->owner = (PyObject *)self;
+
+    if (kwds) {
+        // all keyword arguments are attribute-assignments
+        PyObject *key, *value;
+        Py_ssize_t pos = 0;
+        
+        while (PyDict_Next(kwds, &pos, &key, &value)) {
+            if (PyObject_SetAttr((PyObject*)self, key, value)) return -1;
+        }   
+    }
 
     return 0;
 }
@@ -2954,17 +4281,54 @@ static PyTypeObject pylv_fs_dir_t_Type = {
     .tp_as_buffer = &Struct_bufferprocs
 };
 
+static int pylv_fs_dir_t_arg_converter(PyObject *obj, void* target) {
+    int isinst;
+    // TODO: support dictionary as argument; create a new struct object in that case
+    isinst = PyObject_IsInstance(obj, (PyObject*)&pylv_fs_dir_t_Type);
+    if (isinst == 0) {
+        PyErr_Format(PyExc_TypeError, "argument should be of type lv_fs_dir_t");
+    }
+    if (isinst != 1) {
+        return 0;
+    }
+    *(lv_fs_dir_t **)target = ((StructObject*)obj) -> data;
+    Py_INCREF(obj); // Required since **target now uses the data. TODO: this leaks a reference; also support Py_CLEANUP_SUPPORTED
+    return 1;
+
+}
+
+
 
 
 static int
 pylv_fs_drv_t_init(StructObject *self, PyObject *args, PyObject *kwds) 
 {
+    StructObject *copy = NULL;
+    // copy is a positional-only argument
+    if (!PyArg_ParseTuple(args, "|O!", &pylv_fs_drv_t_Type, &copy)) return -1;
+    
     self->size = sizeof(lv_fs_drv_t);
     self->data = PyMem_Malloc(self->size);
     if (!self->data) return -1;
     
-    memset(self->data, 0, self->size);
+    if (copy) {
+        assert(self->size == copy->size); // should be same size, since same type
+        memcpy(self->data, copy->data, self->size);
+    } else {
+        memset(self->data, 0, self->size);
+    }
+    
     self->owner = (PyObject *)self;
+
+    if (kwds) {
+        // all keyword arguments are attribute-assignments
+        PyObject *key, *value;
+        Py_ssize_t pos = 0;
+        
+        while (PyDict_Next(kwds, &pos, &key, &value)) {
+            if (PyObject_SetAttr((PyObject*)self, key, value)) return -1;
+        }   
+    }
 
     return 0;
 }
@@ -3007,17 +4371,54 @@ static PyTypeObject pylv_fs_drv_t_Type = {
     .tp_as_buffer = &Struct_bufferprocs
 };
 
+static int pylv_fs_drv_t_arg_converter(PyObject *obj, void* target) {
+    int isinst;
+    // TODO: support dictionary as argument; create a new struct object in that case
+    isinst = PyObject_IsInstance(obj, (PyObject*)&pylv_fs_drv_t_Type);
+    if (isinst == 0) {
+        PyErr_Format(PyExc_TypeError, "argument should be of type lv_fs_drv_t");
+    }
+    if (isinst != 1) {
+        return 0;
+    }
+    *(lv_fs_drv_t **)target = ((StructObject*)obj) -> data;
+    Py_INCREF(obj); // Required since **target now uses the data. TODO: this leaks a reference; also support Py_CLEANUP_SUPPORTED
+    return 1;
+
+}
+
+
 
 
 static int
 pylv_label_ext_t_init(StructObject *self, PyObject *args, PyObject *kwds) 
 {
+    StructObject *copy = NULL;
+    // copy is a positional-only argument
+    if (!PyArg_ParseTuple(args, "|O!", &pylv_label_ext_t_Type, &copy)) return -1;
+    
     self->size = sizeof(lv_label_ext_t);
     self->data = PyMem_Malloc(self->size);
     if (!self->data) return -1;
     
-    memset(self->data, 0, self->size);
+    if (copy) {
+        assert(self->size == copy->size); // should be same size, since same type
+        memcpy(self->data, copy->data, self->size);
+    } else {
+        memset(self->data, 0, self->size);
+    }
+    
     self->owner = (PyObject *)self;
+
+    if (kwds) {
+        // all keyword arguments are attribute-assignments
+        PyObject *key, *value;
+        Py_ssize_t pos = 0;
+        
+        while (PyDict_Next(kwds, &pos, &key, &value)) {
+            if (PyObject_SetAttr((PyObject*)self, key, value)) return -1;
+        }   
+    }
 
     return 0;
 }
@@ -3138,17 +4539,54 @@ static PyTypeObject pylv_label_ext_t_Type = {
     .tp_as_buffer = &Struct_bufferprocs
 };
 
+static int pylv_label_ext_t_arg_converter(PyObject *obj, void* target) {
+    int isinst;
+    // TODO: support dictionary as argument; create a new struct object in that case
+    isinst = PyObject_IsInstance(obj, (PyObject*)&pylv_label_ext_t_Type);
+    if (isinst == 0) {
+        PyErr_Format(PyExc_TypeError, "argument should be of type lv_label_ext_t");
+    }
+    if (isinst != 1) {
+        return 0;
+    }
+    *(lv_label_ext_t **)target = ((StructObject*)obj) -> data;
+    Py_INCREF(obj); // Required since **target now uses the data. TODO: this leaks a reference; also support Py_CLEANUP_SUPPORTED
+    return 1;
+
+}
+
+
 
 
 static int
 pylv_img_ext_t_init(StructObject *self, PyObject *args, PyObject *kwds) 
 {
+    StructObject *copy = NULL;
+    // copy is a positional-only argument
+    if (!PyArg_ParseTuple(args, "|O!", &pylv_img_ext_t_Type, &copy)) return -1;
+    
     self->size = sizeof(lv_img_ext_t);
     self->data = PyMem_Malloc(self->size);
     if (!self->data) return -1;
     
-    memset(self->data, 0, self->size);
+    if (copy) {
+        assert(self->size == copy->size); // should be same size, since same type
+        memcpy(self->data, copy->data, self->size);
+    } else {
+        memset(self->data, 0, self->size);
+    }
+    
     self->owner = (PyObject *)self;
+
+    if (kwds) {
+        // all keyword arguments are attribute-assignments
+        PyObject *key, *value;
+        Py_ssize_t pos = 0;
+        
+        while (PyDict_Next(kwds, &pos, &key, &value)) {
+            if (PyObject_SetAttr((PyObject*)self, key, value)) return -1;
+        }   
+    }
 
     return 0;
 }
@@ -3231,17 +4669,54 @@ static PyTypeObject pylv_img_ext_t_Type = {
     .tp_as_buffer = &Struct_bufferprocs
 };
 
+static int pylv_img_ext_t_arg_converter(PyObject *obj, void* target) {
+    int isinst;
+    // TODO: support dictionary as argument; create a new struct object in that case
+    isinst = PyObject_IsInstance(obj, (PyObject*)&pylv_img_ext_t_Type);
+    if (isinst == 0) {
+        PyErr_Format(PyExc_TypeError, "argument should be of type lv_img_ext_t");
+    }
+    if (isinst != 1) {
+        return 0;
+    }
+    *(lv_img_ext_t **)target = ((StructObject*)obj) -> data;
+    Py_INCREF(obj); // Required since **target now uses the data. TODO: this leaks a reference; also support Py_CLEANUP_SUPPORTED
+    return 1;
+
+}
+
+
 
 
 static int
 pylv_line_ext_t_init(StructObject *self, PyObject *args, PyObject *kwds) 
 {
+    StructObject *copy = NULL;
+    // copy is a positional-only argument
+    if (!PyArg_ParseTuple(args, "|O!", &pylv_line_ext_t_Type, &copy)) return -1;
+    
     self->size = sizeof(lv_line_ext_t);
     self->data = PyMem_Malloc(self->size);
     if (!self->data) return -1;
     
-    memset(self->data, 0, self->size);
+    if (copy) {
+        assert(self->size == copy->size); // should be same size, since same type
+        memcpy(self->data, copy->data, self->size);
+    } else {
+        memset(self->data, 0, self->size);
+    }
+    
     self->owner = (PyObject *)self;
+
+    if (kwds) {
+        // all keyword arguments are attribute-assignments
+        PyObject *key, *value;
+        Py_ssize_t pos = 0;
+        
+        while (PyDict_Next(kwds, &pos, &key, &value)) {
+            if (PyObject_SetAttr((PyObject*)self, key, value)) return -1;
+        }   
+    }
 
     return 0;
 }
@@ -3304,17 +4779,54 @@ static PyTypeObject pylv_line_ext_t_Type = {
     .tp_as_buffer = &Struct_bufferprocs
 };
 
+static int pylv_line_ext_t_arg_converter(PyObject *obj, void* target) {
+    int isinst;
+    // TODO: support dictionary as argument; create a new struct object in that case
+    isinst = PyObject_IsInstance(obj, (PyObject*)&pylv_line_ext_t_Type);
+    if (isinst == 0) {
+        PyErr_Format(PyExc_TypeError, "argument should be of type lv_line_ext_t");
+    }
+    if (isinst != 1) {
+        return 0;
+    }
+    *(lv_line_ext_t **)target = ((StructObject*)obj) -> data;
+    Py_INCREF(obj); // Required since **target now uses the data. TODO: this leaks a reference; also support Py_CLEANUP_SUPPORTED
+    return 1;
+
+}
+
+
 
 
 static int
 pylv_page_ext_t_init(StructObject *self, PyObject *args, PyObject *kwds) 
 {
+    StructObject *copy = NULL;
+    // copy is a positional-only argument
+    if (!PyArg_ParseTuple(args, "|O!", &pylv_page_ext_t_Type, &copy)) return -1;
+    
     self->size = sizeof(lv_page_ext_t);
     self->data = PyMem_Malloc(self->size);
     if (!self->data) return -1;
     
-    memset(self->data, 0, self->size);
+    if (copy) {
+        assert(self->size == copy->size); // should be same size, since same type
+        memcpy(self->data, copy->data, self->size);
+    } else {
+        memset(self->data, 0, self->size);
+    }
+    
     self->owner = (PyObject *)self;
+
+    if (kwds) {
+        // all keyword arguments are attribute-assignments
+        PyObject *key, *value;
+        Py_ssize_t pos = 0;
+        
+        while (PyDict_Next(kwds, &pos, &key, &value)) {
+            if (PyObject_SetAttr((PyObject*)self, key, value)) return -1;
+        }   
+    }
 
     return 0;
 }
@@ -3397,17 +4909,54 @@ static PyTypeObject pylv_page_ext_t_Type = {
     .tp_as_buffer = &Struct_bufferprocs
 };
 
+static int pylv_page_ext_t_arg_converter(PyObject *obj, void* target) {
+    int isinst;
+    // TODO: support dictionary as argument; create a new struct object in that case
+    isinst = PyObject_IsInstance(obj, (PyObject*)&pylv_page_ext_t_Type);
+    if (isinst == 0) {
+        PyErr_Format(PyExc_TypeError, "argument should be of type lv_page_ext_t");
+    }
+    if (isinst != 1) {
+        return 0;
+    }
+    *(lv_page_ext_t **)target = ((StructObject*)obj) -> data;
+    Py_INCREF(obj); // Required since **target now uses the data. TODO: this leaks a reference; also support Py_CLEANUP_SUPPORTED
+    return 1;
+
+}
+
+
 
 
 static int
 pylv_list_ext_t_init(StructObject *self, PyObject *args, PyObject *kwds) 
 {
+    StructObject *copy = NULL;
+    // copy is a positional-only argument
+    if (!PyArg_ParseTuple(args, "|O!", &pylv_list_ext_t_Type, &copy)) return -1;
+    
     self->size = sizeof(lv_list_ext_t);
     self->data = PyMem_Malloc(self->size);
     if (!self->data) return -1;
     
-    memset(self->data, 0, self->size);
+    if (copy) {
+        assert(self->size == copy->size); // should be same size, since same type
+        memcpy(self->data, copy->data, self->size);
+    } else {
+        memset(self->data, 0, self->size);
+    }
+    
     self->owner = (PyObject *)self;
+
+    if (kwds) {
+        // all keyword arguments are attribute-assignments
+        PyObject *key, *value;
+        Py_ssize_t pos = 0;
+        
+        while (PyDict_Next(kwds, &pos, &key, &value)) {
+            if (PyObject_SetAttr((PyObject*)self, key, value)) return -1;
+        }   
+    }
 
     return 0;
 }
@@ -3440,17 +4989,54 @@ static PyTypeObject pylv_list_ext_t_Type = {
     .tp_as_buffer = &Struct_bufferprocs
 };
 
+static int pylv_list_ext_t_arg_converter(PyObject *obj, void* target) {
+    int isinst;
+    // TODO: support dictionary as argument; create a new struct object in that case
+    isinst = PyObject_IsInstance(obj, (PyObject*)&pylv_list_ext_t_Type);
+    if (isinst == 0) {
+        PyErr_Format(PyExc_TypeError, "argument should be of type lv_list_ext_t");
+    }
+    if (isinst != 1) {
+        return 0;
+    }
+    *(lv_list_ext_t **)target = ((StructObject*)obj) -> data;
+    Py_INCREF(obj); // Required since **target now uses the data. TODO: this leaks a reference; also support Py_CLEANUP_SUPPORTED
+    return 1;
+
+}
+
+
 
 
 static int
 pylv_chart_series_t_init(StructObject *self, PyObject *args, PyObject *kwds) 
 {
+    StructObject *copy = NULL;
+    // copy is a positional-only argument
+    if (!PyArg_ParseTuple(args, "|O!", &pylv_chart_series_t_Type, &copy)) return -1;
+    
     self->size = sizeof(lv_chart_series_t);
     self->data = PyMem_Malloc(self->size);
     if (!self->data) return -1;
     
-    memset(self->data, 0, self->size);
+    if (copy) {
+        assert(self->size == copy->size); // should be same size, since same type
+        memcpy(self->data, copy->data, self->size);
+    } else {
+        memset(self->data, 0, self->size);
+    }
+    
     self->owner = (PyObject *)self;
+
+    if (kwds) {
+        // all keyword arguments are attribute-assignments
+        PyObject *key, *value;
+        Py_ssize_t pos = 0;
+        
+        while (PyDict_Next(kwds, &pos, &key, &value)) {
+            if (PyObject_SetAttr((PyObject*)self, key, value)) return -1;
+        }   
+    }
 
     return 0;
 }
@@ -3478,17 +5064,54 @@ static PyTypeObject pylv_chart_series_t_Type = {
     .tp_as_buffer = &Struct_bufferprocs
 };
 
+static int pylv_chart_series_t_arg_converter(PyObject *obj, void* target) {
+    int isinst;
+    // TODO: support dictionary as argument; create a new struct object in that case
+    isinst = PyObject_IsInstance(obj, (PyObject*)&pylv_chart_series_t_Type);
+    if (isinst == 0) {
+        PyErr_Format(PyExc_TypeError, "argument should be of type lv_chart_series_t");
+    }
+    if (isinst != 1) {
+        return 0;
+    }
+    *(lv_chart_series_t **)target = ((StructObject*)obj) -> data;
+    Py_INCREF(obj); // Required since **target now uses the data. TODO: this leaks a reference; also support Py_CLEANUP_SUPPORTED
+    return 1;
+
+}
+
+
 
 
 static int
 pylv_chart_ext_t_init(StructObject *self, PyObject *args, PyObject *kwds) 
 {
+    StructObject *copy = NULL;
+    // copy is a positional-only argument
+    if (!PyArg_ParseTuple(args, "|O!", &pylv_chart_ext_t_Type, &copy)) return -1;
+    
     self->size = sizeof(lv_chart_ext_t);
     self->data = PyMem_Malloc(self->size);
     if (!self->data) return -1;
     
-    memset(self->data, 0, self->size);
+    if (copy) {
+        assert(self->size == copy->size); // should be same size, since same type
+        memcpy(self->data, copy->data, self->size);
+    } else {
+        memset(self->data, 0, self->size);
+    }
+    
     self->owner = (PyObject *)self;
+
+    if (kwds) {
+        // all keyword arguments are attribute-assignments
+        PyObject *key, *value;
+        Py_ssize_t pos = 0;
+        
+        while (PyDict_Next(kwds, &pos, &key, &value)) {
+            if (PyObject_SetAttr((PyObject*)self, key, value)) return -1;
+        }   
+    }
 
     return 0;
 }
@@ -3538,17 +5161,54 @@ static PyTypeObject pylv_chart_ext_t_Type = {
     .tp_as_buffer = &Struct_bufferprocs
 };
 
+static int pylv_chart_ext_t_arg_converter(PyObject *obj, void* target) {
+    int isinst;
+    // TODO: support dictionary as argument; create a new struct object in that case
+    isinst = PyObject_IsInstance(obj, (PyObject*)&pylv_chart_ext_t_Type);
+    if (isinst == 0) {
+        PyErr_Format(PyExc_TypeError, "argument should be of type lv_chart_ext_t");
+    }
+    if (isinst != 1) {
+        return 0;
+    }
+    *(lv_chart_ext_t **)target = ((StructObject*)obj) -> data;
+    Py_INCREF(obj); // Required since **target now uses the data. TODO: this leaks a reference; also support Py_CLEANUP_SUPPORTED
+    return 1;
+
+}
+
+
 
 
 static int
 pylv_table_cell_format_t_init(StructObject *self, PyObject *args, PyObject *kwds) 
 {
+    StructObject *copy = NULL;
+    // copy is a positional-only argument
+    if (!PyArg_ParseTuple(args, "|O!", &pylv_table_cell_format_t_Type, &copy)) return -1;
+    
     self->size = sizeof(lv_table_cell_format_t);
     self->data = PyMem_Malloc(self->size);
     if (!self->data) return -1;
     
-    memset(self->data, 0, self->size);
+    if (copy) {
+        assert(self->size == copy->size); // should be same size, since same type
+        memcpy(self->data, copy->data, self->size);
+    } else {
+        memset(self->data, 0, self->size);
+    }
+    
     self->owner = (PyObject *)self;
+
+    if (kwds) {
+        // all keyword arguments are attribute-assignments
+        PyObject *key, *value;
+        Py_ssize_t pos = 0;
+        
+        while (PyDict_Next(kwds, &pos, &key, &value)) {
+            if (PyObject_SetAttr((PyObject*)self, key, value)) return -1;
+        }   
+    }
 
     return 0;
 }
@@ -3646,17 +5306,54 @@ static PyTypeObject pylv_table_cell_format_t_Type = {
     .tp_as_buffer = &Struct_bufferprocs
 };
 
+static int pylv_table_cell_format_t_arg_converter(PyObject *obj, void* target) {
+    int isinst;
+    // TODO: support dictionary as argument; create a new struct object in that case
+    isinst = PyObject_IsInstance(obj, (PyObject*)&pylv_table_cell_format_t_Type);
+    if (isinst == 0) {
+        PyErr_Format(PyExc_TypeError, "argument should be of type lv_table_cell_format_t");
+    }
+    if (isinst != 1) {
+        return 0;
+    }
+    *(lv_table_cell_format_t **)target = ((StructObject*)obj) -> data;
+    Py_INCREF(obj); // Required since **target now uses the data. TODO: this leaks a reference; also support Py_CLEANUP_SUPPORTED
+    return 1;
+
+}
+
+
 
 
 static int
 pylv_table_ext_t_init(StructObject *self, PyObject *args, PyObject *kwds) 
 {
+    StructObject *copy = NULL;
+    // copy is a positional-only argument
+    if (!PyArg_ParseTuple(args, "|O!", &pylv_table_ext_t_Type, &copy)) return -1;
+    
     self->size = sizeof(lv_table_ext_t);
     self->data = PyMem_Malloc(self->size);
     if (!self->data) return -1;
     
-    memset(self->data, 0, self->size);
+    if (copy) {
+        assert(self->size == copy->size); // should be same size, since same type
+        memcpy(self->data, copy->data, self->size);
+    } else {
+        memset(self->data, 0, self->size);
+    }
+    
     self->owner = (PyObject *)self;
+
+    if (kwds) {
+        // all keyword arguments are attribute-assignments
+        PyObject *key, *value;
+        Py_ssize_t pos = 0;
+        
+        while (PyDict_Next(kwds, &pos, &key, &value)) {
+            if (PyObject_SetAttr((PyObject*)self, key, value)) return -1;
+        }   
+    }
 
     return 0;
 }
@@ -3686,17 +5383,54 @@ static PyTypeObject pylv_table_ext_t_Type = {
     .tp_as_buffer = &Struct_bufferprocs
 };
 
+static int pylv_table_ext_t_arg_converter(PyObject *obj, void* target) {
+    int isinst;
+    // TODO: support dictionary as argument; create a new struct object in that case
+    isinst = PyObject_IsInstance(obj, (PyObject*)&pylv_table_ext_t_Type);
+    if (isinst == 0) {
+        PyErr_Format(PyExc_TypeError, "argument should be of type lv_table_ext_t");
+    }
+    if (isinst != 1) {
+        return 0;
+    }
+    *(lv_table_ext_t **)target = ((StructObject*)obj) -> data;
+    Py_INCREF(obj); // Required since **target now uses the data. TODO: this leaks a reference; also support Py_CLEANUP_SUPPORTED
+    return 1;
+
+}
+
+
 
 
 static int
 pylv_cb_ext_t_init(StructObject *self, PyObject *args, PyObject *kwds) 
 {
+    StructObject *copy = NULL;
+    // copy is a positional-only argument
+    if (!PyArg_ParseTuple(args, "|O!", &pylv_cb_ext_t_Type, &copy)) return -1;
+    
     self->size = sizeof(lv_cb_ext_t);
     self->data = PyMem_Malloc(self->size);
     if (!self->data) return -1;
     
-    memset(self->data, 0, self->size);
+    if (copy) {
+        assert(self->size == copy->size); // should be same size, since same type
+        memcpy(self->data, copy->data, self->size);
+    } else {
+        memset(self->data, 0, self->size);
+    }
+    
     self->owner = (PyObject *)self;
+
+    if (kwds) {
+        // all keyword arguments are attribute-assignments
+        PyObject *key, *value;
+        Py_ssize_t pos = 0;
+        
+        while (PyDict_Next(kwds, &pos, &key, &value)) {
+            if (PyObject_SetAttr((PyObject*)self, key, value)) return -1;
+        }   
+    }
 
     return 0;
 }
@@ -3724,17 +5458,54 @@ static PyTypeObject pylv_cb_ext_t_Type = {
     .tp_as_buffer = &Struct_bufferprocs
 };
 
+static int pylv_cb_ext_t_arg_converter(PyObject *obj, void* target) {
+    int isinst;
+    // TODO: support dictionary as argument; create a new struct object in that case
+    isinst = PyObject_IsInstance(obj, (PyObject*)&pylv_cb_ext_t_Type);
+    if (isinst == 0) {
+        PyErr_Format(PyExc_TypeError, "argument should be of type lv_cb_ext_t");
+    }
+    if (isinst != 1) {
+        return 0;
+    }
+    *(lv_cb_ext_t **)target = ((StructObject*)obj) -> data;
+    Py_INCREF(obj); // Required since **target now uses the data. TODO: this leaks a reference; also support Py_CLEANUP_SUPPORTED
+    return 1;
+
+}
+
+
 
 
 static int
 pylv_bar_ext_t_init(StructObject *self, PyObject *args, PyObject *kwds) 
 {
+    StructObject *copy = NULL;
+    // copy is a positional-only argument
+    if (!PyArg_ParseTuple(args, "|O!", &pylv_bar_ext_t_Type, &copy)) return -1;
+    
     self->size = sizeof(lv_bar_ext_t);
     self->data = PyMem_Malloc(self->size);
     if (!self->data) return -1;
     
-    memset(self->data, 0, self->size);
+    if (copy) {
+        assert(self->size == copy->size); // should be same size, since same type
+        memcpy(self->data, copy->data, self->size);
+    } else {
+        memset(self->data, 0, self->size);
+    }
+    
     self->owner = (PyObject *)self;
+
+    if (kwds) {
+        // all keyword arguments are attribute-assignments
+        PyObject *key, *value;
+        Py_ssize_t pos = 0;
+        
+        while (PyDict_Next(kwds, &pos, &key, &value)) {
+            if (PyObject_SetAttr((PyObject*)self, key, value)) return -1;
+        }   
+    }
 
     return 0;
 }
@@ -3785,17 +5556,54 @@ static PyTypeObject pylv_bar_ext_t_Type = {
     .tp_as_buffer = &Struct_bufferprocs
 };
 
+static int pylv_bar_ext_t_arg_converter(PyObject *obj, void* target) {
+    int isinst;
+    // TODO: support dictionary as argument; create a new struct object in that case
+    isinst = PyObject_IsInstance(obj, (PyObject*)&pylv_bar_ext_t_Type);
+    if (isinst == 0) {
+        PyErr_Format(PyExc_TypeError, "argument should be of type lv_bar_ext_t");
+    }
+    if (isinst != 1) {
+        return 0;
+    }
+    *(lv_bar_ext_t **)target = ((StructObject*)obj) -> data;
+    Py_INCREF(obj); // Required since **target now uses the data. TODO: this leaks a reference; also support Py_CLEANUP_SUPPORTED
+    return 1;
+
+}
+
+
 
 
 static int
 pylv_slider_ext_t_init(StructObject *self, PyObject *args, PyObject *kwds) 
 {
+    StructObject *copy = NULL;
+    // copy is a positional-only argument
+    if (!PyArg_ParseTuple(args, "|O!", &pylv_slider_ext_t_Type, &copy)) return -1;
+    
     self->size = sizeof(lv_slider_ext_t);
     self->data = PyMem_Malloc(self->size);
     if (!self->data) return -1;
     
-    memset(self->data, 0, self->size);
+    if (copy) {
+        assert(self->size == copy->size); // should be same size, since same type
+        memcpy(self->data, copy->data, self->size);
+    } else {
+        memset(self->data, 0, self->size);
+    }
+    
     self->owner = (PyObject *)self;
+
+    if (kwds) {
+        // all keyword arguments are attribute-assignments
+        PyObject *key, *value;
+        Py_ssize_t pos = 0;
+        
+        while (PyDict_Next(kwds, &pos, &key, &value)) {
+            if (PyObject_SetAttr((PyObject*)self, key, value)) return -1;
+        }   
+    }
 
     return 0;
 }
@@ -3841,17 +5649,54 @@ static PyTypeObject pylv_slider_ext_t_Type = {
     .tp_as_buffer = &Struct_bufferprocs
 };
 
+static int pylv_slider_ext_t_arg_converter(PyObject *obj, void* target) {
+    int isinst;
+    // TODO: support dictionary as argument; create a new struct object in that case
+    isinst = PyObject_IsInstance(obj, (PyObject*)&pylv_slider_ext_t_Type);
+    if (isinst == 0) {
+        PyErr_Format(PyExc_TypeError, "argument should be of type lv_slider_ext_t");
+    }
+    if (isinst != 1) {
+        return 0;
+    }
+    *(lv_slider_ext_t **)target = ((StructObject*)obj) -> data;
+    Py_INCREF(obj); // Required since **target now uses the data. TODO: this leaks a reference; also support Py_CLEANUP_SUPPORTED
+    return 1;
+
+}
+
+
 
 
 static int
 pylv_led_ext_t_init(StructObject *self, PyObject *args, PyObject *kwds) 
 {
+    StructObject *copy = NULL;
+    // copy is a positional-only argument
+    if (!PyArg_ParseTuple(args, "|O!", &pylv_led_ext_t_Type, &copy)) return -1;
+    
     self->size = sizeof(lv_led_ext_t);
     self->data = PyMem_Malloc(self->size);
     if (!self->data) return -1;
     
-    memset(self->data, 0, self->size);
+    if (copy) {
+        assert(self->size == copy->size); // should be same size, since same type
+        memcpy(self->data, copy->data, self->size);
+    } else {
+        memset(self->data, 0, self->size);
+    }
+    
     self->owner = (PyObject *)self;
+
+    if (kwds) {
+        // all keyword arguments are attribute-assignments
+        PyObject *key, *value;
+        Py_ssize_t pos = 0;
+        
+        while (PyDict_Next(kwds, &pos, &key, &value)) {
+            if (PyObject_SetAttr((PyObject*)self, key, value)) return -1;
+        }   
+    }
 
     return 0;
 }
@@ -3877,17 +5722,54 @@ static PyTypeObject pylv_led_ext_t_Type = {
     .tp_as_buffer = &Struct_bufferprocs
 };
 
+static int pylv_led_ext_t_arg_converter(PyObject *obj, void* target) {
+    int isinst;
+    // TODO: support dictionary as argument; create a new struct object in that case
+    isinst = PyObject_IsInstance(obj, (PyObject*)&pylv_led_ext_t_Type);
+    if (isinst == 0) {
+        PyErr_Format(PyExc_TypeError, "argument should be of type lv_led_ext_t");
+    }
+    if (isinst != 1) {
+        return 0;
+    }
+    *(lv_led_ext_t **)target = ((StructObject*)obj) -> data;
+    Py_INCREF(obj); // Required since **target now uses the data. TODO: this leaks a reference; also support Py_CLEANUP_SUPPORTED
+    return 1;
+
+}
+
+
 
 
 static int
 pylv_btnm_ext_t_init(StructObject *self, PyObject *args, PyObject *kwds) 
 {
+    StructObject *copy = NULL;
+    // copy is a positional-only argument
+    if (!PyArg_ParseTuple(args, "|O!", &pylv_btnm_ext_t_Type, &copy)) return -1;
+    
     self->size = sizeof(lv_btnm_ext_t);
     self->data = PyMem_Malloc(self->size);
     if (!self->data) return -1;
     
-    memset(self->data, 0, self->size);
+    if (copy) {
+        assert(self->size == copy->size); // should be same size, since same type
+        memcpy(self->data, copy->data, self->size);
+    } else {
+        memset(self->data, 0, self->size);
+    }
+    
     self->owner = (PyObject *)self;
+
+    if (kwds) {
+        // all keyword arguments are attribute-assignments
+        PyObject *key, *value;
+        Py_ssize_t pos = 0;
+        
+        while (PyDict_Next(kwds, &pos, &key, &value)) {
+            if (PyObject_SetAttr((PyObject*)self, key, value)) return -1;
+        }   
+    }
 
     return 0;
 }
@@ -3937,17 +5819,54 @@ static PyTypeObject pylv_btnm_ext_t_Type = {
     .tp_as_buffer = &Struct_bufferprocs
 };
 
+static int pylv_btnm_ext_t_arg_converter(PyObject *obj, void* target) {
+    int isinst;
+    // TODO: support dictionary as argument; create a new struct object in that case
+    isinst = PyObject_IsInstance(obj, (PyObject*)&pylv_btnm_ext_t_Type);
+    if (isinst == 0) {
+        PyErr_Format(PyExc_TypeError, "argument should be of type lv_btnm_ext_t");
+    }
+    if (isinst != 1) {
+        return 0;
+    }
+    *(lv_btnm_ext_t **)target = ((StructObject*)obj) -> data;
+    Py_INCREF(obj); // Required since **target now uses the data. TODO: this leaks a reference; also support Py_CLEANUP_SUPPORTED
+    return 1;
+
+}
+
+
 
 
 static int
 pylv_kb_ext_t_init(StructObject *self, PyObject *args, PyObject *kwds) 
 {
+    StructObject *copy = NULL;
+    // copy is a positional-only argument
+    if (!PyArg_ParseTuple(args, "|O!", &pylv_kb_ext_t_Type, &copy)) return -1;
+    
     self->size = sizeof(lv_kb_ext_t);
     self->data = PyMem_Malloc(self->size);
     if (!self->data) return -1;
     
-    memset(self->data, 0, self->size);
+    if (copy) {
+        assert(self->size == copy->size); // should be same size, since same type
+        memcpy(self->data, copy->data, self->size);
+    } else {
+        memset(self->data, 0, self->size);
+    }
+    
     self->owner = (PyObject *)self;
+
+    if (kwds) {
+        // all keyword arguments are attribute-assignments
+        PyObject *key, *value;
+        Py_ssize_t pos = 0;
+        
+        while (PyDict_Next(kwds, &pos, &key, &value)) {
+            if (PyObject_SetAttr((PyObject*)self, key, value)) return -1;
+        }   
+    }
 
     return 0;
 }
@@ -3993,17 +5912,54 @@ static PyTypeObject pylv_kb_ext_t_Type = {
     .tp_as_buffer = &Struct_bufferprocs
 };
 
+static int pylv_kb_ext_t_arg_converter(PyObject *obj, void* target) {
+    int isinst;
+    // TODO: support dictionary as argument; create a new struct object in that case
+    isinst = PyObject_IsInstance(obj, (PyObject*)&pylv_kb_ext_t_Type);
+    if (isinst == 0) {
+        PyErr_Format(PyExc_TypeError, "argument should be of type lv_kb_ext_t");
+    }
+    if (isinst != 1) {
+        return 0;
+    }
+    *(lv_kb_ext_t **)target = ((StructObject*)obj) -> data;
+    Py_INCREF(obj); // Required since **target now uses the data. TODO: this leaks a reference; also support Py_CLEANUP_SUPPORTED
+    return 1;
+
+}
+
+
 
 
 static int
 pylv_ddlist_ext_t_init(StructObject *self, PyObject *args, PyObject *kwds) 
 {
+    StructObject *copy = NULL;
+    // copy is a positional-only argument
+    if (!PyArg_ParseTuple(args, "|O!", &pylv_ddlist_ext_t_Type, &copy)) return -1;
+    
     self->size = sizeof(lv_ddlist_ext_t);
     self->data = PyMem_Malloc(self->size);
     if (!self->data) return -1;
     
-    memset(self->data, 0, self->size);
+    if (copy) {
+        assert(self->size == copy->size); // should be same size, since same type
+        memcpy(self->data, copy->data, self->size);
+    } else {
+        memset(self->data, 0, self->size);
+    }
+    
     self->owner = (PyObject *)self;
+
+    if (kwds) {
+        // all keyword arguments are attribute-assignments
+        PyObject *key, *value;
+        Py_ssize_t pos = 0;
+        
+        while (PyDict_Next(kwds, &pos, &key, &value)) {
+            if (PyObject_SetAttr((PyObject*)self, key, value)) return -1;
+        }   
+    }
 
     return 0;
 }
@@ -4090,17 +6046,54 @@ static PyTypeObject pylv_ddlist_ext_t_Type = {
     .tp_as_buffer = &Struct_bufferprocs
 };
 
+static int pylv_ddlist_ext_t_arg_converter(PyObject *obj, void* target) {
+    int isinst;
+    // TODO: support dictionary as argument; create a new struct object in that case
+    isinst = PyObject_IsInstance(obj, (PyObject*)&pylv_ddlist_ext_t_Type);
+    if (isinst == 0) {
+        PyErr_Format(PyExc_TypeError, "argument should be of type lv_ddlist_ext_t");
+    }
+    if (isinst != 1) {
+        return 0;
+    }
+    *(lv_ddlist_ext_t **)target = ((StructObject*)obj) -> data;
+    Py_INCREF(obj); // Required since **target now uses the data. TODO: this leaks a reference; also support Py_CLEANUP_SUPPORTED
+    return 1;
+
+}
+
+
 
 
 static int
 pylv_roller_ext_t_init(StructObject *self, PyObject *args, PyObject *kwds) 
 {
+    StructObject *copy = NULL;
+    // copy is a positional-only argument
+    if (!PyArg_ParseTuple(args, "|O!", &pylv_roller_ext_t_Type, &copy)) return -1;
+    
     self->size = sizeof(lv_roller_ext_t);
     self->data = PyMem_Malloc(self->size);
     if (!self->data) return -1;
     
-    memset(self->data, 0, self->size);
+    if (copy) {
+        assert(self->size == copy->size); // should be same size, since same type
+        memcpy(self->data, copy->data, self->size);
+    } else {
+        memset(self->data, 0, self->size);
+    }
+    
     self->owner = (PyObject *)self;
+
+    if (kwds) {
+        // all keyword arguments are attribute-assignments
+        PyObject *key, *value;
+        Py_ssize_t pos = 0;
+        
+        while (PyDict_Next(kwds, &pos, &key, &value)) {
+            if (PyObject_SetAttr((PyObject*)self, key, value)) return -1;
+        }   
+    }
 
     return 0;
 }
@@ -4126,17 +6119,54 @@ static PyTypeObject pylv_roller_ext_t_Type = {
     .tp_as_buffer = &Struct_bufferprocs
 };
 
+static int pylv_roller_ext_t_arg_converter(PyObject *obj, void* target) {
+    int isinst;
+    // TODO: support dictionary as argument; create a new struct object in that case
+    isinst = PyObject_IsInstance(obj, (PyObject*)&pylv_roller_ext_t_Type);
+    if (isinst == 0) {
+        PyErr_Format(PyExc_TypeError, "argument should be of type lv_roller_ext_t");
+    }
+    if (isinst != 1) {
+        return 0;
+    }
+    *(lv_roller_ext_t **)target = ((StructObject*)obj) -> data;
+    Py_INCREF(obj); // Required since **target now uses the data. TODO: this leaks a reference; also support Py_CLEANUP_SUPPORTED
+    return 1;
+
+}
+
+
 
 
 static int
 pylv_ta_ext_t_init(StructObject *self, PyObject *args, PyObject *kwds) 
 {
+    StructObject *copy = NULL;
+    // copy is a positional-only argument
+    if (!PyArg_ParseTuple(args, "|O!", &pylv_ta_ext_t_Type, &copy)) return -1;
+    
     self->size = sizeof(lv_ta_ext_t);
     self->data = PyMem_Malloc(self->size);
     if (!self->data) return -1;
     
-    memset(self->data, 0, self->size);
+    if (copy) {
+        assert(self->size == copy->size); // should be same size, since same type
+        memcpy(self->data, copy->data, self->size);
+    } else {
+        memset(self->data, 0, self->size);
+    }
+    
     self->owner = (PyObject *)self;
+
+    if (kwds) {
+        // all keyword arguments are attribute-assignments
+        PyObject *key, *value;
+        Py_ssize_t pos = 0;
+        
+        while (PyDict_Next(kwds, &pos, &key, &value)) {
+            if (PyObject_SetAttr((PyObject*)self, key, value)) return -1;
+        }   
+    }
 
     return 0;
 }
@@ -4204,17 +6234,54 @@ static PyTypeObject pylv_ta_ext_t_Type = {
     .tp_as_buffer = &Struct_bufferprocs
 };
 
+static int pylv_ta_ext_t_arg_converter(PyObject *obj, void* target) {
+    int isinst;
+    // TODO: support dictionary as argument; create a new struct object in that case
+    isinst = PyObject_IsInstance(obj, (PyObject*)&pylv_ta_ext_t_Type);
+    if (isinst == 0) {
+        PyErr_Format(PyExc_TypeError, "argument should be of type lv_ta_ext_t");
+    }
+    if (isinst != 1) {
+        return 0;
+    }
+    *(lv_ta_ext_t **)target = ((StructObject*)obj) -> data;
+    Py_INCREF(obj); // Required since **target now uses the data. TODO: this leaks a reference; also support Py_CLEANUP_SUPPORTED
+    return 1;
+
+}
+
+
 
 
 static int
 pylv_canvas_ext_t_init(StructObject *self, PyObject *args, PyObject *kwds) 
 {
+    StructObject *copy = NULL;
+    // copy is a positional-only argument
+    if (!PyArg_ParseTuple(args, "|O!", &pylv_canvas_ext_t_Type, &copy)) return -1;
+    
     self->size = sizeof(lv_canvas_ext_t);
     self->data = PyMem_Malloc(self->size);
     if (!self->data) return -1;
     
-    memset(self->data, 0, self->size);
+    if (copy) {
+        assert(self->size == copy->size); // should be same size, since same type
+        memcpy(self->data, copy->data, self->size);
+    } else {
+        memset(self->data, 0, self->size);
+    }
+    
     self->owner = (PyObject *)self;
+
+    if (kwds) {
+        // all keyword arguments are attribute-assignments
+        PyObject *key, *value;
+        Py_ssize_t pos = 0;
+        
+        while (PyDict_Next(kwds, &pos, &key, &value)) {
+            if (PyObject_SetAttr((PyObject*)self, key, value)) return -1;
+        }   
+    }
 
     return 0;
 }
@@ -4241,17 +6308,54 @@ static PyTypeObject pylv_canvas_ext_t_Type = {
     .tp_as_buffer = &Struct_bufferprocs
 };
 
+static int pylv_canvas_ext_t_arg_converter(PyObject *obj, void* target) {
+    int isinst;
+    // TODO: support dictionary as argument; create a new struct object in that case
+    isinst = PyObject_IsInstance(obj, (PyObject*)&pylv_canvas_ext_t_Type);
+    if (isinst == 0) {
+        PyErr_Format(PyExc_TypeError, "argument should be of type lv_canvas_ext_t");
+    }
+    if (isinst != 1) {
+        return 0;
+    }
+    *(lv_canvas_ext_t **)target = ((StructObject*)obj) -> data;
+    Py_INCREF(obj); // Required since **target now uses the data. TODO: this leaks a reference; also support Py_CLEANUP_SUPPORTED
+    return 1;
+
+}
+
+
 
 
 static int
 pylv_win_ext_t_init(StructObject *self, PyObject *args, PyObject *kwds) 
 {
+    StructObject *copy = NULL;
+    // copy is a positional-only argument
+    if (!PyArg_ParseTuple(args, "|O!", &pylv_win_ext_t_Type, &copy)) return -1;
+    
     self->size = sizeof(lv_win_ext_t);
     self->data = PyMem_Malloc(self->size);
     if (!self->data) return -1;
     
-    memset(self->data, 0, self->size);
+    if (copy) {
+        assert(self->size == copy->size); // should be same size, since same type
+        memcpy(self->data, copy->data, self->size);
+    } else {
+        memset(self->data, 0, self->size);
+    }
+    
     self->owner = (PyObject *)self;
+
+    if (kwds) {
+        // all keyword arguments are attribute-assignments
+        PyObject *key, *value;
+        Py_ssize_t pos = 0;
+        
+        while (PyDict_Next(kwds, &pos, &key, &value)) {
+            if (PyObject_SetAttr((PyObject*)self, key, value)) return -1;
+        }   
+    }
 
     return 0;
 }
@@ -4283,17 +6387,54 @@ static PyTypeObject pylv_win_ext_t_Type = {
     .tp_as_buffer = &Struct_bufferprocs
 };
 
+static int pylv_win_ext_t_arg_converter(PyObject *obj, void* target) {
+    int isinst;
+    // TODO: support dictionary as argument; create a new struct object in that case
+    isinst = PyObject_IsInstance(obj, (PyObject*)&pylv_win_ext_t_Type);
+    if (isinst == 0) {
+        PyErr_Format(PyExc_TypeError, "argument should be of type lv_win_ext_t");
+    }
+    if (isinst != 1) {
+        return 0;
+    }
+    *(lv_win_ext_t **)target = ((StructObject*)obj) -> data;
+    Py_INCREF(obj); // Required since **target now uses the data. TODO: this leaks a reference; also support Py_CLEANUP_SUPPORTED
+    return 1;
+
+}
+
+
 
 
 static int
 pylv_tabview_ext_t_init(StructObject *self, PyObject *args, PyObject *kwds) 
 {
+    StructObject *copy = NULL;
+    // copy is a positional-only argument
+    if (!PyArg_ParseTuple(args, "|O!", &pylv_tabview_ext_t_Type, &copy)) return -1;
+    
     self->size = sizeof(lv_tabview_ext_t);
     self->data = PyMem_Malloc(self->size);
     if (!self->data) return -1;
     
-    memset(self->data, 0, self->size);
+    if (copy) {
+        assert(self->size == copy->size); // should be same size, since same type
+        memcpy(self->data, copy->data, self->size);
+    } else {
+        memset(self->data, 0, self->size);
+    }
+    
     self->owner = (PyObject *)self;
+
+    if (kwds) {
+        // all keyword arguments are attribute-assignments
+        PyObject *key, *value;
+        Py_ssize_t pos = 0;
+        
+        while (PyDict_Next(kwds, &pos, &key, &value)) {
+            if (PyObject_SetAttr((PyObject*)self, key, value)) return -1;
+        }   
+    }
 
     return 0;
 }
@@ -4416,17 +6557,54 @@ static PyTypeObject pylv_tabview_ext_t_Type = {
     .tp_as_buffer = &Struct_bufferprocs
 };
 
+static int pylv_tabview_ext_t_arg_converter(PyObject *obj, void* target) {
+    int isinst;
+    // TODO: support dictionary as argument; create a new struct object in that case
+    isinst = PyObject_IsInstance(obj, (PyObject*)&pylv_tabview_ext_t_Type);
+    if (isinst == 0) {
+        PyErr_Format(PyExc_TypeError, "argument should be of type lv_tabview_ext_t");
+    }
+    if (isinst != 1) {
+        return 0;
+    }
+    *(lv_tabview_ext_t **)target = ((StructObject*)obj) -> data;
+    Py_INCREF(obj); // Required since **target now uses the data. TODO: this leaks a reference; also support Py_CLEANUP_SUPPORTED
+    return 1;
+
+}
+
+
 
 
 static int
 pylv_tileview_ext_t_init(StructObject *self, PyObject *args, PyObject *kwds) 
 {
+    StructObject *copy = NULL;
+    // copy is a positional-only argument
+    if (!PyArg_ParseTuple(args, "|O!", &pylv_tileview_ext_t_Type, &copy)) return -1;
+    
     self->size = sizeof(lv_tileview_ext_t);
     self->data = PyMem_Malloc(self->size);
     if (!self->data) return -1;
     
-    memset(self->data, 0, self->size);
+    if (copy) {
+        assert(self->size == copy->size); // should be same size, since same type
+        memcpy(self->data, copy->data, self->size);
+    } else {
+        memset(self->data, 0, self->size);
+    }
+    
     self->owner = (PyObject *)self;
+
+    if (kwds) {
+        // all keyword arguments are attribute-assignments
+        PyObject *key, *value;
+        Py_ssize_t pos = 0;
+        
+        while (PyDict_Next(kwds, &pos, &key, &value)) {
+            if (PyObject_SetAttr((PyObject*)self, key, value)) return -1;
+        }   
+    }
 
     return 0;
 }
@@ -4563,17 +6741,54 @@ static PyTypeObject pylv_tileview_ext_t_Type = {
     .tp_as_buffer = &Struct_bufferprocs
 };
 
+static int pylv_tileview_ext_t_arg_converter(PyObject *obj, void* target) {
+    int isinst;
+    // TODO: support dictionary as argument; create a new struct object in that case
+    isinst = PyObject_IsInstance(obj, (PyObject*)&pylv_tileview_ext_t_Type);
+    if (isinst == 0) {
+        PyErr_Format(PyExc_TypeError, "argument should be of type lv_tileview_ext_t");
+    }
+    if (isinst != 1) {
+        return 0;
+    }
+    *(lv_tileview_ext_t **)target = ((StructObject*)obj) -> data;
+    Py_INCREF(obj); // Required since **target now uses the data. TODO: this leaks a reference; also support Py_CLEANUP_SUPPORTED
+    return 1;
+
+}
+
+
 
 
 static int
 pylv_mbox_ext_t_init(StructObject *self, PyObject *args, PyObject *kwds) 
 {
+    StructObject *copy = NULL;
+    // copy is a positional-only argument
+    if (!PyArg_ParseTuple(args, "|O!", &pylv_mbox_ext_t_Type, &copy)) return -1;
+    
     self->size = sizeof(lv_mbox_ext_t);
     self->data = PyMem_Malloc(self->size);
     if (!self->data) return -1;
     
-    memset(self->data, 0, self->size);
+    if (copy) {
+        assert(self->size == copy->size); // should be same size, since same type
+        memcpy(self->data, copy->data, self->size);
+    } else {
+        memset(self->data, 0, self->size);
+    }
+    
     self->owner = (PyObject *)self;
+
+    if (kwds) {
+        // all keyword arguments are attribute-assignments
+        PyObject *key, *value;
+        Py_ssize_t pos = 0;
+        
+        while (PyDict_Next(kwds, &pos, &key, &value)) {
+            if (PyObject_SetAttr((PyObject*)self, key, value)) return -1;
+        }   
+    }
 
     return 0;
 }
@@ -4602,17 +6817,54 @@ static PyTypeObject pylv_mbox_ext_t_Type = {
     .tp_as_buffer = &Struct_bufferprocs
 };
 
+static int pylv_mbox_ext_t_arg_converter(PyObject *obj, void* target) {
+    int isinst;
+    // TODO: support dictionary as argument; create a new struct object in that case
+    isinst = PyObject_IsInstance(obj, (PyObject*)&pylv_mbox_ext_t_Type);
+    if (isinst == 0) {
+        PyErr_Format(PyExc_TypeError, "argument should be of type lv_mbox_ext_t");
+    }
+    if (isinst != 1) {
+        return 0;
+    }
+    *(lv_mbox_ext_t **)target = ((StructObject*)obj) -> data;
+    Py_INCREF(obj); // Required since **target now uses the data. TODO: this leaks a reference; also support Py_CLEANUP_SUPPORTED
+    return 1;
+
+}
+
+
 
 
 static int
 pylv_lmeter_ext_t_init(StructObject *self, PyObject *args, PyObject *kwds) 
 {
+    StructObject *copy = NULL;
+    // copy is a positional-only argument
+    if (!PyArg_ParseTuple(args, "|O!", &pylv_lmeter_ext_t_Type, &copy)) return -1;
+    
     self->size = sizeof(lv_lmeter_ext_t);
     self->data = PyMem_Malloc(self->size);
     if (!self->data) return -1;
     
-    memset(self->data, 0, self->size);
+    if (copy) {
+        assert(self->size == copy->size); // should be same size, since same type
+        memcpy(self->data, copy->data, self->size);
+    } else {
+        memset(self->data, 0, self->size);
+    }
+    
     self->owner = (PyObject *)self;
+
+    if (kwds) {
+        // all keyword arguments are attribute-assignments
+        PyObject *key, *value;
+        Py_ssize_t pos = 0;
+        
+        while (PyDict_Next(kwds, &pos, &key, &value)) {
+            if (PyObject_SetAttr((PyObject*)self, key, value)) return -1;
+        }   
+    }
 
     return 0;
 }
@@ -4642,17 +6894,54 @@ static PyTypeObject pylv_lmeter_ext_t_Type = {
     .tp_as_buffer = &Struct_bufferprocs
 };
 
+static int pylv_lmeter_ext_t_arg_converter(PyObject *obj, void* target) {
+    int isinst;
+    // TODO: support dictionary as argument; create a new struct object in that case
+    isinst = PyObject_IsInstance(obj, (PyObject*)&pylv_lmeter_ext_t_Type);
+    if (isinst == 0) {
+        PyErr_Format(PyExc_TypeError, "argument should be of type lv_lmeter_ext_t");
+    }
+    if (isinst != 1) {
+        return 0;
+    }
+    *(lv_lmeter_ext_t **)target = ((StructObject*)obj) -> data;
+    Py_INCREF(obj); // Required since **target now uses the data. TODO: this leaks a reference; also support Py_CLEANUP_SUPPORTED
+    return 1;
+
+}
+
+
 
 
 static int
 pylv_gauge_ext_t_init(StructObject *self, PyObject *args, PyObject *kwds) 
 {
+    StructObject *copy = NULL;
+    // copy is a positional-only argument
+    if (!PyArg_ParseTuple(args, "|O!", &pylv_gauge_ext_t_Type, &copy)) return -1;
+    
     self->size = sizeof(lv_gauge_ext_t);
     self->data = PyMem_Malloc(self->size);
     if (!self->data) return -1;
     
-    memset(self->data, 0, self->size);
+    if (copy) {
+        assert(self->size == copy->size); // should be same size, since same type
+        memcpy(self->data, copy->data, self->size);
+    } else {
+        memset(self->data, 0, self->size);
+    }
+    
     self->owner = (PyObject *)self;
+
+    if (kwds) {
+        // all keyword arguments are attribute-assignments
+        PyObject *key, *value;
+        Py_ssize_t pos = 0;
+        
+        while (PyDict_Next(kwds, &pos, &key, &value)) {
+            if (PyObject_SetAttr((PyObject*)self, key, value)) return -1;
+        }   
+    }
 
     return 0;
 }
@@ -4682,17 +6971,54 @@ static PyTypeObject pylv_gauge_ext_t_Type = {
     .tp_as_buffer = &Struct_bufferprocs
 };
 
+static int pylv_gauge_ext_t_arg_converter(PyObject *obj, void* target) {
+    int isinst;
+    // TODO: support dictionary as argument; create a new struct object in that case
+    isinst = PyObject_IsInstance(obj, (PyObject*)&pylv_gauge_ext_t_Type);
+    if (isinst == 0) {
+        PyErr_Format(PyExc_TypeError, "argument should be of type lv_gauge_ext_t");
+    }
+    if (isinst != 1) {
+        return 0;
+    }
+    *(lv_gauge_ext_t **)target = ((StructObject*)obj) -> data;
+    Py_INCREF(obj); // Required since **target now uses the data. TODO: this leaks a reference; also support Py_CLEANUP_SUPPORTED
+    return 1;
+
+}
+
+
 
 
 static int
 pylv_sw_ext_t_init(StructObject *self, PyObject *args, PyObject *kwds) 
 {
+    StructObject *copy = NULL;
+    // copy is a positional-only argument
+    if (!PyArg_ParseTuple(args, "|O!", &pylv_sw_ext_t_Type, &copy)) return -1;
+    
     self->size = sizeof(lv_sw_ext_t);
     self->data = PyMem_Malloc(self->size);
     if (!self->data) return -1;
     
-    memset(self->data, 0, self->size);
+    if (copy) {
+        assert(self->size == copy->size); // should be same size, since same type
+        memcpy(self->data, copy->data, self->size);
+    } else {
+        memset(self->data, 0, self->size);
+    }
+    
     self->owner = (PyObject *)self;
+
+    if (kwds) {
+        // all keyword arguments are attribute-assignments
+        PyObject *key, *value;
+        Py_ssize_t pos = 0;
+        
+        while (PyDict_Next(kwds, &pos, &key, &value)) {
+            if (PyObject_SetAttr((PyObject*)self, key, value)) return -1;
+        }   
+    }
 
     return 0;
 }
@@ -4758,17 +7084,54 @@ static PyTypeObject pylv_sw_ext_t_Type = {
     .tp_as_buffer = &Struct_bufferprocs
 };
 
+static int pylv_sw_ext_t_arg_converter(PyObject *obj, void* target) {
+    int isinst;
+    // TODO: support dictionary as argument; create a new struct object in that case
+    isinst = PyObject_IsInstance(obj, (PyObject*)&pylv_sw_ext_t_Type);
+    if (isinst == 0) {
+        PyErr_Format(PyExc_TypeError, "argument should be of type lv_sw_ext_t");
+    }
+    if (isinst != 1) {
+        return 0;
+    }
+    *(lv_sw_ext_t **)target = ((StructObject*)obj) -> data;
+    Py_INCREF(obj); // Required since **target now uses the data. TODO: this leaks a reference; also support Py_CLEANUP_SUPPORTED
+    return 1;
+
+}
+
+
 
 
 static int
 pylv_arc_ext_t_init(StructObject *self, PyObject *args, PyObject *kwds) 
 {
+    StructObject *copy = NULL;
+    // copy is a positional-only argument
+    if (!PyArg_ParseTuple(args, "|O!", &pylv_arc_ext_t_Type, &copy)) return -1;
+    
     self->size = sizeof(lv_arc_ext_t);
     self->data = PyMem_Malloc(self->size);
     if (!self->data) return -1;
     
-    memset(self->data, 0, self->size);
+    if (copy) {
+        assert(self->size == copy->size); // should be same size, since same type
+        memcpy(self->data, copy->data, self->size);
+    } else {
+        memset(self->data, 0, self->size);
+    }
+    
     self->owner = (PyObject *)self;
+
+    if (kwds) {
+        // all keyword arguments are attribute-assignments
+        PyObject *key, *value;
+        Py_ssize_t pos = 0;
+        
+        while (PyDict_Next(kwds, &pos, &key, &value)) {
+            if (PyObject_SetAttr((PyObject*)self, key, value)) return -1;
+        }   
+    }
 
     return 0;
 }
@@ -4795,17 +7158,54 @@ static PyTypeObject pylv_arc_ext_t_Type = {
     .tp_as_buffer = &Struct_bufferprocs
 };
 
+static int pylv_arc_ext_t_arg_converter(PyObject *obj, void* target) {
+    int isinst;
+    // TODO: support dictionary as argument; create a new struct object in that case
+    isinst = PyObject_IsInstance(obj, (PyObject*)&pylv_arc_ext_t_Type);
+    if (isinst == 0) {
+        PyErr_Format(PyExc_TypeError, "argument should be of type lv_arc_ext_t");
+    }
+    if (isinst != 1) {
+        return 0;
+    }
+    *(lv_arc_ext_t **)target = ((StructObject*)obj) -> data;
+    Py_INCREF(obj); // Required since **target now uses the data. TODO: this leaks a reference; also support Py_CLEANUP_SUPPORTED
+    return 1;
+
+}
+
+
 
 
 static int
 pylv_preload_ext_t_init(StructObject *self, PyObject *args, PyObject *kwds) 
 {
+    StructObject *copy = NULL;
+    // copy is a positional-only argument
+    if (!PyArg_ParseTuple(args, "|O!", &pylv_preload_ext_t_Type, &copy)) return -1;
+    
     self->size = sizeof(lv_preload_ext_t);
     self->data = PyMem_Malloc(self->size);
     if (!self->data) return -1;
     
-    memset(self->data, 0, self->size);
+    if (copy) {
+        assert(self->size == copy->size); // should be same size, since same type
+        memcpy(self->data, copy->data, self->size);
+    } else {
+        memset(self->data, 0, self->size);
+    }
+    
     self->owner = (PyObject *)self;
+
+    if (kwds) {
+        // all keyword arguments are attribute-assignments
+        PyObject *key, *value;
+        Py_ssize_t pos = 0;
+        
+        while (PyDict_Next(kwds, &pos, &key, &value)) {
+            if (PyObject_SetAttr((PyObject*)self, key, value)) return -1;
+        }   
+    }
 
     return 0;
 }
@@ -4834,17 +7234,54 @@ static PyTypeObject pylv_preload_ext_t_Type = {
     .tp_as_buffer = &Struct_bufferprocs
 };
 
+static int pylv_preload_ext_t_arg_converter(PyObject *obj, void* target) {
+    int isinst;
+    // TODO: support dictionary as argument; create a new struct object in that case
+    isinst = PyObject_IsInstance(obj, (PyObject*)&pylv_preload_ext_t_Type);
+    if (isinst == 0) {
+        PyErr_Format(PyExc_TypeError, "argument should be of type lv_preload_ext_t");
+    }
+    if (isinst != 1) {
+        return 0;
+    }
+    *(lv_preload_ext_t **)target = ((StructObject*)obj) -> data;
+    Py_INCREF(obj); // Required since **target now uses the data. TODO: this leaks a reference; also support Py_CLEANUP_SUPPORTED
+    return 1;
+
+}
+
+
 
 
 static int
 pylv_spinbox_ext_t_init(StructObject *self, PyObject *args, PyObject *kwds) 
 {
+    StructObject *copy = NULL;
+    // copy is a positional-only argument
+    if (!PyArg_ParseTuple(args, "|O!", &pylv_spinbox_ext_t_Type, &copy)) return -1;
+    
     self->size = sizeof(lv_spinbox_ext_t);
     self->data = PyMem_Malloc(self->size);
     if (!self->data) return -1;
     
-    memset(self->data, 0, self->size);
+    if (copy) {
+        assert(self->size == copy->size); // should be same size, since same type
+        memcpy(self->data, copy->data, self->size);
+    } else {
+        memset(self->data, 0, self->size);
+    }
+    
     self->owner = (PyObject *)self;
+
+    if (kwds) {
+        // all keyword arguments are attribute-assignments
+        PyObject *key, *value;
+        Py_ssize_t pos = 0;
+        
+        while (PyDict_Next(kwds, &pos, &key, &value)) {
+            if (PyObject_SetAttr((PyObject*)self, key, value)) return -1;
+        }   
+    }
 
     return 0;
 }
@@ -4927,6 +7364,23 @@ static PyTypeObject pylv_spinbox_ext_t_Type = {
     .tp_repr = (reprfunc) Struct_repr,
     .tp_as_buffer = &Struct_bufferprocs
 };
+
+static int pylv_spinbox_ext_t_arg_converter(PyObject *obj, void* target) {
+    int isinst;
+    // TODO: support dictionary as argument; create a new struct object in that case
+    isinst = PyObject_IsInstance(obj, (PyObject*)&pylv_spinbox_ext_t_Type);
+    if (isinst == 0) {
+        PyErr_Format(PyExc_TypeError, "argument should be of type lv_spinbox_ext_t");
+    }
+    if (isinst != 1) {
+        return 0;
+    }
+    *(lv_spinbox_ext_t **)target = ((StructObject*)obj) -> data;
+    Py_INCREF(obj); // Required since **target now uses the data. TODO: this leaks a reference; also support Py_CLEANUP_SUPPORTED
+    return 1;
+
+}
+
 
 
 
@@ -6866,8 +9320,14 @@ pylv_obj_set_auto_realign(pylv_Obj *self, PyObject *args, PyObject *kwds)
 static PyObject*
 pylv_obj_set_style(pylv_Obj *self, PyObject *args, PyObject *kwds)
 {
-    PyErr_SetString(PyExc_NotImplementedError, "not implemented: lv_obj_set_style: Parameter type not found >lv_style_t*< ");
-    return NULL;
+    static char *kwlist[] = {"style", NULL};
+    lv_style_t * style;
+    if (!PyArg_ParseTupleAndKeywords(args, kwds, "O&", kwlist , pylv_style_t_arg_converter, &style)) return NULL;
+
+    LVGL_LOCK         
+    lv_obj_set_style(self->ref, style);
+    LVGL_UNLOCK
+    Py_RETURN_NONE;
 }
 
 static PyObject*
@@ -7208,8 +9668,13 @@ pylv_obj_get_auto_realign(pylv_Obj *self, PyObject *args, PyObject *kwds)
 static PyObject*
 pylv_obj_get_style(pylv_Obj *self, PyObject *args, PyObject *kwds)
 {
-    PyErr_SetString(PyExc_NotImplementedError, "not implemented: lv_obj_get_style: Return type not found >lv_style_t*< ");
-    return NULL;
+    static char *kwlist[] = {NULL};
+    if (!PyArg_ParseTupleAndKeywords(args, kwds, "", kwlist )) return NULL;
+
+    LVGL_LOCK        
+    lv_style_t * result = lv_obj_get_style(self->ref);
+    LVGL_UNLOCK
+    return pystruct_from_lv(result);            
 }
 
 static PyObject*
@@ -7718,8 +10183,15 @@ pylv_btn_set_ink_out_time(pylv_Obj *self, PyObject *args, PyObject *kwds)
 static PyObject*
 pylv_btn_set_style(pylv_Obj *self, PyObject *args, PyObject *kwds)
 {
-    PyErr_SetString(PyExc_NotImplementedError, "not implemented: lv_btn_set_style: Parameter type not found >lv_style_t*< ");
-    return NULL;
+    static char *kwlist[] = {"type", "style", NULL};
+    unsigned char type;
+    lv_style_t * style;
+    if (!PyArg_ParseTupleAndKeywords(args, kwds, "bO&", kwlist , &type, pylv_style_t_arg_converter, &style)) return NULL;
+
+    LVGL_LOCK         
+    lv_btn_set_style(self->ref, type, style);
+    LVGL_UNLOCK
+    Py_RETURN_NONE;
 }
 
 static PyObject*
@@ -7785,8 +10257,14 @@ pylv_btn_get_ink_out_time(pylv_Obj *self, PyObject *args, PyObject *kwds)
 static PyObject*
 pylv_btn_get_style(pylv_Obj *self, PyObject *args, PyObject *kwds)
 {
-    PyErr_SetString(PyExc_NotImplementedError, "not implemented: lv_btn_get_style: Return type not found >lv_style_t*< ");
-    return NULL;
+    static char *kwlist[] = {"type", NULL};
+    unsigned char type;
+    if (!PyArg_ParseTupleAndKeywords(args, kwds, "b", kwlist , &type)) return NULL;
+
+    LVGL_LOCK        
+    lv_style_t * result = lv_btn_get_style(self->ref, type);
+    LVGL_UNLOCK
+    return pystruct_from_lv(result);            
 }
 
 
@@ -7857,8 +10335,15 @@ pylv_imgbtn_set_src(pylv_Obj *self, PyObject *args, PyObject *kwds)
 static PyObject*
 pylv_imgbtn_set_style(pylv_Obj *self, PyObject *args, PyObject *kwds)
 {
-    PyErr_SetString(PyExc_NotImplementedError, "not implemented: lv_imgbtn_set_style: Parameter type not found >lv_style_t*< ");
-    return NULL;
+    static char *kwlist[] = {"type", "style", NULL};
+    unsigned char type;
+    lv_style_t * style;
+    if (!PyArg_ParseTupleAndKeywords(args, kwds, "bO&", kwlist , &type, pylv_style_t_arg_converter, &style)) return NULL;
+
+    LVGL_LOCK         
+    lv_imgbtn_set_style(self->ref, type, style);
+    LVGL_UNLOCK
+    Py_RETURN_NONE;
 }
 
 static PyObject*
@@ -7871,8 +10356,14 @@ pylv_imgbtn_get_src(pylv_Obj *self, PyObject *args, PyObject *kwds)
 static PyObject*
 pylv_imgbtn_get_style(pylv_Obj *self, PyObject *args, PyObject *kwds)
 {
-    PyErr_SetString(PyExc_NotImplementedError, "not implemented: lv_imgbtn_get_style: Return type not found >lv_style_t*< ");
-    return NULL;
+    static char *kwlist[] = {"type", NULL};
+    unsigned char type;
+    if (!PyArg_ParseTupleAndKeywords(args, kwds, "b", kwlist , &type)) return NULL;
+
+    LVGL_LOCK        
+    lv_style_t * result = lv_imgbtn_get_style(self->ref, type);
+    LVGL_UNLOCK
+    return pystruct_from_lv(result);            
 }
 
 
@@ -8678,8 +11169,15 @@ pylv_page_set_scrl_layout(pylv_Obj *self, PyObject *args, PyObject *kwds)
 static PyObject*
 pylv_page_set_style(pylv_Obj *self, PyObject *args, PyObject *kwds)
 {
-    PyErr_SetString(PyExc_NotImplementedError, "not implemented: lv_page_set_style: Parameter type not found >lv_style_t*< ");
-    return NULL;
+    static char *kwlist[] = {"type", "style", NULL};
+    unsigned char type;
+    lv_style_t * style;
+    if (!PyArg_ParseTupleAndKeywords(args, kwds, "bO&", kwlist , &type, pylv_style_t_arg_converter, &style)) return NULL;
+
+    LVGL_LOCK         
+    lv_page_set_style(self->ref, type, style);
+    LVGL_UNLOCK
+    Py_RETURN_NONE;
 }
 
 static PyObject*
@@ -8821,8 +11319,14 @@ pylv_page_get_scrl_fit_bottom(pylv_Obj *self, PyObject *args, PyObject *kwds)
 static PyObject*
 pylv_page_get_style(pylv_Obj *self, PyObject *args, PyObject *kwds)
 {
-    PyErr_SetString(PyExc_NotImplementedError, "not implemented: lv_page_get_style: Return type not found >lv_style_t*< ");
-    return NULL;
+    static char *kwlist[] = {"type", NULL};
+    unsigned char type;
+    if (!PyArg_ParseTupleAndKeywords(args, kwds, "b", kwlist , &type)) return NULL;
+
+    LVGL_LOCK        
+    lv_style_t * result = lv_page_get_style(self->ref, type);
+    LVGL_UNLOCK
+    return pystruct_from_lv(result);            
 }
 
 static PyObject*
@@ -9034,8 +11538,15 @@ pylv_list_set_anim_time(pylv_Obj *self, PyObject *args, PyObject *kwds)
 static PyObject*
 pylv_list_set_style(pylv_Obj *self, PyObject *args, PyObject *kwds)
 {
-    PyErr_SetString(PyExc_NotImplementedError, "not implemented: lv_list_set_style: Parameter type not found >lv_style_t*< ");
-    return NULL;
+    static char *kwlist[] = {"type", "style", NULL};
+    unsigned char type;
+    lv_style_t * style;
+    if (!PyArg_ParseTupleAndKeywords(args, kwds, "bO&", kwlist , &type, pylv_style_t_arg_converter, &style)) return NULL;
+
+    LVGL_LOCK         
+    lv_list_set_style(self->ref, type, style);
+    LVGL_UNLOCK
+    Py_RETURN_NONE;
 }
 
 static PyObject*
@@ -9174,8 +11685,14 @@ pylv_list_get_anim_time(pylv_Obj *self, PyObject *args, PyObject *kwds)
 static PyObject*
 pylv_list_get_style(pylv_Obj *self, PyObject *args, PyObject *kwds)
 {
-    PyErr_SetString(PyExc_NotImplementedError, "not implemented: lv_list_get_style: Return type not found >lv_style_t*< ");
-    return NULL;
+    static char *kwlist[] = {"type", NULL};
+    unsigned char type;
+    if (!PyArg_ParseTupleAndKeywords(args, kwds, "b", kwlist , &type)) return NULL;
+
+    LVGL_LOCK        
+    lv_style_t * result = lv_list_get_style(self->ref, type);
+    LVGL_UNLOCK
+    return pystruct_from_lv(result);            
 }
 
 static PyObject*
@@ -9649,8 +12166,15 @@ pylv_table_set_cell_merge_right(pylv_Obj *self, PyObject *args, PyObject *kwds)
 static PyObject*
 pylv_table_set_style(pylv_Obj *self, PyObject *args, PyObject *kwds)
 {
-    PyErr_SetString(PyExc_NotImplementedError, "not implemented: lv_table_set_style: Parameter type not found >lv_style_t*< ");
-    return NULL;
+    static char *kwlist[] = {"type", "style", NULL};
+    unsigned char type;
+    lv_style_t * style;
+    if (!PyArg_ParseTupleAndKeywords(args, kwds, "bO&", kwlist , &type, pylv_style_t_arg_converter, &style)) return NULL;
+
+    LVGL_LOCK         
+    lv_table_set_style(self->ref, type, style);
+    LVGL_UNLOCK
+    Py_RETURN_NONE;
 }
 
 static PyObject*
@@ -9763,8 +12287,14 @@ pylv_table_get_cell_merge_right(pylv_Obj *self, PyObject *args, PyObject *kwds)
 static PyObject*
 pylv_table_get_style(pylv_Obj *self, PyObject *args, PyObject *kwds)
 {
-    PyErr_SetString(PyExc_NotImplementedError, "not implemented: lv_table_get_style: Return type not found >lv_style_t*< ");
-    return NULL;
+    static char *kwlist[] = {"type", NULL};
+    unsigned char type;
+    if (!PyArg_ParseTupleAndKeywords(args, kwds, "b", kwlist , &type)) return NULL;
+
+    LVGL_LOCK        
+    lv_style_t * result = lv_table_get_style(self->ref, type);
+    LVGL_UNLOCK
+    return pystruct_from_lv(result);            
 }
 
 
@@ -9884,8 +12414,15 @@ pylv_cb_set_inactive(pylv_Obj *self, PyObject *args, PyObject *kwds)
 static PyObject*
 pylv_cb_set_style(pylv_Obj *self, PyObject *args, PyObject *kwds)
 {
-    PyErr_SetString(PyExc_NotImplementedError, "not implemented: lv_cb_set_style: Parameter type not found >lv_style_t*< ");
-    return NULL;
+    static char *kwlist[] = {"type", "style", NULL};
+    unsigned char type;
+    lv_style_t * style;
+    if (!PyArg_ParseTupleAndKeywords(args, kwds, "bO&", kwlist , &type, pylv_style_t_arg_converter, &style)) return NULL;
+
+    LVGL_LOCK         
+    lv_cb_set_style(self->ref, type, style);
+    LVGL_UNLOCK
+    Py_RETURN_NONE;
 }
 
 static PyObject*
@@ -9915,8 +12452,14 @@ pylv_cb_is_checked(pylv_Obj *self, PyObject *args, PyObject *kwds)
 static PyObject*
 pylv_cb_get_style(pylv_Obj *self, PyObject *args, PyObject *kwds)
 {
-    PyErr_SetString(PyExc_NotImplementedError, "not implemented: lv_cb_get_style: Return type not found >lv_style_t*< ");
-    return NULL;
+    static char *kwlist[] = {"type", NULL};
+    unsigned char type;
+    if (!PyArg_ParseTupleAndKeywords(args, kwds, "b", kwlist , &type)) return NULL;
+
+    LVGL_LOCK        
+    lv_style_t * result = lv_cb_get_style(self->ref, type);
+    LVGL_UNLOCK
+    return pystruct_from_lv(result);            
 }
 
 
@@ -10016,8 +12559,15 @@ pylv_bar_set_sym(pylv_Obj *self, PyObject *args, PyObject *kwds)
 static PyObject*
 pylv_bar_set_style(pylv_Obj *self, PyObject *args, PyObject *kwds)
 {
-    PyErr_SetString(PyExc_NotImplementedError, "not implemented: lv_bar_set_style: Parameter type not found >lv_style_t*< ");
-    return NULL;
+    static char *kwlist[] = {"type", "style", NULL};
+    unsigned char type;
+    lv_style_t * style;
+    if (!PyArg_ParseTupleAndKeywords(args, kwds, "bO&", kwlist , &type, pylv_style_t_arg_converter, &style)) return NULL;
+
+    LVGL_LOCK         
+    lv_bar_set_style(self->ref, type, style);
+    LVGL_UNLOCK
+    Py_RETURN_NONE;
 }
 
 static PyObject*
@@ -10071,8 +12621,14 @@ pylv_bar_get_sym(pylv_Obj *self, PyObject *args, PyObject *kwds)
 static PyObject*
 pylv_bar_get_style(pylv_Obj *self, PyObject *args, PyObject *kwds)
 {
-    PyErr_SetString(PyExc_NotImplementedError, "not implemented: lv_bar_get_style: Return type not found >lv_style_t*< ");
-    return NULL;
+    static char *kwlist[] = {"type", NULL};
+    unsigned char type;
+    if (!PyArg_ParseTupleAndKeywords(args, kwds, "b", kwlist , &type)) return NULL;
+
+    LVGL_LOCK        
+    lv_style_t * result = lv_bar_get_style(self->ref, type);
+    LVGL_UNLOCK
+    return pystruct_from_lv(result);            
 }
 
 
@@ -10145,8 +12701,15 @@ pylv_slider_set_knob_in(pylv_Obj *self, PyObject *args, PyObject *kwds)
 static PyObject*
 pylv_slider_set_style(pylv_Obj *self, PyObject *args, PyObject *kwds)
 {
-    PyErr_SetString(PyExc_NotImplementedError, "not implemented: lv_slider_set_style: Parameter type not found >lv_style_t*< ");
-    return NULL;
+    static char *kwlist[] = {"type", "style", NULL};
+    unsigned char type;
+    lv_style_t * style;
+    if (!PyArg_ParseTupleAndKeywords(args, kwds, "bO&", kwlist , &type, pylv_style_t_arg_converter, &style)) return NULL;
+
+    LVGL_LOCK         
+    lv_slider_set_style(self->ref, type, style);
+    LVGL_UNLOCK
+    Py_RETURN_NONE;
 }
 
 static PyObject*
@@ -10188,8 +12751,14 @@ pylv_slider_get_knob_in(pylv_Obj *self, PyObject *args, PyObject *kwds)
 static PyObject*
 pylv_slider_get_style(pylv_Obj *self, PyObject *args, PyObject *kwds)
 {
-    PyErr_SetString(PyExc_NotImplementedError, "not implemented: lv_slider_get_style: Return type not found >lv_style_t*< ");
-    return NULL;
+    static char *kwlist[] = {"type", NULL};
+    unsigned char type;
+    if (!PyArg_ParseTupleAndKeywords(args, kwds, "b", kwlist , &type)) return NULL;
+
+    LVGL_LOCK        
+    lv_style_t * result = lv_slider_get_style(self->ref, type);
+    LVGL_UNLOCK
+    return pystruct_from_lv(result);            
 }
 
 
@@ -10384,8 +12953,15 @@ pylv_btnm_set_pressed(pylv_Obj *self, PyObject *args, PyObject *kwds)
 static PyObject*
 pylv_btnm_set_style(pylv_Obj *self, PyObject *args, PyObject *kwds)
 {
-    PyErr_SetString(PyExc_NotImplementedError, "not implemented: lv_btnm_set_style: Parameter type not found >lv_style_t*< ");
-    return NULL;
+    static char *kwlist[] = {"type", "style", NULL};
+    unsigned char type;
+    lv_style_t * style;
+    if (!PyArg_ParseTupleAndKeywords(args, kwds, "bO&", kwlist , &type, pylv_style_t_arg_converter, &style)) return NULL;
+
+    LVGL_LOCK         
+    lv_btnm_set_style(self->ref, type, style);
+    LVGL_UNLOCK
+    Py_RETURN_NONE;
 }
 
 static PyObject*
@@ -10652,8 +13228,14 @@ pylv_btnm_get_btn_toggle_state(pylv_Obj *self, PyObject *args, PyObject *kwds)
 static PyObject*
 pylv_btnm_get_style(pylv_Obj *self, PyObject *args, PyObject *kwds)
 {
-    PyErr_SetString(PyExc_NotImplementedError, "not implemented: lv_btnm_get_style: Return type not found >lv_style_t*< ");
-    return NULL;
+    static char *kwlist[] = {"type", NULL};
+    unsigned char type;
+    if (!PyArg_ParseTupleAndKeywords(args, kwds, "b", kwlist , &type)) return NULL;
+
+    LVGL_LOCK        
+    lv_style_t * result = lv_btnm_get_style(self->ref, type);
+    LVGL_UNLOCK
+    return pystruct_from_lv(result);            
 }
 
 
@@ -10768,8 +13350,15 @@ pylv_kb_set_cursor_manage(pylv_Obj *self, PyObject *args, PyObject *kwds)
 static PyObject*
 pylv_kb_set_style(pylv_Obj *self, PyObject *args, PyObject *kwds)
 {
-    PyErr_SetString(PyExc_NotImplementedError, "not implemented: lv_kb_set_style: Parameter type not found >lv_style_t*< ");
-    return NULL;
+    static char *kwlist[] = {"type", "style", NULL};
+    unsigned char type;
+    lv_style_t * style;
+    if (!PyArg_ParseTupleAndKeywords(args, kwds, "bO&", kwlist , &type, pylv_style_t_arg_converter, &style)) return NULL;
+
+    LVGL_LOCK         
+    lv_kb_set_style(self->ref, type, style);
+    LVGL_UNLOCK
+    Py_RETURN_NONE;
 }
 
 static PyObject*
@@ -10813,8 +13402,14 @@ pylv_kb_get_cursor_manage(pylv_Obj *self, PyObject *args, PyObject *kwds)
 static PyObject*
 pylv_kb_get_style(pylv_Obj *self, PyObject *args, PyObject *kwds)
 {
-    PyErr_SetString(PyExc_NotImplementedError, "not implemented: lv_kb_get_style: Return type not found >lv_style_t*< ");
-    return NULL;
+    static char *kwlist[] = {"type", NULL};
+    unsigned char type;
+    if (!PyArg_ParseTupleAndKeywords(args, kwds, "b", kwlist , &type)) return NULL;
+
+    LVGL_LOCK        
+    lv_style_t * result = lv_kb_get_style(self->ref, type);
+    LVGL_UNLOCK
+    return pystruct_from_lv(result);            
 }
 
 
@@ -10958,8 +13553,15 @@ pylv_ddlist_set_anim_time(pylv_Obj *self, PyObject *args, PyObject *kwds)
 static PyObject*
 pylv_ddlist_set_style(pylv_Obj *self, PyObject *args, PyObject *kwds)
 {
-    PyErr_SetString(PyExc_NotImplementedError, "not implemented: lv_ddlist_set_style: Parameter type not found >lv_style_t*< ");
-    return NULL;
+    static char *kwlist[] = {"type", "style", NULL};
+    unsigned char type;
+    lv_style_t * style;
+    if (!PyArg_ParseTupleAndKeywords(args, kwds, "bO&", kwlist , &type, pylv_style_t_arg_converter, &style)) return NULL;
+
+    LVGL_LOCK         
+    lv_ddlist_set_style(self->ref, type, style);
+    LVGL_UNLOCK
+    Py_RETURN_NONE;
 }
 
 static PyObject*
@@ -11057,8 +13659,14 @@ pylv_ddlist_get_anim_time(pylv_Obj *self, PyObject *args, PyObject *kwds)
 static PyObject*
 pylv_ddlist_get_style(pylv_Obj *self, PyObject *args, PyObject *kwds)
 {
-    PyErr_SetString(PyExc_NotImplementedError, "not implemented: lv_ddlist_get_style: Return type not found >lv_style_t*< ");
-    return NULL;
+    static char *kwlist[] = {"type", NULL};
+    unsigned char type;
+    if (!PyArg_ParseTupleAndKeywords(args, kwds, "b", kwlist , &type)) return NULL;
+
+    LVGL_LOCK        
+    lv_style_t * result = lv_ddlist_get_style(self->ref, type);
+    LVGL_UNLOCK
+    return pystruct_from_lv(result);            
 }
 
 static PyObject*
@@ -11214,8 +13822,15 @@ pylv_roller_set_hor_fit(pylv_Obj *self, PyObject *args, PyObject *kwds)
 static PyObject*
 pylv_roller_set_style(pylv_Obj *self, PyObject *args, PyObject *kwds)
 {
-    PyErr_SetString(PyExc_NotImplementedError, "not implemented: lv_roller_set_style: Parameter type not found >lv_style_t*< ");
-    return NULL;
+    static char *kwlist[] = {"type", "style", NULL};
+    unsigned char type;
+    lv_style_t * style;
+    if (!PyArg_ParseTupleAndKeywords(args, kwds, "bO&", kwlist , &type, pylv_style_t_arg_converter, &style)) return NULL;
+
+    LVGL_LOCK         
+    lv_roller_set_style(self->ref, type, style);
+    LVGL_UNLOCK
+    Py_RETURN_NONE;
 }
 
 static PyObject*
@@ -11245,8 +13860,14 @@ pylv_roller_get_hor_fit(pylv_Obj *self, PyObject *args, PyObject *kwds)
 static PyObject*
 pylv_roller_get_style(pylv_Obj *self, PyObject *args, PyObject *kwds)
 {
-    PyErr_SetString(PyExc_NotImplementedError, "not implemented: lv_roller_get_style: Return type not found >lv_style_t*< ");
-    return NULL;
+    static char *kwlist[] = {"type", NULL};
+    unsigned char type;
+    if (!PyArg_ParseTupleAndKeywords(args, kwds, "b", kwlist , &type)) return NULL;
+
+    LVGL_LOCK        
+    lv_style_t * result = lv_roller_get_style(self->ref, type);
+    LVGL_UNLOCK
+    return pystruct_from_lv(result);            
 }
 
 
@@ -11472,8 +14093,15 @@ pylv_ta_set_max_length(pylv_Obj *self, PyObject *args, PyObject *kwds)
 static PyObject*
 pylv_ta_set_style(pylv_Obj *self, PyObject *args, PyObject *kwds)
 {
-    PyErr_SetString(PyExc_NotImplementedError, "not implemented: lv_ta_set_style: Parameter type not found >lv_style_t*< ");
-    return NULL;
+    static char *kwlist[] = {"type", "style", NULL};
+    unsigned char type;
+    lv_style_t * style;
+    if (!PyArg_ParseTupleAndKeywords(args, kwds, "bO&", kwlist , &type, pylv_style_t_arg_converter, &style)) return NULL;
+
+    LVGL_LOCK         
+    lv_ta_set_style(self->ref, type, style);
+    LVGL_UNLOCK
+    Py_RETURN_NONE;
 }
 
 static PyObject*
@@ -11589,8 +14217,14 @@ pylv_ta_get_max_length(pylv_Obj *self, PyObject *args, PyObject *kwds)
 static PyObject*
 pylv_ta_get_style(pylv_Obj *self, PyObject *args, PyObject *kwds)
 {
-    PyErr_SetString(PyExc_NotImplementedError, "not implemented: lv_ta_get_style: Return type not found >lv_style_t*< ");
-    return NULL;
+    static char *kwlist[] = {"type", NULL};
+    unsigned char type;
+    if (!PyArg_ParseTupleAndKeywords(args, kwds, "b", kwlist , &type)) return NULL;
+
+    LVGL_LOCK        
+    lv_style_t * result = lv_ta_get_style(self->ref, type);
+    LVGL_UNLOCK
+    return pystruct_from_lv(result);            
 }
 
 static PyObject*
@@ -11731,8 +14365,15 @@ pylv_canvas_set_px(pylv_Obj *self, PyObject *args, PyObject *kwds)
 static PyObject*
 pylv_canvas_set_style(pylv_Obj *self, PyObject *args, PyObject *kwds)
 {
-    PyErr_SetString(PyExc_NotImplementedError, "not implemented: lv_canvas_set_style: Parameter type not found >lv_style_t*< ");
-    return NULL;
+    static char *kwlist[] = {"type", "style", NULL};
+    unsigned char type;
+    lv_style_t * style;
+    if (!PyArg_ParseTupleAndKeywords(args, kwds, "bO&", kwlist , &type, pylv_style_t_arg_converter, &style)) return NULL;
+
+    LVGL_LOCK         
+    lv_canvas_set_style(self->ref, type, style);
+    LVGL_UNLOCK
+    Py_RETURN_NONE;
 }
 
 static PyObject*
@@ -11745,8 +14386,14 @@ pylv_canvas_get_px(pylv_Obj *self, PyObject *args, PyObject *kwds)
 static PyObject*
 pylv_canvas_get_style(pylv_Obj *self, PyObject *args, PyObject *kwds)
 {
-    PyErr_SetString(PyExc_NotImplementedError, "not implemented: lv_canvas_get_style: Return type not found >lv_style_t*< ");
-    return NULL;
+    static char *kwlist[] = {"type", NULL};
+    unsigned char type;
+    if (!PyArg_ParseTupleAndKeywords(args, kwds, "b", kwlist , &type)) return NULL;
+
+    LVGL_LOCK        
+    lv_style_t * result = lv_canvas_get_style(self->ref, type);
+    LVGL_UNLOCK
+    return pystruct_from_lv(result);            
 }
 
 static PyObject*
@@ -11960,8 +14607,15 @@ pylv_win_set_sb_mode(pylv_Obj *self, PyObject *args, PyObject *kwds)
 static PyObject*
 pylv_win_set_style(pylv_Obj *self, PyObject *args, PyObject *kwds)
 {
-    PyErr_SetString(PyExc_NotImplementedError, "not implemented: lv_win_set_style: Parameter type not found >lv_style_t*< ");
-    return NULL;
+    static char *kwlist[] = {"type", "style", NULL};
+    unsigned char type;
+    lv_style_t * style;
+    if (!PyArg_ParseTupleAndKeywords(args, kwds, "bO&", kwlist , &type, pylv_style_t_arg_converter, &style)) return NULL;
+
+    LVGL_LOCK         
+    lv_win_set_style(self->ref, type, style);
+    LVGL_UNLOCK
+    Py_RETURN_NONE;
 }
 
 static PyObject*
@@ -12068,8 +14722,14 @@ pylv_win_get_width(pylv_Obj *self, PyObject *args, PyObject *kwds)
 static PyObject*
 pylv_win_get_style(pylv_Obj *self, PyObject *args, PyObject *kwds)
 {
-    PyErr_SetString(PyExc_NotImplementedError, "not implemented: lv_win_get_style: Return type not found >lv_style_t*< ");
-    return NULL;
+    static char *kwlist[] = {"type", NULL};
+    unsigned char type;
+    if (!PyArg_ParseTupleAndKeywords(args, kwds, "b", kwlist , &type)) return NULL;
+
+    LVGL_LOCK        
+    lv_style_t * result = lv_win_get_style(self->ref, type);
+    LVGL_UNLOCK
+    return pystruct_from_lv(result);            
 }
 
 static PyObject*
@@ -12247,8 +14907,15 @@ pylv_tabview_set_anim_time(pylv_Obj *self, PyObject *args, PyObject *kwds)
 static PyObject*
 pylv_tabview_set_style(pylv_Obj *self, PyObject *args, PyObject *kwds)
 {
-    PyErr_SetString(PyExc_NotImplementedError, "not implemented: lv_tabview_set_style: Parameter type not found >lv_style_t*< ");
-    return NULL;
+    static char *kwlist[] = {"type", "style", NULL};
+    unsigned char type;
+    lv_style_t * style;
+    if (!PyArg_ParseTupleAndKeywords(args, kwds, "bO&", kwlist , &type, pylv_style_t_arg_converter, &style)) return NULL;
+
+    LVGL_LOCK         
+    lv_tabview_set_style(self->ref, type, style);
+    LVGL_UNLOCK
+    Py_RETURN_NONE;
 }
 
 static PyObject*
@@ -12343,8 +15010,14 @@ pylv_tabview_get_anim_time(pylv_Obj *self, PyObject *args, PyObject *kwds)
 static PyObject*
 pylv_tabview_get_style(pylv_Obj *self, PyObject *args, PyObject *kwds)
 {
-    PyErr_SetString(PyExc_NotImplementedError, "not implemented: lv_tabview_get_style: Return type not found >lv_style_t*< ");
-    return NULL;
+    static char *kwlist[] = {"type", NULL};
+    unsigned char type;
+    if (!PyArg_ParseTupleAndKeywords(args, kwds, "b", kwlist , &type)) return NULL;
+
+    LVGL_LOCK        
+    lv_style_t * result = lv_tabview_get_style(self->ref, type);
+    LVGL_UNLOCK
+    return pystruct_from_lv(result);            
 }
 
 static PyObject*
@@ -12470,15 +15143,28 @@ pylv_tileview_set_tile_act(pylv_Obj *self, PyObject *args, PyObject *kwds)
 static PyObject*
 pylv_tileview_set_style(pylv_Obj *self, PyObject *args, PyObject *kwds)
 {
-    PyErr_SetString(PyExc_NotImplementedError, "not implemented: lv_tileview_set_style: Parameter type not found >lv_style_t*< ");
-    return NULL;
+    static char *kwlist[] = {"type", "style", NULL};
+    unsigned char type;
+    lv_style_t * style;
+    if (!PyArg_ParseTupleAndKeywords(args, kwds, "bO&", kwlist , &type, pylv_style_t_arg_converter, &style)) return NULL;
+
+    LVGL_LOCK         
+    lv_tileview_set_style(self->ref, type, style);
+    LVGL_UNLOCK
+    Py_RETURN_NONE;
 }
 
 static PyObject*
 pylv_tileview_get_style(pylv_Obj *self, PyObject *args, PyObject *kwds)
 {
-    PyErr_SetString(PyExc_NotImplementedError, "not implemented: lv_tileview_get_style: Return type not found >lv_style_t*< ");
-    return NULL;
+    static char *kwlist[] = {"type", NULL};
+    unsigned char type;
+    if (!PyArg_ParseTupleAndKeywords(args, kwds, "b", kwlist , &type)) return NULL;
+
+    LVGL_LOCK        
+    lv_style_t * result = lv_tileview_get_style(self->ref, type);
+    LVGL_UNLOCK
+    return pystruct_from_lv(result);            
 }
 
 
@@ -12592,8 +15278,15 @@ pylv_mbox_stop_auto_close(pylv_Obj *self, PyObject *args, PyObject *kwds)
 static PyObject*
 pylv_mbox_set_style(pylv_Obj *self, PyObject *args, PyObject *kwds)
 {
-    PyErr_SetString(PyExc_NotImplementedError, "not implemented: lv_mbox_set_style: Parameter type not found >lv_style_t*< ");
-    return NULL;
+    static char *kwlist[] = {"type", "style", NULL};
+    unsigned char type;
+    lv_style_t * style;
+    if (!PyArg_ParseTupleAndKeywords(args, kwds, "bO&", kwlist , &type, pylv_style_t_arg_converter, &style)) return NULL;
+
+    LVGL_LOCK         
+    lv_mbox_set_style(self->ref, type, style);
+    LVGL_UNLOCK
+    Py_RETURN_NONE;
 }
 
 static PyObject*
@@ -12660,8 +15353,14 @@ pylv_mbox_get_anim_time(pylv_Obj *self, PyObject *args, PyObject *kwds)
 static PyObject*
 pylv_mbox_get_style(pylv_Obj *self, PyObject *args, PyObject *kwds)
 {
-    PyErr_SetString(PyExc_NotImplementedError, "not implemented: lv_mbox_get_style: Return type not found >lv_style_t*< ");
-    return NULL;
+    static char *kwlist[] = {"type", NULL};
+    unsigned char type;
+    if (!PyArg_ParseTupleAndKeywords(args, kwds, "b", kwlist , &type)) return NULL;
+
+    LVGL_LOCK        
+    lv_style_t * result = lv_mbox_get_style(self->ref, type);
+    LVGL_UNLOCK
+    return pystruct_from_lv(result);            
 }
 
 static PyObject*
@@ -13096,8 +15795,15 @@ pylv_sw_toggle(pylv_Obj *self, PyObject *args, PyObject *kwds)
 static PyObject*
 pylv_sw_set_style(pylv_Obj *self, PyObject *args, PyObject *kwds)
 {
-    PyErr_SetString(PyExc_NotImplementedError, "not implemented: lv_sw_set_style: Parameter type not found >lv_style_t*< ");
-    return NULL;
+    static char *kwlist[] = {"type", "style", NULL};
+    unsigned char type;
+    lv_style_t * style;
+    if (!PyArg_ParseTupleAndKeywords(args, kwds, "bO&", kwlist , &type, pylv_style_t_arg_converter, &style)) return NULL;
+
+    LVGL_LOCK         
+    lv_sw_set_style(self->ref, type, style);
+    LVGL_UNLOCK
+    Py_RETURN_NONE;
 }
 
 static PyObject*
@@ -13128,8 +15834,14 @@ pylv_sw_get_state(pylv_Obj *self, PyObject *args, PyObject *kwds)
 static PyObject*
 pylv_sw_get_style(pylv_Obj *self, PyObject *args, PyObject *kwds)
 {
-    PyErr_SetString(PyExc_NotImplementedError, "not implemented: lv_sw_get_style: Return type not found >lv_style_t*< ");
-    return NULL;
+    static char *kwlist[] = {"type", NULL};
+    unsigned char type;
+    if (!PyArg_ParseTupleAndKeywords(args, kwds, "b", kwlist , &type)) return NULL;
+
+    LVGL_LOCK        
+    lv_style_t * result = lv_sw_get_style(self->ref, type);
+    LVGL_UNLOCK
+    return pystruct_from_lv(result);            
 }
 
 static PyObject*
@@ -13214,8 +15926,15 @@ pylv_arc_set_angles(pylv_Obj *self, PyObject *args, PyObject *kwds)
 static PyObject*
 pylv_arc_set_style(pylv_Obj *self, PyObject *args, PyObject *kwds)
 {
-    PyErr_SetString(PyExc_NotImplementedError, "not implemented: lv_arc_set_style: Parameter type not found >lv_style_t*< ");
-    return NULL;
+    static char *kwlist[] = {"type", "style", NULL};
+    unsigned char type;
+    lv_style_t * style;
+    if (!PyArg_ParseTupleAndKeywords(args, kwds, "bO&", kwlist , &type, pylv_style_t_arg_converter, &style)) return NULL;
+
+    LVGL_LOCK         
+    lv_arc_set_style(self->ref, type, style);
+    LVGL_UNLOCK
+    Py_RETURN_NONE;
 }
 
 static PyObject*
@@ -13245,8 +15964,14 @@ pylv_arc_get_angle_end(pylv_Obj *self, PyObject *args, PyObject *kwds)
 static PyObject*
 pylv_arc_get_style(pylv_Obj *self, PyObject *args, PyObject *kwds)
 {
-    PyErr_SetString(PyExc_NotImplementedError, "not implemented: lv_arc_get_style: Return type not found >lv_style_t*< ");
-    return NULL;
+    static char *kwlist[] = {"type", NULL};
+    unsigned char type;
+    if (!PyArg_ParseTupleAndKeywords(args, kwds, "b", kwlist , &type)) return NULL;
+
+    LVGL_LOCK        
+    lv_style_t * result = lv_arc_get_style(self->ref, type);
+    LVGL_UNLOCK
+    return pystruct_from_lv(result);            
 }
 
 
@@ -13328,8 +16053,15 @@ pylv_preload_set_spin_time(pylv_Obj *self, PyObject *args, PyObject *kwds)
 static PyObject*
 pylv_preload_set_style(pylv_Obj *self, PyObject *args, PyObject *kwds)
 {
-    PyErr_SetString(PyExc_NotImplementedError, "not implemented: lv_preload_set_style: Parameter type not found >lv_style_t*< ");
-    return NULL;
+    static char *kwlist[] = {"type", "style", NULL};
+    unsigned char type;
+    lv_style_t * style;
+    if (!PyArg_ParseTupleAndKeywords(args, kwds, "bO&", kwlist , &type, pylv_style_t_arg_converter, &style)) return NULL;
+
+    LVGL_LOCK         
+    lv_preload_set_style(self->ref, type, style);
+    LVGL_UNLOCK
+    Py_RETURN_NONE;
 }
 
 static PyObject*
@@ -13372,8 +16104,14 @@ pylv_preload_get_spin_time(pylv_Obj *self, PyObject *args, PyObject *kwds)
 static PyObject*
 pylv_preload_get_style(pylv_Obj *self, PyObject *args, PyObject *kwds)
 {
-    PyErr_SetString(PyExc_NotImplementedError, "not implemented: lv_preload_get_style: Return type not found >lv_style_t*< ");
-    return NULL;
+    static char *kwlist[] = {"type", NULL};
+    unsigned char type;
+    if (!PyArg_ParseTupleAndKeywords(args, kwds, "b", kwlist , &type)) return NULL;
+
+    LVGL_LOCK        
+    lv_style_t * result = lv_preload_get_style(self->ref, type);
+    LVGL_UNLOCK
+    return pystruct_from_lv(result);            
 }
 
 static PyObject*
@@ -14073,6 +16811,10 @@ PyInit_lvgl(void) {
     if (PyType_Ready(&pylv_ta_ext_t_cursor_Type) < 0) return NULL;
 
 
+    struct_dict = PyDict_New();
+    if (!struct_dict) return NULL;
+    //TODO: remove
+    PyModule_AddObject(module, "_structs_", struct_dict);
 
 
     Py_INCREF(&pylv_obj_Type);
