@@ -37,6 +37,8 @@
 
 typedef struct {
     PyObject_HEAD
+    PyObject *dict;
+    PyObject *weakreflist;
     lv_obj_t *ref;
     PyObject *event;
     lv_event_cb_t orig_c_event_cb;
@@ -430,7 +432,6 @@ static lv_res_t pylv_signal_cb(lv_obj_t * obj, lv_signal_t sign, void * param)
 {
     pylv_Obj* py_obj = (pylv_Obj*)(*lv_obj_get_user_data(obj));
     if (py_obj) {
-        PySys_FormatStdout("Signal %d on %R", sign, py_obj);
         if (sign == LV_SIGNAL_CLEANUP) {
             py_obj->ref = NULL; // mark object as deleted
             
@@ -9164,7 +9165,14 @@ pylv_list_focus(pylv_List *self, PyObject *args, PyObject *kwds)
 static void
 pylv_obj_dealloc(pylv_Obj *self) 
 {
-    // TODO: delete lvgl object? How to manage whether it has references in LittlevGL?
+    // the accompanying lv_obj holds a reference to the Python object, so
+    // dealloc can only take place if the lv_obj has already been deleted using
+    // Obj.del_() or .clean() on ints parents. 
+    
+    if (self->weakreflist != NULL)
+        PyObject_ClearWeakRefs((PyObject *) self);
+
+    Py_TYPE(self)->tp_free((PyObject *) self);
 
 }
 
@@ -10031,12 +10039,21 @@ static PyTypeObject pylv_obj_Type = {
     .tp_init = (initproc) pylv_obj_init,
     .tp_dealloc = (destructor) pylv_obj_dealloc,
     .tp_methods = pylv_obj_methods,
+    .tp_dictoffset = offsetof(pylv_Obj, dict),
+    .tp_weaklistoffset = offsetof(pylv_Obj, weakreflist),
 };
 
 static void
 pylv_cont_dealloc(pylv_Cont *self) 
 {
-    // TODO: delete lvgl object? How to manage whether it has references in LittlevGL?
+    // the accompanying lv_obj holds a reference to the Python object, so
+    // dealloc can only take place if the lv_obj has already been deleted using
+    // Obj.del_() or .clean() on ints parents. 
+    
+    if (self->weakreflist != NULL)
+        PyObject_ClearWeakRefs((PyObject *) self);
+
+    Py_TYPE(self)->tp_free((PyObject *) self);
 
 }
 
@@ -10191,12 +10208,21 @@ static PyTypeObject pylv_cont_Type = {
     .tp_init = (initproc) pylv_cont_init,
     .tp_dealloc = (destructor) pylv_cont_dealloc,
     .tp_methods = pylv_cont_methods,
+    .tp_dictoffset = offsetof(pylv_Cont, dict),
+    .tp_weaklistoffset = offsetof(pylv_Cont, weakreflist),
 };
 
 static void
 pylv_btn_dealloc(pylv_Btn *self) 
 {
-    // TODO: delete lvgl object? How to manage whether it has references in LittlevGL?
+    // the accompanying lv_obj holds a reference to the Python object, so
+    // dealloc can only take place if the lv_obj has already been deleted using
+    // Obj.del_() or .clean() on ints parents. 
+    
+    if (self->weakreflist != NULL)
+        PyObject_ClearWeakRefs((PyObject *) self);
+
+    Py_TYPE(self)->tp_free((PyObject *) self);
 
 }
 
@@ -10428,12 +10454,21 @@ static PyTypeObject pylv_btn_Type = {
     .tp_init = (initproc) pylv_btn_init,
     .tp_dealloc = (destructor) pylv_btn_dealloc,
     .tp_methods = pylv_btn_methods,
+    .tp_dictoffset = offsetof(pylv_Btn, dict),
+    .tp_weaklistoffset = offsetof(pylv_Btn, weakreflist),
 };
 
 static void
 pylv_imgbtn_dealloc(pylv_Imgbtn *self) 
 {
-    // TODO: delete lvgl object? How to manage whether it has references in LittlevGL?
+    // the accompanying lv_obj holds a reference to the Python object, so
+    // dealloc can only take place if the lv_obj has already been deleted using
+    // Obj.del_() or .clean() on ints parents. 
+    
+    if (self->weakreflist != NULL)
+        PyObject_ClearWeakRefs((PyObject *) self);
+
+    Py_TYPE(self)->tp_free((PyObject *) self);
 
 }
 
@@ -10522,12 +10557,21 @@ static PyTypeObject pylv_imgbtn_Type = {
     .tp_init = (initproc) pylv_imgbtn_init,
     .tp_dealloc = (destructor) pylv_imgbtn_dealloc,
     .tp_methods = pylv_imgbtn_methods,
+    .tp_dictoffset = offsetof(pylv_Imgbtn, dict),
+    .tp_weaklistoffset = offsetof(pylv_Imgbtn, weakreflist),
 };
 
 static void
 pylv_label_dealloc(pylv_Label *self) 
 {
-    // TODO: delete lvgl object? How to manage whether it has references in LittlevGL?
+    // the accompanying lv_obj holds a reference to the Python object, so
+    // dealloc can only take place if the lv_obj has already been deleted using
+    // Obj.del_() or .clean() on ints parents. 
+    
+    if (self->weakreflist != NULL)
+        PyObject_ClearWeakRefs((PyObject *) self);
+
+    Py_TYPE(self)->tp_free((PyObject *) self);
 
 }
 
@@ -10808,12 +10852,21 @@ static PyTypeObject pylv_label_Type = {
     .tp_init = (initproc) pylv_label_init,
     .tp_dealloc = (destructor) pylv_label_dealloc,
     .tp_methods = pylv_label_methods,
+    .tp_dictoffset = offsetof(pylv_Label, dict),
+    .tp_weaklistoffset = offsetof(pylv_Label, weakreflist),
 };
 
 static void
 pylv_img_dealloc(pylv_Img *self) 
 {
-    // TODO: delete lvgl object? How to manage whether it has references in LittlevGL?
+    // the accompanying lv_obj holds a reference to the Python object, so
+    // dealloc can only take place if the lv_obj has already been deleted using
+    // Obj.del_() or .clean() on ints parents. 
+    
+    if (self->weakreflist != NULL)
+        PyObject_ClearWeakRefs((PyObject *) self);
+
+    Py_TYPE(self)->tp_free((PyObject *) self);
 
 }
 
@@ -11032,12 +11085,21 @@ static PyTypeObject pylv_img_Type = {
     .tp_init = (initproc) pylv_img_init,
     .tp_dealloc = (destructor) pylv_img_dealloc,
     .tp_methods = pylv_img_methods,
+    .tp_dictoffset = offsetof(pylv_Img, dict),
+    .tp_weaklistoffset = offsetof(pylv_Img, weakreflist),
 };
 
 static void
 pylv_line_dealloc(pylv_Line *self) 
 {
-    // TODO: delete lvgl object? How to manage whether it has references in LittlevGL?
+    // the accompanying lv_obj holds a reference to the Python object, so
+    // dealloc can only take place if the lv_obj has already been deleted using
+    // Obj.del_() or .clean() on ints parents. 
+    
+    if (self->weakreflist != NULL)
+        PyObject_ClearWeakRefs((PyObject *) self);
+
+    Py_TYPE(self)->tp_free((PyObject *) self);
 
 }
 
@@ -11174,12 +11236,21 @@ static PyTypeObject pylv_line_Type = {
     .tp_init = (initproc) pylv_line_init,
     .tp_dealloc = (destructor) pylv_line_dealloc,
     .tp_methods = pylv_line_methods,
+    .tp_dictoffset = offsetof(pylv_Line, dict),
+    .tp_weaklistoffset = offsetof(pylv_Line, weakreflist),
 };
 
 static void
 pylv_page_dealloc(pylv_Page *self) 
 {
-    // TODO: delete lvgl object? How to manage whether it has references in LittlevGL?
+    // the accompanying lv_obj holds a reference to the Python object, so
+    // dealloc can only take place if the lv_obj has already been deleted using
+    // Obj.del_() or .clean() on ints parents. 
+    
+    if (self->weakreflist != NULL)
+        PyObject_ClearWeakRefs((PyObject *) self);
+
+    Py_TYPE(self)->tp_free((PyObject *) self);
 
 }
 
@@ -11644,12 +11715,21 @@ static PyTypeObject pylv_page_Type = {
     .tp_init = (initproc) pylv_page_init,
     .tp_dealloc = (destructor) pylv_page_dealloc,
     .tp_methods = pylv_page_methods,
+    .tp_dictoffset = offsetof(pylv_Page, dict),
+    .tp_weaklistoffset = offsetof(pylv_Page, weakreflist),
 };
 
 static void
 pylv_list_dealloc(pylv_List *self) 
 {
-    // TODO: delete lvgl object? How to manage whether it has references in LittlevGL?
+    // the accompanying lv_obj holds a reference to the Python object, so
+    // dealloc can only take place if the lv_obj has already been deleted using
+    // Obj.del_() or .clean() on ints parents. 
+    
+    if (self->weakreflist != NULL)
+        PyObject_ClearWeakRefs((PyObject *) self);
+
+    Py_TYPE(self)->tp_free((PyObject *) self);
 
 }
 
@@ -11979,12 +12059,21 @@ static PyTypeObject pylv_list_Type = {
     .tp_init = (initproc) pylv_list_init,
     .tp_dealloc = (destructor) pylv_list_dealloc,
     .tp_methods = pylv_list_methods,
+    .tp_dictoffset = offsetof(pylv_List, dict),
+    .tp_weaklistoffset = offsetof(pylv_List, weakreflist),
 };
 
 static void
 pylv_chart_dealloc(pylv_Chart *self) 
 {
-    // TODO: delete lvgl object? How to manage whether it has references in LittlevGL?
+    // the accompanying lv_obj holds a reference to the Python object, so
+    // dealloc can only take place if the lv_obj has already been deleted using
+    // Obj.del_() or .clean() on ints parents. 
+    
+    if (self->weakreflist != NULL)
+        PyObject_ClearWeakRefs((PyObject *) self);
+
+    Py_TYPE(self)->tp_free((PyObject *) self);
 
 }
 
@@ -12257,12 +12346,21 @@ static PyTypeObject pylv_chart_Type = {
     .tp_init = (initproc) pylv_chart_init,
     .tp_dealloc = (destructor) pylv_chart_dealloc,
     .tp_methods = pylv_chart_methods,
+    .tp_dictoffset = offsetof(pylv_Chart, dict),
+    .tp_weaklistoffset = offsetof(pylv_Chart, weakreflist),
 };
 
 static void
 pylv_table_dealloc(pylv_Table *self) 
 {
-    // TODO: delete lvgl object? How to manage whether it has references in LittlevGL?
+    // the accompanying lv_obj holds a reference to the Python object, so
+    // dealloc can only take place if the lv_obj has already been deleted using
+    // Obj.del_() or .clean() on ints parents. 
+    
+    if (self->weakreflist != NULL)
+        PyObject_ClearWeakRefs((PyObject *) self);
+
+    Py_TYPE(self)->tp_free((PyObject *) self);
 
 }
 
@@ -12589,12 +12687,21 @@ static PyTypeObject pylv_table_Type = {
     .tp_init = (initproc) pylv_table_init,
     .tp_dealloc = (destructor) pylv_table_dealloc,
     .tp_methods = pylv_table_methods,
+    .tp_dictoffset = offsetof(pylv_Table, dict),
+    .tp_weaklistoffset = offsetof(pylv_Table, weakreflist),
 };
 
 static void
 pylv_cb_dealloc(pylv_Cb *self) 
 {
-    // TODO: delete lvgl object? How to manage whether it has references in LittlevGL?
+    // the accompanying lv_obj holds a reference to the Python object, so
+    // dealloc can only take place if the lv_obj has already been deleted using
+    // Obj.del_() or .clean() on ints parents. 
+    
+    if (self->weakreflist != NULL)
+        PyObject_ClearWeakRefs((PyObject *) self);
+
+    Py_TYPE(self)->tp_free((PyObject *) self);
 
 }
 
@@ -12754,12 +12861,21 @@ static PyTypeObject pylv_cb_Type = {
     .tp_init = (initproc) pylv_cb_init,
     .tp_dealloc = (destructor) pylv_cb_dealloc,
     .tp_methods = pylv_cb_methods,
+    .tp_dictoffset = offsetof(pylv_Cb, dict),
+    .tp_weaklistoffset = offsetof(pylv_Cb, weakreflist),
 };
 
 static void
 pylv_bar_dealloc(pylv_Bar *self) 
 {
-    // TODO: delete lvgl object? How to manage whether it has references in LittlevGL?
+    // the accompanying lv_obj holds a reference to the Python object, so
+    // dealloc can only take place if the lv_obj has already been deleted using
+    // Obj.del_() or .clean() on ints parents. 
+    
+    if (self->weakreflist != NULL)
+        PyObject_ClearWeakRefs((PyObject *) self);
+
+    Py_TYPE(self)->tp_free((PyObject *) self);
 
 }
 
@@ -12935,12 +13051,21 @@ static PyTypeObject pylv_bar_Type = {
     .tp_init = (initproc) pylv_bar_init,
     .tp_dealloc = (destructor) pylv_bar_dealloc,
     .tp_methods = pylv_bar_methods,
+    .tp_dictoffset = offsetof(pylv_Bar, dict),
+    .tp_weaklistoffset = offsetof(pylv_Bar, weakreflist),
 };
 
 static void
 pylv_slider_dealloc(pylv_Slider *self) 
 {
-    // TODO: delete lvgl object? How to manage whether it has references in LittlevGL?
+    // the accompanying lv_obj holds a reference to the Python object, so
+    // dealloc can only take place if the lv_obj has already been deleted using
+    // Obj.del_() or .clean() on ints parents. 
+    
+    if (self->weakreflist != NULL)
+        PyObject_ClearWeakRefs((PyObject *) self);
+
+    Py_TYPE(self)->tp_free((PyObject *) self);
 
 }
 
@@ -13070,12 +13195,21 @@ static PyTypeObject pylv_slider_Type = {
     .tp_init = (initproc) pylv_slider_init,
     .tp_dealloc = (destructor) pylv_slider_dealloc,
     .tp_methods = pylv_slider_methods,
+    .tp_dictoffset = offsetof(pylv_Slider, dict),
+    .tp_weaklistoffset = offsetof(pylv_Slider, weakreflist),
 };
 
 static void
 pylv_led_dealloc(pylv_Led *self) 
 {
-    // TODO: delete lvgl object? How to manage whether it has references in LittlevGL?
+    // the accompanying lv_obj holds a reference to the Python object, so
+    // dealloc can only take place if the lv_obj has already been deleted using
+    // Obj.del_() or .clean() on ints parents. 
+    
+    if (self->weakreflist != NULL)
+        PyObject_ClearWeakRefs((PyObject *) self);
+
+    Py_TYPE(self)->tp_free((PyObject *) self);
 
 }
 
@@ -13188,12 +13322,21 @@ static PyTypeObject pylv_led_Type = {
     .tp_init = (initproc) pylv_led_init,
     .tp_dealloc = (destructor) pylv_led_dealloc,
     .tp_methods = pylv_led_methods,
+    .tp_dictoffset = offsetof(pylv_Led, dict),
+    .tp_weaklistoffset = offsetof(pylv_Led, weakreflist),
 };
 
 static void
 pylv_btnm_dealloc(pylv_Btnm *self) 
 {
-    // TODO: delete lvgl object? How to manage whether it has references in LittlevGL?
+    // the accompanying lv_obj holds a reference to the Python object, so
+    // dealloc can only take place if the lv_obj has already been deleted using
+    // Obj.del_() or .clean() on ints parents. 
+    
+    if (self->weakreflist != NULL)
+        PyObject_ClearWeakRefs((PyObject *) self);
+
+    Py_TYPE(self)->tp_free((PyObject *) self);
 
 }
 
@@ -13597,12 +13740,21 @@ static PyTypeObject pylv_btnm_Type = {
     .tp_init = (initproc) pylv_btnm_init,
     .tp_dealloc = (destructor) pylv_btnm_dealloc,
     .tp_methods = pylv_btnm_methods,
+    .tp_dictoffset = offsetof(pylv_Btnm, dict),
+    .tp_weaklistoffset = offsetof(pylv_Btnm, weakreflist),
 };
 
 static void
 pylv_kb_dealloc(pylv_Kb *self) 
 {
-    // TODO: delete lvgl object? How to manage whether it has references in LittlevGL?
+    // the accompanying lv_obj holds a reference to the Python object, so
+    // dealloc can only take place if the lv_obj has already been deleted using
+    // Obj.del_() or .clean() on ints parents. 
+    
+    if (self->weakreflist != NULL)
+        PyObject_ClearWeakRefs((PyObject *) self);
+
+    Py_TYPE(self)->tp_free((PyObject *) self);
 
 }
 
@@ -13764,12 +13916,21 @@ static PyTypeObject pylv_kb_Type = {
     .tp_init = (initproc) pylv_kb_init,
     .tp_dealloc = (destructor) pylv_kb_dealloc,
     .tp_methods = pylv_kb_methods,
+    .tp_dictoffset = offsetof(pylv_Kb, dict),
+    .tp_weaklistoffset = offsetof(pylv_Kb, weakreflist),
 };
 
 static void
 pylv_ddlist_dealloc(pylv_Ddlist *self) 
 {
-    // TODO: delete lvgl object? How to manage whether it has references in LittlevGL?
+    // the accompanying lv_obj holds a reference to the Python object, so
+    // dealloc can only take place if the lv_obj has already been deleted using
+    // Obj.del_() or .clean() on ints parents. 
+    
+    if (self->weakreflist != NULL)
+        PyObject_ClearWeakRefs((PyObject *) self);
+
+    Py_TYPE(self)->tp_free((PyObject *) self);
 
 }
 
@@ -14091,12 +14252,21 @@ static PyTypeObject pylv_ddlist_Type = {
     .tp_init = (initproc) pylv_ddlist_init,
     .tp_dealloc = (destructor) pylv_ddlist_dealloc,
     .tp_methods = pylv_ddlist_methods,
+    .tp_dictoffset = offsetof(pylv_Ddlist, dict),
+    .tp_weaklistoffset = offsetof(pylv_Ddlist, weakreflist),
 };
 
 static void
 pylv_roller_dealloc(pylv_Roller *self) 
 {
-    // TODO: delete lvgl object? How to manage whether it has references in LittlevGL?
+    // the accompanying lv_obj holds a reference to the Python object, so
+    // dealloc can only take place if the lv_obj has already been deleted using
+    // Obj.del_() or .clean() on ints parents. 
+    
+    if (self->weakreflist != NULL)
+        PyObject_ClearWeakRefs((PyObject *) self);
+
+    Py_TYPE(self)->tp_free((PyObject *) self);
 
 }
 
@@ -14251,12 +14421,21 @@ static PyTypeObject pylv_roller_Type = {
     .tp_init = (initproc) pylv_roller_init,
     .tp_dealloc = (destructor) pylv_roller_dealloc,
     .tp_methods = pylv_roller_methods,
+    .tp_dictoffset = offsetof(pylv_Roller, dict),
+    .tp_weaklistoffset = offsetof(pylv_Roller, weakreflist),
 };
 
 static void
 pylv_ta_dealloc(pylv_Ta *self) 
 {
-    // TODO: delete lvgl object? How to manage whether it has references in LittlevGL?
+    // the accompanying lv_obj holds a reference to the Python object, so
+    // dealloc can only take place if the lv_obj has already been deleted using
+    // Obj.del_() or .clean() on ints parents. 
+    
+    if (self->weakreflist != NULL)
+        PyObject_ClearWeakRefs((PyObject *) self);
+
+    Py_TYPE(self)->tp_free((PyObject *) self);
 
 }
 
@@ -14706,12 +14885,21 @@ static PyTypeObject pylv_ta_Type = {
     .tp_init = (initproc) pylv_ta_init,
     .tp_dealloc = (destructor) pylv_ta_dealloc,
     .tp_methods = pylv_ta_methods,
+    .tp_dictoffset = offsetof(pylv_Ta, dict),
+    .tp_weaklistoffset = offsetof(pylv_Ta, weakreflist),
 };
 
 static void
 pylv_canvas_dealloc(pylv_Canvas *self) 
 {
-    // TODO: delete lvgl object? How to manage whether it has references in LittlevGL?
+    // the accompanying lv_obj holds a reference to the Python object, so
+    // dealloc can only take place if the lv_obj has already been deleted using
+    // Obj.del_() or .clean() on ints parents. 
+    
+    if (self->weakreflist != NULL)
+        PyObject_ClearWeakRefs((PyObject *) self);
+
+    Py_TYPE(self)->tp_free((PyObject *) self);
 
 }
 
@@ -14888,12 +15076,21 @@ static PyTypeObject pylv_canvas_Type = {
     .tp_init = (initproc) pylv_canvas_init,
     .tp_dealloc = (destructor) pylv_canvas_dealloc,
     .tp_methods = pylv_canvas_methods,
+    .tp_dictoffset = offsetof(pylv_Canvas, dict),
+    .tp_weaklistoffset = offsetof(pylv_Canvas, weakreflist),
 };
 
 static void
 pylv_win_dealloc(pylv_Win *self) 
 {
-    // TODO: delete lvgl object? How to manage whether it has references in LittlevGL?
+    // the accompanying lv_obj holds a reference to the Python object, so
+    // dealloc can only take place if the lv_obj has already been deleted using
+    // Obj.del_() or .clean() on ints parents. 
+    
+    if (self->weakreflist != NULL)
+        PyObject_ClearWeakRefs((PyObject *) self);
+
+    Py_TYPE(self)->tp_free((PyObject *) self);
 
 }
 
@@ -15219,12 +15416,21 @@ static PyTypeObject pylv_win_Type = {
     .tp_init = (initproc) pylv_win_init,
     .tp_dealloc = (destructor) pylv_win_dealloc,
     .tp_methods = pylv_win_methods,
+    .tp_dictoffset = offsetof(pylv_Win, dict),
+    .tp_weaklistoffset = offsetof(pylv_Win, weakreflist),
 };
 
 static void
 pylv_tabview_dealloc(pylv_Tabview *self) 
 {
-    // TODO: delete lvgl object? How to manage whether it has references in LittlevGL?
+    // the accompanying lv_obj holds a reference to the Python object, so
+    // dealloc can only take place if the lv_obj has already been deleted using
+    // Obj.del_() or .clean() on ints parents. 
+    
+    if (self->weakreflist != NULL)
+        PyObject_ClearWeakRefs((PyObject *) self);
+
+    Py_TYPE(self)->tp_free((PyObject *) self);
 
 }
 
@@ -15505,12 +15711,21 @@ static PyTypeObject pylv_tabview_Type = {
     .tp_init = (initproc) pylv_tabview_init,
     .tp_dealloc = (destructor) pylv_tabview_dealloc,
     .tp_methods = pylv_tabview_methods,
+    .tp_dictoffset = offsetof(pylv_Tabview, dict),
+    .tp_weaklistoffset = offsetof(pylv_Tabview, weakreflist),
 };
 
 static void
 pylv_tileview_dealloc(pylv_Tileview *self) 
 {
-    // TODO: delete lvgl object? How to manage whether it has references in LittlevGL?
+    // the accompanying lv_obj holds a reference to the Python object, so
+    // dealloc can only take place if the lv_obj has already been deleted using
+    // Obj.del_() or .clean() on ints parents. 
+    
+    if (self->weakreflist != NULL)
+        PyObject_ClearWeakRefs((PyObject *) self);
+
+    Py_TYPE(self)->tp_free((PyObject *) self);
 
 }
 
@@ -15623,12 +15838,21 @@ static PyTypeObject pylv_tileview_Type = {
     .tp_init = (initproc) pylv_tileview_init,
     .tp_dealloc = (destructor) pylv_tileview_dealloc,
     .tp_methods = pylv_tileview_methods,
+    .tp_dictoffset = offsetof(pylv_Tileview, dict),
+    .tp_weaklistoffset = offsetof(pylv_Tileview, weakreflist),
 };
 
 static void
 pylv_mbox_dealloc(pylv_Mbox *self) 
 {
-    // TODO: delete lvgl object? How to manage whether it has references in LittlevGL?
+    // the accompanying lv_obj holds a reference to the Python object, so
+    // dealloc can only take place if the lv_obj has already been deleted using
+    // Obj.del_() or .clean() on ints parents. 
+    
+    if (self->weakreflist != NULL)
+        PyObject_ClearWeakRefs((PyObject *) self);
+
+    Py_TYPE(self)->tp_free((PyObject *) self);
 
 }
 
@@ -15869,12 +16093,21 @@ static PyTypeObject pylv_mbox_Type = {
     .tp_init = (initproc) pylv_mbox_init,
     .tp_dealloc = (destructor) pylv_mbox_dealloc,
     .tp_methods = pylv_mbox_methods,
+    .tp_dictoffset = offsetof(pylv_Mbox, dict),
+    .tp_weaklistoffset = offsetof(pylv_Mbox, weakreflist),
 };
 
 static void
 pylv_lmeter_dealloc(pylv_Lmeter *self) 
 {
-    // TODO: delete lvgl object? How to manage whether it has references in LittlevGL?
+    // the accompanying lv_obj holds a reference to the Python object, so
+    // dealloc can only take place if the lv_obj has already been deleted using
+    // Obj.del_() or .clean() on ints parents. 
+    
+    if (self->weakreflist != NULL)
+        PyObject_ClearWeakRefs((PyObject *) self);
+
+    Py_TYPE(self)->tp_free((PyObject *) self);
 
 }
 
@@ -16033,12 +16266,21 @@ static PyTypeObject pylv_lmeter_Type = {
     .tp_init = (initproc) pylv_lmeter_init,
     .tp_dealloc = (destructor) pylv_lmeter_dealloc,
     .tp_methods = pylv_lmeter_methods,
+    .tp_dictoffset = offsetof(pylv_Lmeter, dict),
+    .tp_weaklistoffset = offsetof(pylv_Lmeter, weakreflist),
 };
 
 static void
 pylv_gauge_dealloc(pylv_Gauge *self) 
 {
-    // TODO: delete lvgl object? How to manage whether it has references in LittlevGL?
+    // the accompanying lv_obj holds a reference to the Python object, so
+    // dealloc can only take place if the lv_obj has already been deleted using
+    // Obj.del_() or .clean() on ints parents. 
+    
+    if (self->weakreflist != NULL)
+        PyObject_ClearWeakRefs((PyObject *) self);
+
+    Py_TYPE(self)->tp_free((PyObject *) self);
 
 }
 
@@ -16193,12 +16435,21 @@ static PyTypeObject pylv_gauge_Type = {
     .tp_init = (initproc) pylv_gauge_init,
     .tp_dealloc = (destructor) pylv_gauge_dealloc,
     .tp_methods = pylv_gauge_methods,
+    .tp_dictoffset = offsetof(pylv_Gauge, dict),
+    .tp_weaklistoffset = offsetof(pylv_Gauge, weakreflist),
 };
 
 static void
 pylv_sw_dealloc(pylv_Sw *self) 
 {
-    // TODO: delete lvgl object? How to manage whether it has references in LittlevGL?
+    // the accompanying lv_obj holds a reference to the Python object, so
+    // dealloc can only take place if the lv_obj has already been deleted using
+    // Obj.del_() or .clean() on ints parents. 
+    
+    if (self->weakreflist != NULL)
+        PyObject_ClearWeakRefs((PyObject *) self);
+
+    Py_TYPE(self)->tp_free((PyObject *) self);
 
 }
 
@@ -16359,12 +16610,21 @@ static PyTypeObject pylv_sw_Type = {
     .tp_init = (initproc) pylv_sw_init,
     .tp_dealloc = (destructor) pylv_sw_dealloc,
     .tp_methods = pylv_sw_methods,
+    .tp_dictoffset = offsetof(pylv_Sw, dict),
+    .tp_weaklistoffset = offsetof(pylv_Sw, weakreflist),
 };
 
 static void
 pylv_arc_dealloc(pylv_Arc *self) 
 {
-    // TODO: delete lvgl object? How to manage whether it has references in LittlevGL?
+    // the accompanying lv_obj holds a reference to the Python object, so
+    // dealloc can only take place if the lv_obj has already been deleted using
+    // Obj.del_() or .clean() on ints parents. 
+    
+    if (self->weakreflist != NULL)
+        PyObject_ClearWeakRefs((PyObject *) self);
+
+    Py_TYPE(self)->tp_free((PyObject *) self);
 
 }
 
@@ -16481,12 +16741,21 @@ static PyTypeObject pylv_arc_Type = {
     .tp_init = (initproc) pylv_arc_init,
     .tp_dealloc = (destructor) pylv_arc_dealloc,
     .tp_methods = pylv_arc_methods,
+    .tp_dictoffset = offsetof(pylv_Arc, dict),
+    .tp_weaklistoffset = offsetof(pylv_Arc, weakreflist),
 };
 
 static void
 pylv_preload_dealloc(pylv_Preload *self) 
 {
-    // TODO: delete lvgl object? How to manage whether it has references in LittlevGL?
+    // the accompanying lv_obj holds a reference to the Python object, so
+    // dealloc can only take place if the lv_obj has already been deleted using
+    // Obj.del_() or .clean() on ints parents. 
+    
+    if (self->weakreflist != NULL)
+        PyObject_ClearWeakRefs((PyObject *) self);
+
+    Py_TYPE(self)->tp_free((PyObject *) self);
 
 }
 
@@ -16646,12 +16915,21 @@ static PyTypeObject pylv_preload_Type = {
     .tp_init = (initproc) pylv_preload_init,
     .tp_dealloc = (destructor) pylv_preload_dealloc,
     .tp_methods = pylv_preload_methods,
+    .tp_dictoffset = offsetof(pylv_Preload, dict),
+    .tp_weaklistoffset = offsetof(pylv_Preload, weakreflist),
 };
 
 static void
 pylv_spinbox_dealloc(pylv_Spinbox *self) 
 {
-    // TODO: delete lvgl object? How to manage whether it has references in LittlevGL?
+    // the accompanying lv_obj holds a reference to the Python object, so
+    // dealloc can only take place if the lv_obj has already been deleted using
+    // Obj.del_() or .clean() on ints parents. 
+    
+    if (self->weakreflist != NULL)
+        PyObject_ClearWeakRefs((PyObject *) self);
+
+    Py_TYPE(self)->tp_free((PyObject *) self);
 
 }
 
@@ -16848,6 +17126,8 @@ static PyTypeObject pylv_spinbox_Type = {
     .tp_init = (initproc) pylv_spinbox_init,
     .tp_dealloc = (destructor) pylv_spinbox_dealloc,
     .tp_methods = pylv_spinbox_methods,
+    .tp_dictoffset = offsetof(pylv_Spinbox, dict),
+    .tp_weaklistoffset = offsetof(pylv_Spinbox, weakreflist),
 };
 
 

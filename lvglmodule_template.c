@@ -688,7 +688,12 @@ pylv_{name}_dealloc(pylv_{pyname} *self)
 {{
     // the accompanying lv_obj holds a reference to the Python object, so
     // dealloc can only take place if the lv_obj has already been deleted using
-    // Obj.del_() or .clean() on ints parents. Nothing to be done here
+    // Obj.del_() or .clean() on ints parents. 
+    
+    if (self->weakreflist != NULL)
+        PyObject_ClearWeakRefs((PyObject *) self);
+
+    Py_TYPE(self)->tp_free((PyObject *) self);
 
 }}
 
@@ -730,6 +735,8 @@ static PyTypeObject pylv_{name}_Type = {{
     .tp_init = (initproc) pylv_{name}_init,
     .tp_dealloc = (destructor) pylv_{name}_dealloc,
     .tp_methods = pylv_{name}_methods,
+    .tp_dictoffset = offsetof(pylv_{pyname}, dict),
+    .tp_weaklistoffset = offsetof(pylv_{pyname}, weakreflist),
 }};
 >>>
 
