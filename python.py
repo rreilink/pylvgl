@@ -1,14 +1,11 @@
 import collections
 import re
+import keyword
 
 from bindingsgen import Object, Struct, BindingsGenerator, c_ast, stripstart, generate_c, CustomMethod, type_repr, flatten_struct, MissingConversionException
 
 # TODO: should be common for all bindings generators
 skipfunctions = {
-
-    # Don't tamper with deleting objects which have Python references
-    'lv_obj_del',
-    'lv_obj_clean',
     
     # user_data is used to store reference to Python objects, don't tamper with that!
     'lv_obj_get_user_data',
@@ -79,6 +76,7 @@ class PythonObject(Object):
 static PyObject*
 py{method.decl.name}(pylv_Obj *self, PyObject *args, PyObject *kwds)
 {{
+    if (check_alive(self)) return NULL;
 '''
        
         paramnames = []
@@ -296,8 +294,10 @@ py{method.decl.name}(pylv_Obj *self, PyObject *args, PyObject *kwds)
         methodtablecode = ''
     
         for methodname, method in self.methods.items():
-            
-            methodtablecode += f'    {{"{methodname}", (PyCFunction) py{method.decl.name}, METH_VARARGS | METH_KEYWORDS, "{generate_c(method.decl)}"}},\n'
+            alias = methodname
+            if keyword.iskeyword(alias):
+                alias += '_'
+            methodtablecode += f'    {{"{alias}", (PyCFunction) py{method.decl.name}, METH_VARARGS | METH_KEYWORDS, "{generate_c(method.decl)}"}},\n'
 
     
         return methodtablecode
@@ -439,7 +439,7 @@ class PythonBindingsGenerator(BindingsGenerator):
         
         
         objects = self.objects
-        objects['obj'].customstructfields.extend(['PyObject_HEAD', 'lv_obj_t *ref;', 'PyObject *event;', 'lv_event_cb_t orig_c_event_cb;'])
+        objects['obj'].customstructfields.extend(['PyObject_HEAD', 'lv_obj_t *ref;', 'PyObject *event;', 'lv_event_cb_t orig_c_event_cb;', 'lv_signal_cb_t orig_signal_cb;'])
 
         for custom in ('lv_obj_get_children', 'lv_label_get_letter_pos', 'lv_label_get_letter_on', 'lv_list_add' ,'lv_obj_get_type', 'lv_list_focus'):
             

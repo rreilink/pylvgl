@@ -73,6 +73,36 @@ void lv_set_lock_unlock( void (*flock)(void *), void * flock_arg,
     unlock = funlock;
 }
 
+
+static lv_res_t pylv_signal_cb(lv_obj_t * obj, lv_signal_t sign, void * param)
+{
+    pylv_Obj* py_obj = (pylv_Obj*)(*lv_obj_get_user_data(obj));
+    if (py_obj) {
+        if (sign == LV_SIGNAL_CLEANUP) {
+            py_obj->ref = NULL; // mark object as deleted
+            
+            // remove reference to Python object
+            (*lv_obj_get_user_data(obj)) = NULL;
+            Py_DECREF(py_obj); 
+        }
+
+    }
+    return py_obj->orig_signal_cb(obj, sign, param);
+}
+
+int check_alive(pylv_Obj* obj) {
+    if (!obj->ref) {
+        PyErr_SetString(PyExc_RuntimeError, "the underlying C object has been deleted");
+        return -1;
+    }
+    return 0;
+}
+
+static void install_signal_cb(pylv_Obj * py_obj) {
+    py_obj->orig_signal_cb = lv_obj_get_signal_func(py_obj->ref);       /*Save to old signal function*/
+    lv_obj_set_signal_cb(py_obj->ref, pylv_signal_cb);
+}
+
 /* Given an lvgl lv_obj, return the accompanying Python object. If the 
  * accompanying object already exists, it is returned (with ref count increased).
  * If the lv_obj is not yet known to Python, a new Python object is created,
@@ -111,6 +141,7 @@ PyObject * pyobj_from_lv(lv_obj_t *obj) {
         PyObject_Init((PyObject *)pyobj, tp);
         pyobj -> ref = obj;
         *lv_obj_get_user_data(obj) = pyobj;
+        install_signal_cb(pyobj);
         // reference count for pyobj is 1 -- the reference stored in the lvgl object user_data
     }
 
@@ -655,7 +686,9 @@ pylv_list_focus(pylv_List *self, PyObject *args, PyObject *kwds)
 static void
 pylv_{name}_dealloc(pylv_{pyname} *self) 
 {{
-    // TODO: delete lvgl object? How to manage whether it has references in LittlevGL?
+    // the accompanying lv_obj holds a reference to the Python object, so
+    // dealloc can only take place if the lv_obj has already been deleted using
+    // Obj.del_() or .clean() on ints parents. Nothing to be done here
 
 }}
 
@@ -673,6 +706,8 @@ pylv_{name}_init(pylv_{pyname} *self, PyObject *args, PyObject *kwds)
     LVGL_LOCK
     self->ref = lv_{name}_create(parent ? parent->ref : NULL, copy ? copy->ref : NULL);
     *lv_obj_get_user_data(self->ref) = self;
+    Py_INCREF(self); // since reference is stored in lv_obj user data
+    install_signal_cb(self);
     LVGL_UNLOCK
 
     return 0;
