@@ -52,6 +52,75 @@ static PyTypeObject pylv_{name}_Type;
 >>>
 
 /****************************************************************
+ * Custom type: Ptr                                             * 
+ *                                                              *
+ * Objects of this type are used as keys in struct_dict         *
+ * A Ptr holds a void* value, can be (in)-equality-compared and *
+ * can be hashed                                                *
+ ****************************************************************/
+typedef struct {
+    PyObject_HEAD
+    void *ptr;
+} PtrObject;
+static PyTypeObject Ptr_Type;
+
+static PyObject* Ptr_repr(PyObject *self) {
+    void *value = ((PtrObject *)self)->ptr;
+    return PyUnicode_FromFormat("<%s object at %p = %p>",
+                                self->ob_type->tp_name, self, value);
+}
+
+Py_hash_t Ptr_hash(PtrObject *self) {
+    Py_hash_t x;
+    x = (Py_hash_t)self->ptr;
+    if (x == -1)
+        x = -2;
+    return x;
+}
+
+static PyObject *
+Ptr_richcompare(PtrObject *obj1, PtrObject *obj2, int op)
+{
+    PyObject *result = Py_NotImplemented;
+
+    if ((Py_TYPE(obj1) == &Ptr_Type) && (Py_TYPE(obj2) == &Ptr_Type)) {
+
+        switch (op) {
+        case Py_EQ: 
+            result = (obj1->ptr == obj2->ptr) ? Py_True : Py_False; 
+            break;
+        case Py_NE:
+            result = (obj1->ptr != obj2->ptr) ? Py_True : Py_False; 
+            break;
+        default:
+            ;
+        }
+    }
+    Py_INCREF(result);
+    return result;
+ }
+
+static PyTypeObject Ptr_Type = {
+    PyVarObject_HEAD_INIT(NULL, 0)
+    .tp_name = "lvgl.Ptr",
+    .tp_doc = "lvgl pointer",
+    .tp_basicsize = sizeof(PtrObject),
+    .tp_itemsize = 0,
+    .tp_flags = Py_TPFLAGS_DEFAULT,
+    .tp_new = NULL, // cannot be instantiated
+    .tp_repr = (reprfunc) Ptr_repr,
+    .tp_hash = (hashfunc) Ptr_hash,
+    .tp_richcompare = (richcmpfunc) Ptr_richcompare,
+};
+
+PyObject *PtrObject_fromptr(void *ptr) {
+    PtrObject *ob = PyObject_New(PtrObject, &Ptr_Type);
+    if (ob) ob->ptr = ptr;
+    return (PyObject*) ob;
+}
+
+
+/****************************************************************
  * Helper functons                                              *  
  ****************************************************************/
 
@@ -74,12 +143,41 @@ void lv_set_lock_unlock( void (*flock)(void *), void * flock_arg,
 }
 
 
+
+/* This signal handler is critical in the deallocation process of lvgl and
+ * associated Python objects. It is called when an lvgl object is deleted either
+ * via obj.del_() or when any of its ancestors is deleted or cleared
+ *
+ * The order in which things are done here (and in the pylv_xx_dealloc function)
+ * is very critical to ensure no access-after-free errors.
+ *
+ * Two distinct cases can happen: either there are still other Python references
+ * to the Python object or there are no other references, and the DECREF in 
+ * this signal handler will cause the Python object be deleted, too.
+ *
+ * For the case when there are still references left, py_obj->ref will be set
+ * to NULL so that any access will raise a RuntimeError
+ *
+ *
+ * (the case that there never was a Python object for this lvgl object cannot
+ * happen, since then this signal handler was never installed)
+ */
 static lv_res_t pylv_signal_cb(lv_obj_t * obj, lv_signal_t sign, void * param)
 {
     pylv_Obj* py_obj = (pylv_Obj*)(*lv_obj_get_user_data(obj));
+    
+    // store a reference to the original signal callback, since during the
+    // CLEANUP signal, py_obj may get deallocated and then this reference is gone
+    lv_signal_cb_t orig_signal_cb = py_obj->orig_signal_cb;
+        
     if (py_obj) {
         if (sign == LV_SIGNAL_CLEANUP) {
-            py_obj->ref = NULL; // mark object as deleted
+            // mark object as deleted
+            py_obj->ref = NULL; 
+
+            // restore original signal callback to make sure that this callback
+            // cannot be called again (the Python object may be deleted by then)
+            lv_obj_set_signal_cb(obj, py_obj->orig_signal_cb); 
             
             // remove reference to Python object
             (*lv_obj_get_user_data(obj)) = NULL;
@@ -87,7 +185,7 @@ static lv_res_t pylv_signal_cb(lv_obj_t * obj, lv_signal_t sign, void * param)
         }
 
     }
-    return py_obj->orig_signal_cb(obj, sign, param);
+    return orig_signal_cb(obj, sign, param);
 }
 
 int check_alive(pylv_Obj* obj) {
@@ -102,6 +200,8 @@ static void install_signal_cb(pylv_Obj * py_obj) {
     py_obj->orig_signal_cb = lv_obj_get_signal_func(py_obj->ref);       /*Save to old signal function*/
     lv_obj_set_signal_cb(py_obj->ref, pylv_signal_cb);
 }
+
+
 
 /* Given an lvgl lv_obj, return the accompanying Python object. If the 
  * accompanying object already exists, it is returned (with ref count increased).
@@ -166,7 +266,7 @@ static PyObject* struct_dict;
 static PyObject *pystruct_from_lv(void *c_struct) {
     PyObject *ret;
     PyObject *ptr;
-    ptr = PyLong_FromVoidPtr(c_struct);
+    ptr = PtrObject_fromptr(c_struct);
     if (!ptr) return NULL;
     
     ret = PyDict_GetItem(struct_dict, ptr);
@@ -175,7 +275,7 @@ static PyObject *pystruct_from_lv(void *c_struct) {
     if (ret) {
         Py_INCREF(ret); // ret is a borrowed reference; so need to increase ref count
     } else {
-        PyErr_SetString(PyExc_RuntimeError, "the returned c struct is unknown to Python");
+        PyErr_SetString(PyExc_RuntimeError, "the returned C struct is unknown to Python");
     }
     return ret;
 }
@@ -232,6 +332,7 @@ error:
 }
 
 
+
 /****************************************************************
  * Custom types: structs                                        *  
  ****************************************************************/
@@ -269,34 +370,49 @@ static PyBufferProcs Struct_bufferprocs = {
     NULL,
 };
 
+// Register a Struct object in the global struct_dict dictionary, such that if
+// a C function returns a pointer to the C struct, the associated Python object
+// can be returned
+//
+// Also, if lvgl takes or releases a reference to a C struct, a reference to the
+// associated Python object should be taken resp. freed. This requires all
+// C structure pointers to be referrable to Python objects
+//
+// returns 0 on success, -1 on error with exception set
+static int Struct_register(StructObject *obj) {
+    PyObject *ptr_pyobj;
+    ptr_pyobj = PtrObject_fromptr(obj->data);
+
+    if (!ptr_pyobj) return -1;
+    
+    if (PyDict_SetItem(struct_dict, ptr_pyobj, (PyObject*) obj)) { // todo: use weak references
+        Py_DECREF(ptr_pyobj);
+        return -1;
+    }
+
+    Py_DECREF(ptr_pyobj);
+    return 0;
+}
+
 // Helper to create struct object for global lvgl variables
 // This also adds those Python objects to struct_dict so that they can be
 // returned from object calls
 static PyObject *
 Struct_fromglobal(PyTypeObject *type, void* ptr, size_t size) {
     StructObject *ret = 0;
-    PyObject *ptr_long = 0;
+
     ret = (StructObject*)PyObject_New(StructObject, type);
     if (!ret) return NULL;
-
-    ptr_long = PyLong_FromVoidPtr(ptr);
-    
-    if (!ptr_long) {
-        Py_DECREF(ret);
-        return NULL;
-    }
-    
-    if (PyDict_SetItem(struct_dict, ptr_long, (PyObject*) ret)) { // todo: use weak references
-        Py_DECREF(ret);
-        Py_DECREF(ptr_long);
-        return NULL;
-    }
-
-    Py_DECREF(ptr_long);
 
     ret->owner = NULL; // owner = NULL means: global data, do not free
     ret->data = ptr;
     ret->size = size;
+    
+    if (Struct_register(ret)<0) {
+        Py_DECREF(ret);
+        return NULL;
+    }
+
 
     return (PyObject*)ret;
 
@@ -399,7 +515,10 @@ struct_set_struct(StructObject *self, PyObject *value, struct_closure_t *closure
         
         while (PyDict_Next(value, &pos, &dict_key, &dict_value)) {
             // Set the attribute on the attr attribute
-            if (PyObject_SetAttr(attr, dict_key, dict_value)) return -1;
+            if (PyObject_SetAttr(attr, dict_key, dict_value)) {
+                Py_DECREF(attr);
+                return -1;
+            }
         }  
         
         Py_DECREF(attr);
@@ -439,6 +558,8 @@ pylv_{name}_init(StructObject *self, PyObject *args, PyObject *kwds)
     self->size = sizeof(lv_{name});
     self->data = PyMem_Malloc(self->size);
     if (!self->data) return -1;
+    
+    Struct_register(self);
     
     if (copy) {{
         assert(self->size == copy->size); // should be same size, since same type
@@ -683,9 +804,13 @@ pylv_list_focus(pylv_List *self, PyObject *args, PyObject *kwds)
  ****************************************************************/
 
 <<<objects:
+    
 static void
 pylv_{name}_dealloc(pylv_{pyname} *self) 
 {{
+
+    PySys_FormatStdout("DELETING %R\n", self);
+ 
     // the accompanying lv_obj holds a reference to the Python object, so
     // dealloc can only take place if the lv_obj has already been deleted using
     // Obj.del_() or .clean() on ints parents. 
@@ -735,7 +860,6 @@ static PyTypeObject pylv_{name}_Type = {{
     .tp_init = (initproc) pylv_{name}_init,
     .tp_dealloc = (destructor) pylv_{name}_dealloc,
     .tp_methods = pylv_{name}_methods,
-    .tp_dictoffset = offsetof(pylv_{pyname}, dict),
     .tp_weaklistoffset = offsetof(pylv_{pyname}, weakreflist),
 }};
 >>>
@@ -883,6 +1007,10 @@ PyInit_lvgl(void) {
     if (!module) goto error;
     
     pylv_obj_Type.tp_repr = (reprfunc) Obj_repr;   
+    
+    if (PyType_Ready(&Ptr_Type) < 0) return NULL;
+    PyModule_AddObject(module, "ptr1", PtrObject_fromptr((void*) 4592));
+    PyModule_AddObject(module, "ptr2", PtrObject_fromptr((void*) 4592));
     
 <<<objects:
     pylv_{name}_Type.tp_base = {base};
