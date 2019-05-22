@@ -3,7 +3,8 @@ import os
 import shutil
 import glob
 
-sys.argv = ['setup.py', 'build']
+if len(sys.argv)<=1:
+    sys.argv = ['setup.py', 'build']
 
 from distutils.core import setup, Extension
 
