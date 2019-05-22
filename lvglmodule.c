@@ -9413,8 +9413,6 @@ static void
 pylv_obj_dealloc(pylv_Obj *self) 
 {
 
-    PySys_FormatStdout("DELETING %R\n", self);
- 
     // the accompanying lv_obj holds a reference to the Python object, so
     // dealloc can only take place if the lv_obj has already been deleted using
     // Obj.del_() or .clean() on ints parents. 
@@ -10297,8 +10295,6 @@ static void
 pylv_cont_dealloc(pylv_Cont *self) 
 {
 
-    PySys_FormatStdout("DELETING %R\n", self);
- 
     // the accompanying lv_obj holds a reference to the Python object, so
     // dealloc can only take place if the lv_obj has already been deleted using
     // Obj.del_() or .clean() on ints parents. 
@@ -10469,8 +10465,6 @@ static void
 pylv_btn_dealloc(pylv_Btn *self) 
 {
 
-    PySys_FormatStdout("DELETING %R\n", self);
- 
     // the accompanying lv_obj holds a reference to the Python object, so
     // dealloc can only take place if the lv_obj has already been deleted using
     // Obj.del_() or .clean() on ints parents. 
@@ -10718,8 +10712,6 @@ static void
 pylv_imgbtn_dealloc(pylv_Imgbtn *self) 
 {
 
-    PySys_FormatStdout("DELETING %R\n", self);
- 
     // the accompanying lv_obj holds a reference to the Python object, so
     // dealloc can only take place if the lv_obj has already been deleted using
     // Obj.del_() or .clean() on ints parents. 
@@ -10824,8 +10816,6 @@ static void
 pylv_label_dealloc(pylv_Label *self) 
 {
 
-    PySys_FormatStdout("DELETING %R\n", self);
- 
     // the accompanying lv_obj holds a reference to the Python object, so
     // dealloc can only take place if the lv_obj has already been deleted using
     // Obj.del_() or .clean() on ints parents. 
@@ -11122,8 +11112,6 @@ static void
 pylv_img_dealloc(pylv_Img *self) 
 {
 
-    PySys_FormatStdout("DELETING %R\n", self);
- 
     // the accompanying lv_obj holds a reference to the Python object, so
     // dealloc can only take place if the lv_obj has already been deleted using
     // Obj.del_() or .clean() on ints parents. 
@@ -11358,8 +11346,6 @@ static void
 pylv_line_dealloc(pylv_Line *self) 
 {
 
-    PySys_FormatStdout("DELETING %R\n", self);
- 
     // the accompanying lv_obj holds a reference to the Python object, so
     // dealloc can only take place if the lv_obj has already been deleted using
     // Obj.del_() or .clean() on ints parents. 
@@ -11512,8 +11498,6 @@ static void
 pylv_page_dealloc(pylv_Page *self) 
 {
 
-    PySys_FormatStdout("DELETING %R\n", self);
- 
     // the accompanying lv_obj holds a reference to the Python object, so
     // dealloc can only take place if the lv_obj has already been deleted using
     // Obj.del_() or .clean() on ints parents. 
@@ -11994,8 +11978,6 @@ static void
 pylv_list_dealloc(pylv_List *self) 
 {
 
-    PySys_FormatStdout("DELETING %R\n", self);
- 
     // the accompanying lv_obj holds a reference to the Python object, so
     // dealloc can only take place if the lv_obj has already been deleted using
     // Obj.del_() or .clean() on ints parents. 
@@ -12341,8 +12323,6 @@ static void
 pylv_chart_dealloc(pylv_Chart *self) 
 {
 
-    PySys_FormatStdout("DELETING %R\n", self);
- 
     // the accompanying lv_obj holds a reference to the Python object, so
     // dealloc can only take place if the lv_obj has already been deleted using
     // Obj.del_() or .clean() on ints parents. 
@@ -12631,8 +12611,6 @@ static void
 pylv_table_dealloc(pylv_Table *self) 
 {
 
-    PySys_FormatStdout("DELETING %R\n", self);
- 
     // the accompanying lv_obj holds a reference to the Python object, so
     // dealloc can only take place if the lv_obj has already been deleted using
     // Obj.del_() or .clean() on ints parents. 
@@ -12975,8 +12953,6 @@ static void
 pylv_cb_dealloc(pylv_Cb *self) 
 {
 
-    PySys_FormatStdout("DELETING %R\n", self);
- 
     // the accompanying lv_obj holds a reference to the Python object, so
     // dealloc can only take place if the lv_obj has already been deleted using
     // Obj.del_() or .clean() on ints parents. 
@@ -13152,8 +13128,6 @@ static void
 pylv_bar_dealloc(pylv_Bar *self) 
 {
 
-    PySys_FormatStdout("DELETING %R\n", self);
- 
     // the accompanying lv_obj holds a reference to the Python object, so
     // dealloc can only take place if the lv_obj has already been deleted using
     // Obj.del_() or .clean() on ints parents. 
@@ -13345,8 +13319,6 @@ static void
 pylv_slider_dealloc(pylv_Slider *self) 
 {
 
-    PySys_FormatStdout("DELETING %R\n", self);
- 
     // the accompanying lv_obj holds a reference to the Python object, so
     // dealloc can only take place if the lv_obj has already been deleted using
     // Obj.del_() or .clean() on ints parents. 
@@ -13492,8 +13464,6 @@ static void
 pylv_led_dealloc(pylv_Led *self) 
 {
 
-    PySys_FormatStdout("DELETING %R\n", self);
- 
     // the accompanying lv_obj holds a reference to the Python object, so
     // dealloc can only take place if the lv_obj has already been deleted using
     // Obj.del_() or .clean() on ints parents. 
@@ -13622,8 +13592,6 @@ static void
 pylv_btnm_dealloc(pylv_Btnm *self) 
 {
 
-    PySys_FormatStdout("DELETING %R\n", self);
- 
     // the accompanying lv_obj holds a reference to the Python object, so
     // dealloc can only take place if the lv_obj has already been deleted using
     // Obj.del_() or .clean() on ints parents. 
@@ -14043,8 +14011,6 @@ static void
 pylv_kb_dealloc(pylv_Kb *self) 
 {
 
-    PySys_FormatStdout("DELETING %R\n", self);
- 
     // the accompanying lv_obj holds a reference to the Python object, so
     // dealloc can only take place if the lv_obj has already been deleted using
     // Obj.del_() or .clean() on ints parents. 
@@ -14222,8 +14188,6 @@ static void
 pylv_ddlist_dealloc(pylv_Ddlist *self) 
 {
 
-    PySys_FormatStdout("DELETING %R\n", self);
- 
     // the accompanying lv_obj holds a reference to the Python object, so
     // dealloc can only take place if the lv_obj has already been deleted using
     // Obj.del_() or .clean() on ints parents. 
@@ -14561,8 +14525,6 @@ static void
 pylv_roller_dealloc(pylv_Roller *self) 
 {
 
-    PySys_FormatStdout("DELETING %R\n", self);
- 
     // the accompanying lv_obj holds a reference to the Python object, so
     // dealloc can only take place if the lv_obj has already been deleted using
     // Obj.del_() or .clean() on ints parents. 
@@ -14733,8 +14695,6 @@ static void
 pylv_ta_dealloc(pylv_Ta *self) 
 {
 
-    PySys_FormatStdout("DELETING %R\n", self);
- 
     // the accompanying lv_obj holds a reference to the Python object, so
     // dealloc can only take place if the lv_obj has already been deleted using
     // Obj.del_() or .clean() on ints parents. 
@@ -15200,8 +15160,6 @@ static void
 pylv_canvas_dealloc(pylv_Canvas *self) 
 {
 
-    PySys_FormatStdout("DELETING %R\n", self);
- 
     // the accompanying lv_obj holds a reference to the Python object, so
     // dealloc can only take place if the lv_obj has already been deleted using
     // Obj.del_() or .clean() on ints parents. 
@@ -15394,8 +15352,6 @@ static void
 pylv_win_dealloc(pylv_Win *self) 
 {
 
-    PySys_FormatStdout("DELETING %R\n", self);
- 
     // the accompanying lv_obj holds a reference to the Python object, so
     // dealloc can only take place if the lv_obj has already been deleted using
     // Obj.del_() or .clean() on ints parents. 
@@ -15737,8 +15693,6 @@ static void
 pylv_tabview_dealloc(pylv_Tabview *self) 
 {
 
-    PySys_FormatStdout("DELETING %R\n", self);
- 
     // the accompanying lv_obj holds a reference to the Python object, so
     // dealloc can only take place if the lv_obj has already been deleted using
     // Obj.del_() or .clean() on ints parents. 
@@ -16035,8 +15989,6 @@ static void
 pylv_tileview_dealloc(pylv_Tileview *self) 
 {
 
-    PySys_FormatStdout("DELETING %R\n", self);
- 
     // the accompanying lv_obj holds a reference to the Python object, so
     // dealloc can only take place if the lv_obj has already been deleted using
     // Obj.del_() or .clean() on ints parents. 
@@ -16165,8 +16117,6 @@ static void
 pylv_mbox_dealloc(pylv_Mbox *self) 
 {
 
-    PySys_FormatStdout("DELETING %R\n", self);
- 
     // the accompanying lv_obj holds a reference to the Python object, so
     // dealloc can only take place if the lv_obj has already been deleted using
     // Obj.del_() or .clean() on ints parents. 
@@ -16423,8 +16373,6 @@ static void
 pylv_lmeter_dealloc(pylv_Lmeter *self) 
 {
 
-    PySys_FormatStdout("DELETING %R\n", self);
- 
     // the accompanying lv_obj holds a reference to the Python object, so
     // dealloc can only take place if the lv_obj has already been deleted using
     // Obj.del_() or .clean() on ints parents. 
@@ -16599,8 +16547,6 @@ static void
 pylv_gauge_dealloc(pylv_Gauge *self) 
 {
 
-    PySys_FormatStdout("DELETING %R\n", self);
- 
     // the accompanying lv_obj holds a reference to the Python object, so
     // dealloc can only take place if the lv_obj has already been deleted using
     // Obj.del_() or .clean() on ints parents. 
@@ -16771,8 +16717,6 @@ static void
 pylv_sw_dealloc(pylv_Sw *self) 
 {
 
-    PySys_FormatStdout("DELETING %R\n", self);
- 
     // the accompanying lv_obj holds a reference to the Python object, so
     // dealloc can only take place if the lv_obj has already been deleted using
     // Obj.del_() or .clean() on ints parents. 
@@ -16949,8 +16893,6 @@ static void
 pylv_arc_dealloc(pylv_Arc *self) 
 {
 
-    PySys_FormatStdout("DELETING %R\n", self);
- 
     // the accompanying lv_obj holds a reference to the Python object, so
     // dealloc can only take place if the lv_obj has already been deleted using
     // Obj.del_() or .clean() on ints parents. 
@@ -17083,8 +17025,6 @@ static void
 pylv_preload_dealloc(pylv_Preload *self) 
 {
 
-    PySys_FormatStdout("DELETING %R\n", self);
- 
     // the accompanying lv_obj holds a reference to the Python object, so
     // dealloc can only take place if the lv_obj has already been deleted using
     // Obj.del_() or .clean() on ints parents. 
@@ -17260,8 +17200,6 @@ static void
 pylv_spinbox_dealloc(pylv_Spinbox *self) 
 {
 
-    PySys_FormatStdout("DELETING %R\n", self);
- 
     // the accompanying lv_obj holds a reference to the Python object, so
     // dealloc can only take place if the lv_obj has already been deleted using
     // Obj.del_() or .clean() on ints parents. 

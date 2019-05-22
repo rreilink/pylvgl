@@ -809,8 +809,6 @@ static void
 pylv_{name}_dealloc(pylv_{pyname} *self) 
 {{
 
-    PySys_FormatStdout("DELETING %R\n", self);
- 
     // the accompanying lv_obj holds a reference to the Python object, so
     // dealloc can only take place if the lv_obj has already been deleted using
     // Obj.del_() or .clean() on ints parents. 
