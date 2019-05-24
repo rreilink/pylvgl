@@ -33,11 +33,12 @@ class PythonObject(Object):
         'uint16_t':  ('H', 'unsigned short int'), 
         'int16_t':   ('h', 'short int'),
         'uint32_t':  ('I', 'unsigned int'),
-        'int32_t':  ('I', 'int'),
+        'int32_t':   ('I', 'int'),
+        'int':       ('I', 'int'),
         }
     # TODO: from structs!
 
-    TYPECONV.update({'lv_style_t*':     ('O&', 'lv_style_t *')})
+    TYPECONV.update({'const lv_style_t*':     ('O&', 'lv_style_t *')})
 
     TYPECONV_PARAMETER = TYPECONV.copy()
     TYPECONV_PARAMETER.update({'const lv_obj_t*': ('O!', 'pylv_Obj *')})
@@ -467,9 +468,14 @@ class PythonBindingsGenerator(BindingsGenerator):
         '''
         while True:
             typedef = self.parseresult.typedefs.get(typestr)
-            if not typedef or not isinstance(typedef.type.type, c_ast.IdentifierType):
-                return typestr
-            typestr = type_repr(typedef.type)
+            if typedef:
+                if isinstance(typedef.type.type, c_ast.IdentifierType):
+                    typestr = type_repr(typedef.type)
+                    continue # Continue dereferencing
+                if isinstance(typedef.type.type, c_ast.Enum):
+                    return 'int' # Enum is represented by an int
+            
+            return typestr
     
            
     def get_ENUM_ASSIGNMENTS(self):

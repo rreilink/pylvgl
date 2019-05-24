@@ -143,7 +143,7 @@ class LvglSourceParser:
         
         # Find defines in color.h and symbol_def.h
         defines = collections.OrderedDict() # There is not OrderedSet in Python, so let's use OrderedDict with None values
-        for filename in 'lv_misc/lv_color.h', 'lv_misc/lv_symbol_def.h':
+        for filename in 'src/lv_misc/lv_color.h', 'src/lv_misc/lv_symbol_def.h':
             with open(os.path.join(path, filename), 'rt', encoding='utf-8') as file:
                 code = file.read()
                 for define in re.findall('^\s*#define\s+(\w+)', code,flags = re.MULTILINE):
