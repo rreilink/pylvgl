@@ -164,7 +164,7 @@ void lv_set_lock_unlock( void (*flock)(void *), void * flock_arg,
  */
 static lv_res_t pylv_signal_cb(lv_obj_t * obj, lv_signal_t sign, void * param)
 {
-    pylv_Obj* py_obj = (pylv_Obj*)(*lv_obj_get_user_data(obj));
+    pylv_Obj* py_obj = (pylv_Obj*)(*lv_obj_get_user_data_ptr(obj));
     
     // store a reference to the original signal callback, since during the
     // CLEANUP signal, py_obj may get deallocated and then this reference is gone
@@ -180,7 +180,7 @@ static lv_res_t pylv_signal_cb(lv_obj_t * obj, lv_signal_t sign, void * param)
             lv_obj_set_signal_cb(obj, py_obj->orig_signal_cb); 
             
             // remove reference to Python object
-            (*lv_obj_get_user_data(obj)) = NULL;
+            (*lv_obj_get_user_data_ptr(obj)) = NULL;
             Py_DECREF(py_obj); 
         }
 
@@ -197,7 +197,7 @@ int check_alive(pylv_Obj* obj) {
 }
 
 static void install_signal_cb(pylv_Obj * py_obj) {
-    py_obj->orig_signal_cb = lv_obj_get_signal_func(py_obj->ref);       /*Save to old signal function*/
+    py_obj->orig_signal_cb = lv_obj_get_signal_cb(py_obj->ref);       /*Save to old signal function*/
     lv_obj_set_signal_cb(py_obj->ref, pylv_signal_cb);
 }
 
@@ -222,7 +222,7 @@ PyObject * pyobj_from_lv(lv_obj_t *obj) {
         Py_RETURN_NONE;
     }
     
-    pyobj = *lv_obj_get_user_data(obj);
+    pyobj = *lv_obj_get_user_data_ptr(obj);
     
     if (!pyobj) {
         // Python object for this lv object does not yet exist. Create a new one
@@ -240,7 +240,7 @@ PyObject * pyobj_from_lv(lv_obj_t *obj) {
         memset(pyobj, 0, tp->tp_basicsize);
         PyObject_Init((PyObject *)pyobj, tp);
         pyobj -> ref = obj;
-        *lv_obj_get_user_data(obj) = pyobj;
+        *lv_obj_get_user_data_ptr(obj) = pyobj;
         install_signal_cb(pyobj);
         // reference count for pyobj is 1 -- the reference stored in the lvgl object user_data
     }
@@ -481,7 +481,7 @@ struct_get_struct(StructObject *self, struct_closure_t *closure) {
     ret = (StructObject*)PyObject_New(StructObject, closure->type);
     if (ret) {
         ret->owner = self->owner;
-        Py_INCREF(self->owner);
+        if (self->owner) Py_INCREF(self->owner); // owner could be NULL if data is C global
         ret->data = self->data + closure->offset;
         ret->size = closure->size;
     }
@@ -833,7 +833,7 @@ pylv_{name}_init(pylv_{pyname} *self, PyObject *args, PyObject *kwds)
     
     LVGL_LOCK
     self->ref = lv_{name}_create(parent ? parent->ref : NULL, copy ? copy->ref : NULL);
-    *lv_obj_get_user_data(self->ref) = self;
+    *lv_obj_get_user_data_ptr(self->ref) = self;
     Py_INCREF(self); // since reference is stored in lv_obj user data
     install_signal_cb(self);
     LVGL_UNLOCK

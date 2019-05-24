@@ -159,7 +159,7 @@ py{method.decl.name}(pylv_Obj *self, PyObject *args, PyObject *kwds)
         elif resfmt == 'O&':
             code += f'''
     LVGL_LOCK        
-    {resctype} result = {callcode};
+    {restype} result = {callcode};
     LVGL_UNLOCK
     return pystruct_from_lv(result);            
 '''
@@ -167,7 +167,7 @@ py{method.decl.name}(pylv_Obj *self, PyObject *args, PyObject *kwds)
         else:
             code += f'''
     LVGL_LOCK        
-    {resctype} result = {callcode};
+    {restype} result = {callcode};
     LVGL_UNLOCK
 '''
             if resfmt == 'p': # Py_BuildValue does not support 'p' (which is supported by PyArg_ParseTuple..)

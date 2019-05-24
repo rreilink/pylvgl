@@ -65,7 +65,10 @@ style = lvgl.style_t(lvgl.style_plain)
 style.body.main_color = {'full' : 0xffff}
 style.body.grad_color = {'full' : 0xffff}
 style.text.color = {'full': 0}
-style.body.padding.ver = 0
+style.body.padding.top = 0
+style.body.padding.bottom = 0
+style.body.padding.inner = 0
+
 
 for st in [lvgl.LIST_STYLE.BTN_PR, lvgl.LIST_STYLE.BTN_REL, lvgl.LIST_STYLE.BTN_TGL_PR, lvgl.LIST_STYLE.BTN_TGL_REL]:
     lst.set_style(st, lvgl.style_plain)
