@@ -39,8 +39,7 @@ typedef struct {
     PyObject_HEAD
     PyObject *weakreflist;
     lv_obj_t *ref;
-    PyObject *event;
-    lv_event_cb_t orig_c_event_cb;
+    PyObject *event_cb;
     lv_signal_cb_t orig_signal_cb;
 } pylv_Obj;
 
@@ -10133,6 +10132,7 @@ static PyTypeObject pylv_ta_ext_t_cursor_Type = {
 static PyObject*
 pylv_obj_get_children(pylv_Obj *self, PyObject *args, PyObject *kwds)
 {
+    if (check_alive(self)) return NULL;
     lv_obj_t *child = NULL;
     PyObject *pychild;
     PyObject *ret = PyList_New(0);
@@ -10162,6 +10162,7 @@ pylv_obj_get_children(pylv_Obj *self, PyObject *args, PyObject *kwds)
 static PyObject*
 pylv_obj_get_type(pylv_Obj *self, PyObject *args, PyObject *kwds)
 {
+    if (check_alive(self)) return NULL;
     lv_obj_type_t result;
     PyObject *list = NULL;
     PyObject *str = NULL;
@@ -10189,11 +10190,45 @@ error:
     return NULL;
 }
 
+void pylv_event_cb(lv_obj_t *obj, lv_event_t event) {
+    pylv_Obj *self = (PyObject *)*lv_obj_get_user_data_ptr(obj);
+    assert(self && self->event_cb);
+    
+    PyObject *result = PyObject_CallFunction(self->event_cb, "I", event);
+    
+    if (result) {
+        Py_DECREF(result);
+    } else {
+        PyErr_Print();
+        PyErr_Clear();
+    }
+    
+}
 
+static PyObject *
+pylv_obj_set_event_cb(pylv_Obj *self, PyObject *args, PyObject *kwds) {
+    if (check_alive(self)) return NULL;
+    static char *kwlist[] = {"event_cb", NULL};
+    PyObject *callback, *old_callback;
+    if (!PyArg_ParseTupleAndKeywords(args, kwds, "O", kwlist, &callback)) return NULL;
+    
+    old_callback = self->event_cb;
+    self->event_cb = callback;
+    Py_INCREF(callback);
+    Py_XDECREF(old_callback);
+    
+    LVGL_LOCK
+    lv_obj_set_event_cb(self->ref, pylv_event_cb);
+    LVGL_UNLOCK
+    
+    
+    Py_RETURN_NONE;
+}
 
 static PyObject*
 pylv_label_get_letter_pos(pylv_Label *self, PyObject *args, PyObject *kwds)
 {
+    if (check_alive(self)) return NULL;
     static char *kwlist[] = {"index", NULL};
     int index;
     lv_point_t pos;
@@ -10209,6 +10244,7 @@ pylv_label_get_letter_pos(pylv_Label *self, PyObject *args, PyObject *kwds)
 static PyObject*
 pylv_label_get_letter_on(pylv_Label *self, PyObject *args, PyObject *kwds)
 {
+    if (check_alive(self)) return NULL;
     static char *kwlist[] = {"pos", NULL};
     int x, y, index;
     lv_point_t pos;
@@ -10230,6 +10266,7 @@ pylv_label_get_letter_on(pylv_Label *self, PyObject *args, PyObject *kwds)
 static PyObject*
 pylv_list_add(pylv_List *self, PyObject *args, PyObject *kwds)
 {
+    if (check_alive(self)) return NULL;
     static char *kwlist[] = {"img_src", "txt", "rel_action", NULL};
     PyObject *img_src;
     const char *txt;
@@ -10256,6 +10293,7 @@ pylv_list_add(pylv_List *self, PyObject *args, PyObject *kwds)
 static PyObject*
 pylv_list_focus(pylv_List *self, PyObject *args, PyObject *kwds)
 {
+    if (check_alive(self)) return NULL;
     static char *kwlist[] = {"obj", "anim_en", NULL};
     pylv_Btn * obj;
     lv_obj_t *parent;
@@ -10762,13 +10800,6 @@ pylv_obj_clear_protect(pylv_Obj *self, PyObject *args, PyObject *kwds)
 }
 
 static PyObject*
-pylv_obj_set_event_cb(pylv_Obj *self, PyObject *args, PyObject *kwds)
-{
-    PyErr_SetString(PyExc_NotImplementedError, "not implemented: lv_obj_set_event_cb: Parameter type not found >lv_event_cb_t< ");
-    return NULL;
-}
-
-static PyObject*
 pylv_obj_set_signal_cb(pylv_Obj *self, PyObject *args, PyObject *kwds)
 {
     PyErr_SetString(PyExc_NotImplementedError, "not implemented: lv_obj_set_signal_cb: Parameter type not found >lv_signal_cb_t< ");
@@ -11031,7 +11062,7 @@ pylv_obj_get_style(pylv_Obj *self, PyObject *args, PyObject *kwds)
     LVGL_LOCK        
     const lv_style_t* result = lv_obj_get_style(self->ref);
     LVGL_UNLOCK
-    return pystruct_from_lv(result);            
+    return pystruct_from_lv((void *)result);            
 }
 
 static PyObject*
@@ -11279,7 +11310,7 @@ static PyMethodDef pylv_obj_methods[] = {
     {"set_opa_scale", (PyCFunction) pylv_obj_set_opa_scale, METH_VARARGS | METH_KEYWORDS, "void lv_obj_set_opa_scale(lv_obj_t *obj, lv_opa_t opa_scale)"},
     {"set_protect", (PyCFunction) pylv_obj_set_protect, METH_VARARGS | METH_KEYWORDS, "void lv_obj_set_protect(lv_obj_t *obj, uint8_t prot)"},
     {"clear_protect", (PyCFunction) pylv_obj_clear_protect, METH_VARARGS | METH_KEYWORDS, "void lv_obj_clear_protect(lv_obj_t *obj, uint8_t prot)"},
-    {"set_event_cb", (PyCFunction) pylv_obj_set_event_cb, METH_VARARGS | METH_KEYWORDS, "void lv_obj_set_event_cb(lv_obj_t *obj, lv_event_cb_t event_cb)"},
+    {"set_event_cb", (PyCFunction) pylv_obj_set_event_cb, METH_VARARGS | METH_KEYWORDS, ""},
     {"set_signal_cb", (PyCFunction) pylv_obj_set_signal_cb, METH_VARARGS | METH_KEYWORDS, "void lv_obj_set_signal_cb(lv_obj_t *obj, lv_signal_cb_t signal_cb)"},
     {"set_design_cb", (PyCFunction) pylv_obj_set_design_cb, METH_VARARGS | METH_KEYWORDS, "void lv_obj_set_design_cb(lv_obj_t *obj, lv_design_cb_t design_cb)"},
     {"refresh_ext_draw_pad", (PyCFunction) pylv_obj_refresh_ext_draw_pad, METH_VARARGS | METH_KEYWORDS, "void lv_obj_refresh_ext_draw_pad(lv_obj_t *obj)"},
@@ -11743,7 +11774,7 @@ pylv_btn_get_style(pylv_Obj *self, PyObject *args, PyObject *kwds)
     LVGL_LOCK        
     const lv_style_t* result = lv_btn_get_style(self->ref, type);
     LVGL_UNLOCK
-    return pystruct_from_lv(result);            
+    return pystruct_from_lv((void *)result);            
 }
 
 
@@ -11856,7 +11887,7 @@ pylv_imgbtn_get_style(pylv_Obj *self, PyObject *args, PyObject *kwds)
     LVGL_LOCK        
     const lv_style_t* result = lv_imgbtn_get_style(self->ref, type);
     LVGL_UNLOCK
-    return pystruct_from_lv(result);            
+    return pystruct_from_lv((void *)result);            
 }
 
 
@@ -13035,7 +13066,7 @@ pylv_page_get_style(pylv_Obj *self, PyObject *args, PyObject *kwds)
     LVGL_LOCK        
     const lv_style_t* result = lv_page_get_style(self->ref, type);
     LVGL_UNLOCK
-    return pystruct_from_lv(result);            
+    return pystruct_from_lv((void *)result);            
 }
 
 static PyObject*
@@ -13450,7 +13481,7 @@ pylv_list_get_style(pylv_Obj *self, PyObject *args, PyObject *kwds)
     LVGL_LOCK        
     const lv_style_t* result = lv_list_get_style(self->ref, type);
     LVGL_UNLOCK
-    return pystruct_from_lv(result);            
+    return pystruct_from_lv((void *)result);            
 }
 
 static PyObject*
@@ -14191,7 +14222,7 @@ pylv_table_get_style(pylv_Obj *self, PyObject *args, PyObject *kwds)
     LVGL_LOCK        
     const lv_style_t* result = lv_table_get_style(self->ref, type);
     LVGL_UNLOCK
-    return pystruct_from_lv(result);            
+    return pystruct_from_lv((void *)result);            
 }
 
 
@@ -14376,7 +14407,7 @@ pylv_cb_get_style(pylv_Obj *self, PyObject *args, PyObject *kwds)
     LVGL_LOCK        
     const lv_style_t* result = lv_cb_get_style(self->ref, type);
     LVGL_UNLOCK
-    return pystruct_from_lv(result);            
+    return pystruct_from_lv((void *)result);            
 }
 
 
@@ -14566,7 +14597,7 @@ pylv_bar_get_style(pylv_Obj *self, PyObject *args, PyObject *kwds)
     LVGL_LOCK        
     const lv_style_t* result = lv_bar_get_style(self->ref, type);
     LVGL_UNLOCK
-    return pystruct_from_lv(result);            
+    return pystruct_from_lv((void *)result);            
 }
 
 
@@ -14714,7 +14745,7 @@ pylv_slider_get_style(pylv_Obj *self, PyObject *args, PyObject *kwds)
     LVGL_LOCK        
     const lv_style_t* result = lv_slider_get_style(self->ref, type);
     LVGL_UNLOCK
-    return pystruct_from_lv(result);            
+    return pystruct_from_lv((void *)result);            
 }
 
 
@@ -15138,7 +15169,7 @@ pylv_btnm_get_style(pylv_Obj *self, PyObject *args, PyObject *kwds)
     LVGL_LOCK        
     const lv_style_t* result = lv_btnm_get_style(self->ref, type);
     LVGL_UNLOCK
-    return pystruct_from_lv(result);            
+    return pystruct_from_lv((void *)result);            
 }
 
 static PyObject*
@@ -15338,7 +15369,7 @@ pylv_kb_get_style(pylv_Obj *self, PyObject *args, PyObject *kwds)
     LVGL_LOCK        
     const lv_style_t* result = lv_kb_get_style(self->ref, type);
     LVGL_UNLOCK
-    return pystruct_from_lv(result);            
+    return pystruct_from_lv((void *)result);            
 }
 
 static PyObject*
@@ -15644,7 +15675,7 @@ pylv_ddlist_get_style(pylv_Obj *self, PyObject *args, PyObject *kwds)
     LVGL_LOCK        
     const lv_style_t* result = lv_ddlist_get_style(self->ref, type);
     LVGL_UNLOCK
-    return pystruct_from_lv(result);            
+    return pystruct_from_lv((void *)result);            
 }
 
 static PyObject*
@@ -15888,7 +15919,7 @@ pylv_roller_get_style(pylv_Obj *self, PyObject *args, PyObject *kwds)
     LVGL_LOCK        
     const lv_style_t* result = lv_roller_get_style(self->ref, type);
     LVGL_UNLOCK
-    return pystruct_from_lv(result);            
+    return pystruct_from_lv((void *)result);            
 }
 
 
@@ -16310,7 +16341,7 @@ pylv_ta_get_style(pylv_Obj *self, PyObject *args, PyObject *kwds)
     LVGL_LOCK        
     const lv_style_t* result = lv_ta_get_style(self->ref, type);
     LVGL_UNLOCK
-    return pystruct_from_lv(result);            
+    return pystruct_from_lv((void *)result);            
 }
 
 static PyObject*
@@ -16548,7 +16579,7 @@ pylv_canvas_get_style(pylv_Obj *self, PyObject *args, PyObject *kwds)
     LVGL_LOCK        
     const lv_style_t* result = lv_canvas_get_style(self->ref, type);
     LVGL_UNLOCK
-    return pystruct_from_lv(result);            
+    return pystruct_from_lv((void *)result);            
 }
 
 static PyObject*
@@ -16927,7 +16958,7 @@ pylv_win_get_style(pylv_Obj *self, PyObject *args, PyObject *kwds)
     LVGL_LOCK        
     const lv_style_t* result = lv_win_get_style(self->ref, type);
     LVGL_UNLOCK
-    return pystruct_from_lv(result);            
+    return pystruct_from_lv((void *)result);            
 }
 
 static PyObject*
@@ -17244,7 +17275,7 @@ pylv_tabview_get_style(pylv_Obj *self, PyObject *args, PyObject *kwds)
     LVGL_LOCK        
     const lv_style_t* result = lv_tabview_get_style(self->ref, type);
     LVGL_UNLOCK
-    return pystruct_from_lv(result);            
+    return pystruct_from_lv((void *)result);            
 }
 
 static PyObject*
@@ -17409,7 +17440,7 @@ pylv_tileview_get_style(pylv_Obj *self, PyObject *args, PyObject *kwds)
     LVGL_LOCK        
     const lv_style_t* result = lv_tileview_get_style(self->ref, type);
     LVGL_UNLOCK
-    return pystruct_from_lv(result);            
+    return pystruct_from_lv((void *)result);            
 }
 
 
@@ -17628,7 +17659,7 @@ pylv_mbox_get_style(pylv_Obj *self, PyObject *args, PyObject *kwds)
     LVGL_LOCK        
     const lv_style_t* result = lv_mbox_get_style(self->ref, type);
     LVGL_UNLOCK
-    return pystruct_from_lv(result);            
+    return pystruct_from_lv((void *)result);            
 }
 
 static PyObject*
@@ -18169,7 +18200,7 @@ pylv_sw_get_style(pylv_Obj *self, PyObject *args, PyObject *kwds)
     LVGL_LOCK        
     const lv_style_t* result = lv_sw_get_style(self->ref, type);
     LVGL_UNLOCK
-    return pystruct_from_lv(result);            
+    return pystruct_from_lv((void *)result);            
 }
 
 static PyObject*
@@ -18317,7 +18348,7 @@ pylv_arc_get_style(pylv_Obj *self, PyObject *args, PyObject *kwds)
     LVGL_LOCK        
     const lv_style_t* result = lv_arc_get_style(self->ref, type);
     LVGL_UNLOCK
-    return pystruct_from_lv(result);            
+    return pystruct_from_lv((void *)result);            
 }
 
 
@@ -18490,7 +18521,7 @@ pylv_preload_get_style(pylv_Obj *self, PyObject *args, PyObject *kwds)
     LVGL_LOCK        
     const lv_style_t* result = lv_preload_get_style(self->ref, type);
     LVGL_UNLOCK
-    return pystruct_from_lv(result);            
+    return pystruct_from_lv((void *)result);            
 }
 
 static PyObject*
@@ -18702,7 +18733,7 @@ pylv_calendar_get_style(pylv_Obj *self, PyObject *args, PyObject *kwds)
     LVGL_LOCK        
     const lv_style_t* result = lv_calendar_get_style(self->ref, type);
     LVGL_UNLOCK
-    return pystruct_from_lv(result);            
+    return pystruct_from_lv((void *)result);            
 }
 
 

@@ -133,13 +133,9 @@ s3 = MainMenu()
 
 s4 = lvgl.Obj()
 kb = lvgl.Kb(s4)
-lvgl.scr_load(s2)
+lvgl.scr_load(s3)
 
-# todo: support for event handlers
-# s3.btnPrint.set_action(lvgl.BTN_ACTION.CLICK, lambda: print('click'))
-# s3.btnPrint.set_action(lvgl.BTN_ACTION.PR, lambda: print('press'))
-# s3.btnPrint.set_action(lvgl.BTN_ACTION.LONG_PR, lambda: print('long press'))
-# s3.btnPrint.set_action(lvgl.BTN_ACTION.LONG_PR_REPEAT, lambda: print('long press repeat'))
+s3.btnPrint.set_event_cb(print)
 
 print(s3.btnPrint.get_type())
 

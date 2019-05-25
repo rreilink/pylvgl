@@ -652,6 +652,7 @@ static PyTypeObject pylv_{name}_Type = {{
 static PyObject*
 pylv_obj_get_children(pylv_Obj *self, PyObject *args, PyObject *kwds)
 {
+    if (check_alive(self)) return NULL;
     lv_obj_t *child = NULL;
     PyObject *pychild;
     PyObject *ret = PyList_New(0);
@@ -681,6 +682,7 @@ pylv_obj_get_children(pylv_Obj *self, PyObject *args, PyObject *kwds)
 static PyObject*
 pylv_obj_get_type(pylv_Obj *self, PyObject *args, PyObject *kwds)
 {
+    if (check_alive(self)) return NULL;
     lv_obj_type_t result;
     PyObject *list = NULL;
     PyObject *str = NULL;
@@ -708,11 +710,45 @@ error:
     return NULL;
 }
 
+void pylv_event_cb(lv_obj_t *obj, lv_event_t event) {
+    pylv_Obj *self = (PyObject *)*lv_obj_get_user_data_ptr(obj);
+    assert(self && self->event_cb);
+    
+    PyObject *result = PyObject_CallFunction(self->event_cb, "I", event);
+    
+    if (result) {
+        Py_DECREF(result);
+    } else {
+        PyErr_Print();
+        PyErr_Clear();
+    }
+    
+}
 
+static PyObject *
+pylv_obj_set_event_cb(pylv_Obj *self, PyObject *args, PyObject *kwds) {
+    if (check_alive(self)) return NULL;
+    static char *kwlist[] = {"event_cb", NULL};
+    PyObject *callback, *old_callback;
+    if (!PyArg_ParseTupleAndKeywords(args, kwds, "O", kwlist, &callback)) return NULL;
+    
+    old_callback = self->event_cb;
+    self->event_cb = callback;
+    Py_INCREF(callback);
+    Py_XDECREF(old_callback);
+    
+    LVGL_LOCK
+    lv_obj_set_event_cb(self->ref, pylv_event_cb);
+    LVGL_UNLOCK
+    
+    
+    Py_RETURN_NONE;
+}
 
 static PyObject*
 pylv_label_get_letter_pos(pylv_Label *self, PyObject *args, PyObject *kwds)
 {
+    if (check_alive(self)) return NULL;
     static char *kwlist[] = {"index", NULL};
     int index;
     lv_point_t pos;
@@ -728,6 +764,7 @@ pylv_label_get_letter_pos(pylv_Label *self, PyObject *args, PyObject *kwds)
 static PyObject*
 pylv_label_get_letter_on(pylv_Label *self, PyObject *args, PyObject *kwds)
 {
+    if (check_alive(self)) return NULL;
     static char *kwlist[] = {"pos", NULL};
     int x, y, index;
     lv_point_t pos;
@@ -749,6 +786,7 @@ pylv_label_get_letter_on(pylv_Label *self, PyObject *args, PyObject *kwds)
 static PyObject*
 pylv_list_add(pylv_List *self, PyObject *args, PyObject *kwds)
 {
+    if (check_alive(self)) return NULL;
     static char *kwlist[] = {"img_src", "txt", "rel_action", NULL};
     PyObject *img_src;
     const char *txt;
@@ -775,6 +813,7 @@ pylv_list_add(pylv_List *self, PyObject *args, PyObject *kwds)
 static PyObject*
 pylv_list_focus(pylv_List *self, PyObject *args, PyObject *kwds)
 {
+    if (check_alive(self)) return NULL;
     static char *kwlist[] = {"obj", "anim_en", NULL};
     pylv_Btn * obj;
     lv_obj_t *parent;

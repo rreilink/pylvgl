@@ -161,8 +161,8 @@ py{method.decl.name}(pylv_Obj *self, PyObject *args, PyObject *kwds)
     LVGL_LOCK        
     {restype} result = {callcode};
     LVGL_UNLOCK
-    return pystruct_from_lv(result);            
-'''
+    return pystruct_from_lv((void *)result);            
+''' # TODO: the (void *) cast should be removed, and pystruct_from_lv should return a read-only struct when the data is unknown to Python
 
         else:
             code += f'''
@@ -440,9 +440,9 @@ class PythonBindingsGenerator(BindingsGenerator):
         
         
         objects = self.objects
-        objects['obj'].customstructfields.extend(['PyObject_HEAD', 'PyObject *weakreflist;', 'lv_obj_t *ref;', 'PyObject *event;', 'lv_event_cb_t orig_c_event_cb;', 'lv_signal_cb_t orig_signal_cb;'])
+        objects['obj'].customstructfields.extend(['PyObject_HEAD', 'PyObject *weakreflist;', 'lv_obj_t *ref;', 'PyObject *event_cb;', 'lv_signal_cb_t orig_signal_cb;'])
 
-        for custom in ('lv_obj_get_children', 'lv_label_get_letter_pos', 'lv_label_get_letter_on', 'lv_list_add' ,'lv_obj_get_type', 'lv_list_focus'):
+        for custom in ('lv_obj_get_children', 'lv_obj_set_event_cb', 'lv_label_get_letter_pos', 'lv_label_get_letter_on', 'lv_list_add' ,'lv_obj_get_type', 'lv_list_focus'):
             
             obj, method = re.match('lv_([A-Za-z0-9]+)_(\w+)$', custom).groups()
             objects[obj].methods[method] = CustomMethod(custom)
