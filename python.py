@@ -57,8 +57,7 @@ class PythonObject(Object):
             self.base = '&pylv_' + self.ancestor.name + '_Type'
 
     def get_structfields(self, recurse = False):
-        actionfields = [f'PyObject *{action};' for action in self.get_std_actions()]
-        myfields = actionfields + self.customstructfields
+        myfields = self.customstructfields
         
         if not myfields and not recurse:
             return []
@@ -179,35 +178,6 @@ py{method.decl.name}(pylv_Obj *self, PyObject *args, PyObject *kwds)
         
         return code + '}\n';
 
-    def build_actioncallbackcode(self, action, attrname):
-        obj = self
-        return f'''
-lv_res_t pylv_{obj.name}_{action}_callback(lv_obj_t* obj) {{
-    pylv_{obj.pyname} *pyobj;
-    PyObject *handler;
-    PyGILState_STATE gstate;
-
-    gstate = PyGILState_Ensure();
-    
-    pyobj = lv_obj_get_free_ptr(obj);
-    if (pyobj) {{
-        handler = pyobj->{attrname};
-        if (handler) {{
-            if (unlock) unlock(unlock_arg); 
-            PyObject_CallFunctionObjArgs(handler, NULL);
-            if (PyErr_Occurred()) PyErr_Print();
-            
-            PyGILState_Release(gstate);
-            if (lock) lock(lock_arg); 
-            return LV_RES_OK;
-
-        }}
-
-    }}
-    PyGILState_Release(gstate);
-    return LV_RES_OK;
-}}
-'''
 
     @property
     def pyname(self): # The name of the class in Python lv_obj --> Obj
@@ -229,56 +199,13 @@ lv_res_t pylv_{obj.name}_{action}_callback(lv_obj_t* obj) {{
     def methodscode(self):
         # Method definitions for the object methods (see also _methodcode function)
         code = ''
-        actiongetset = set()
-        for action in self.get_std_actions():
-            actiongetset.add(self.lv_name + '_get_' + action)
-            actiongetset.add(self.lv_name + '_set_' + action)
-            code += self.build_actioncallbackcode(action, action)
-            code += f'''
-
-static PyObject *
-pylv_{self.name}_get_{action}(pylv_{self.pyname} *self, PyObject *args, PyObject *kwds)
-{{
-    static char *kwlist[] = {{NULL}};
-    if (!PyArg_ParseTupleAndKeywords(args, kwds, "", kwlist)) return NULL;   
-    
-    PyObject *action = self->{action};
-    if (!action) Py_RETURN_NONE;
-
-    Py_INCREF(action);
-    return action;
-}}
-
-static PyObject *
-pylv_{self.name}_set_{action}(pylv_{self.pyname} *self, PyObject *args, PyObject *kwds)
-{{
-    static char *kwlist[] = {{"action", NULL}};
-    PyObject *action, *tmp;
-    if (!PyArg_ParseTupleAndKeywords(args, kwds, "O", kwlist , &action)) return NULL;
-    
-    tmp = self->{action};
-    if (action == Py_None) {{
-        self->{action} = NULL;
-    }} else {{
-        self->{action} = action;
-        Py_INCREF(action);
-        lv_{self.name}_set_{action}(self->ref, pylv_{self.name}_{action}_callback);
-    }}
-    Py_XDECREF(tmp); // Old action (tmp) could be NULL
-
-    Py_RETURN_NONE;
-}}
-
-            
-'''
             
         for method in self.methods.values():
-            if method.decl.name not in actiongetset:
-                try:
-                    code += self.build_methodcode(method)
-                except MissingConversionException as e:
-                    print(e)
-                    code += f'''
+            try:
+                code += self.build_methodcode(method)
+            except MissingConversionException as e:
+                print(e)
+                code += f'''
 static PyObject*
 py{method.decl.name}(pylv_Obj *self, PyObject *args, PyObject *kwds)
 {{
@@ -450,9 +377,7 @@ class PythonBindingsGenerator(BindingsGenerator):
         for function in skipfunctions:
             obj, method = re.match('lv_([A-Za-z0-9]+)_(\w+)$', function).groups()
             del objects[obj].methods[method]
-    
-        self.request_enum('lv_btn_action_t') # This enum is used in the custom implementation in Btn.set_action/get_action
-    
+        
     @property
     def struct_inttypes(self):
         
