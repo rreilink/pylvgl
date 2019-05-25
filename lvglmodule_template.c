@@ -281,18 +281,23 @@ static PyObject *pystruct_from_lv(const void *c_struct) {
 
 
 /****************************************************************
- * Custom types: enums                                          *  
+ * Custom types: constclass                                     *  
  ****************************************************************/
 
-static PyType_Slot enum_slots[] = {
+static PyType_Slot constclass_slots[] = {
     {0, 0},
 };
 
-/* Create a new class which represents an enumeration
- * variadic arguments are char* name, int value, ... , NULL
+/* Create a new class which represents a set of constants
+ * Used for C enum constants, symbols and colors
+ *
+ * variadic arguments are char* name, <type> value, ... , NULL
  * representing the enum values
+ *
+ * dtype: 'd' for integers, 's' for strings
+ *
  */
-static PyObject* build_enum(char *name, ...) {
+static PyObject* build_constclass(char dtype, char *name, ...) {
 
     va_list args;
     va_start(args, name);
@@ -302,30 +307,41 @@ static PyObject* build_enum(char *name, ...) {
         .basicsize = sizeof(PyObject),
         .itemsize = 0,
         .flags = Py_TPFLAGS_DEFAULT,
-        .slots = enum_slots /* terminated by slot==0. */
+        .slots = constclass_slots /* terminated by slot==0. */
     };
     
-    PyObject *enum_type = PyType_FromSpec(&spec);
-    if (!enum_type) return NULL;
+    PyObject *constclass_type = PyType_FromSpec(&spec);
+    if (!constclass_type) return NULL;
     
-    ((PyTypeObject*)enum_type)->tp_new = NULL; // enum objects cannot be instantiated
+    ((PyTypeObject*)constclass_type)->tp_new = NULL; // objects cannot be instantiated
     
     while(1) {
         char *name = va_arg(args, char*);
         if (!name) break;
         
-        PyObject *value;
-        value = PyLong_FromLong(va_arg(args, int));
+        PyObject *value=NULL;
+        
+        switch(dtype) {
+            case 'd':
+                value = PyLong_FromLong(va_arg(args, int));
+                break;
+            case 's':
+                value = PyUnicode_FromString(va_arg(args, char *));
+                break;
+            default:
+                assert(0);
+        }
+        
         if (!value) goto error;
         
-        PyObject_SetAttrString(enum_type, name, value);
+        PyObject_SetAttrString(constclass_type, name, value);
         Py_DECREF(value);
     }
 
-    return enum_type;
+    return constclass_type;
 
 error:
-    Py_DECREF(enum_type);
+    Py_DECREF(constclass_type);
     return NULL;
 
 }

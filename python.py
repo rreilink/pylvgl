@@ -409,15 +409,16 @@ class PythonBindingsGenerator(BindingsGenerator):
         for enumname, enum in self.parseresult.enums.items():
 
             items = ''.join(f', "{name}", {value}' for name, value in enum.items())
-            ret += f'    PyModule_AddObject(module, "{enumname}", build_enum("{enumname}"{items}, NULL));\n'
+            ret += f'    PyModule_AddObject(module, "{enumname}", build_constclass(\'d\', "{enumname}"{items}, NULL));\n'
         return ret
 
     def get_SYMBOL_ASSIGNMENTS(self):
-        return ''.join(
-            f'    PyModule_AddStringMacro(module, {name});\n'
-            for name in self.parseresult.defines
-            if name.startswith('SYMBOL_')
-            )
+        
+        skip = {'LV_SYMBOL_DEF_H', 'LV_SYMBOL_GLYPH_FIRST', 'LV_SYMBOL_GLYPH_LAST'}
+        
+        items = ''.join(f', "{name[10:]}", {name}' for name in self.parseresult.defines if name.startswith('LV_SYMBOL_') and name not in skip)
+        return f'    PyModule_AddObject(module, "SYMBOL", build_constclass(\'s\', "SYMBOL"{items}, NULL));\n'
+
             
     def get_GLOBALS_ASSIGNMENTS(self):
         code = ''

@@ -98,22 +98,22 @@ class SymbolButton(lvgl.Btn):
 class MainMenu(lvgl.Obj):
     def __init__(self, *args, **kwds):
         super().__init__(*args, **kwds)
-        self.btnPrint = SymbolButton(lvgl.SYMBOL_PLAY, 'Print', self)
+        self.btnPrint = SymbolButton(lvgl.SYMBOL.PLAY, 'Print', self)
         self.btnPrint.set_x(0)
         self.btnPrint.set_y(0)
         self.btnPrint.set_width(160)
         self.btnPrint.set_height(90)
-        self.btnChange = SymbolButton(lvgl.SYMBOL_SHUFFLE, 'Change filament', self)
+        self.btnChange = SymbolButton(lvgl.SYMBOL.SHUFFLE, 'Change filament', self)
         self.btnChange.set_x(160)
         self.btnChange.set_y(0)
         self.btnChange.set_width(160)
         self.btnChange.set_height(90)
-        self.btnPreheat = SymbolButton(lvgl.SYMBOL_CHARGE, 'Preheat', self)
+        self.btnPreheat = SymbolButton(lvgl.SYMBOL.CHARGE, 'Preheat', self)
         self.btnPreheat.set_x(0)
         self.btnPreheat.set_y(90)
         self.btnPreheat.set_width(160)
         self.btnPreheat.set_height(90)
-        self.btnSettings = SymbolButton(lvgl.SYMBOL_SETTINGS, 'Settings', self)
+        self.btnSettings = SymbolButton(lvgl.SYMBOL.SETTINGS, 'Settings', self)
         self.btnSettings.set_x(160)
         self.btnSettings.set_y(90)
         self.btnSettings.set_width(160)
@@ -122,13 +122,7 @@ class MainMenu(lvgl.Obj):
         self.lblStatus.set_text('\uf026 heating')
         self.lblStatus.align(self, lvgl.ALIGN.IN_BOTTOM_LEFT, 5, -5)
         
-# TODO: replace this
-lvgl.SYMBOL_PLAY = '\uf812'
-lvgl.SYMBOL_SHUFFLE = '\uf81c'
-lvgl.SYMBOL_CHARGE = '\uf826'
-lvgl.SYMBOL_SETTINGS = '\uf806'
 
-        
 s3 = MainMenu()
 
 s4 = lvgl.Obj()
