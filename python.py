@@ -9,6 +9,8 @@ skipfunctions = {
     
     # user_data is used to store reference to Python objects, don't tamper with that!
     'lv_obj_get_user_data',
+    'lv_obj_set_user_data',
+    'lv_obj_get_user_data_ptr',
     
     # Just use Python attributes for custom properties of objects
     'lv_obj_allocate_ext_attr',
@@ -160,9 +162,8 @@ py{method.decl.name}(pylv_Obj *self, PyObject *args, PyObject *kwds)
     LVGL_LOCK        
     {restype} result = {callcode};
     LVGL_UNLOCK
-    return pystruct_from_lv((void *)result);            
-''' # TODO: the (void *) cast should be removed, and pystruct_from_lv should return a read-only struct when the data is unknown to Python
-
+    return pystruct_from_lv(result);            
+'''
         else:
             code += f'''
     LVGL_LOCK        

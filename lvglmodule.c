@@ -434,14 +434,13 @@ static PyTypeObject pylv_ta_ext_t_cursor_Type;
  ****************************************************************/
 typedef struct {
     PyObject_HEAD
-    void *ptr;
+    const void *ptr;
 } PtrObject;
 static PyTypeObject Ptr_Type;
 
 static PyObject* Ptr_repr(PyObject *self) {
-    void *value = ((PtrObject *)self)->ptr;
     return PyUnicode_FromFormat("<%s object at %p = %p>",
-                                self->ob_type->tp_name, self, value);
+                        self->ob_type->tp_name, self, ((PtrObject *)self)->ptr);
 }
 
 Py_hash_t Ptr_hash(PtrObject *self) {
@@ -487,7 +486,7 @@ static PyTypeObject Ptr_Type = {
     .tp_richcompare = (richcmpfunc) Ptr_richcompare,
 };
 
-PyObject *PtrObject_fromptr(void *ptr) {
+PyObject *PtrObject_fromptr(const void *ptr) {
     PtrObject *ob = PyObject_New(PtrObject, &Ptr_Type);
     if (ob) ob->ptr = ptr;
     return (PyObject*) ob;
@@ -637,7 +636,7 @@ PyObject * pyobj_from_lv(lv_obj_t *obj) {
  
 static PyObject* struct_dict;
 
-static PyObject *pystruct_from_lv(void *c_struct) {
+static PyObject *pystruct_from_lv(const void *c_struct) {
     PyObject *ret;
     PyObject *ptr;
     ptr = PtrObject_fromptr(c_struct);
@@ -715,12 +714,13 @@ typedef struct {
     void *data;
     size_t size;
     PyObject *owner; // NULL = reference to global C data, self=allocated @ init, other object=sharing from that object; decref owner when we are deallocated
+    bool readonly;
 } StructObject;
 
 
 static PyObject*
 Struct_repr(StructObject *self) {
-    return PyUnicode_FromFormat("<%s struct at %p data = %p (%d bytes) owner = %p>", Py_TYPE(self)->tp_name, self, self->data, self->size, self->owner);
+    return PyUnicode_FromFormat("<%s struct at %p %sdata = %p (%d bytes) owner = %p>", Py_TYPE(self)->tp_name, self, (self->readonly? "(readonly) " : ""), self->data, self->size, self->owner);
 }
 
 static void
@@ -736,7 +736,8 @@ Struct_dealloc(StructObject *self)
 
 // Provide a read-write buffer to the binary data in this struct
 static int Struct_getbuffer(PyObject *exporter, Py_buffer *view, int flags) {
-    return PyBuffer_FillInfo(view, exporter, ((StructObject*)exporter)->data, ((StructObject*)exporter)->size, 0, flags);
+    StructObject *self = (StructObject*)exporter;
+    return PyBuffer_FillInfo(view, exporter, self->data, self->size, self->readonly, flags);
 }
 
 static PyBufferProcs Struct_bufferprocs = {
@@ -772,15 +773,16 @@ static int Struct_register(StructObject *obj) {
 // This also adds those Python objects to struct_dict so that they can be
 // returned from object calls
 static PyObject *
-Struct_fromglobal(PyTypeObject *type, void* ptr, size_t size) {
+Struct_fromglobal(PyTypeObject *type, const void* ptr, size_t size) {
     StructObject *ret = 0;
 
     ret = (StructObject*)PyObject_New(StructObject, type);
     if (!ret) return NULL;
 
     ret->owner = NULL; // owner = NULL means: global data, do not free
-    ret->data = ptr;
+    ret->data = (void*)ptr; // cast const to non-const, but we set readonly to prevent writing
     ret->size = size;
+    ret->readonly = 1;
     
     if (Struct_register(ret)<0) {
         Py_DECREF(ret);
@@ -823,6 +825,16 @@ static int long_to_int(PyObject *value, long *v, long min, long max) {
     return 0;
 }   
 
+
+static int struct_check_readonly(StructObject *self) {
+    if (self->readonly) {
+        PyErr_SetString(PyExc_ValueError, "setting attribute on read-only struct");
+        return -1;
+    }
+    return 0;
+}
+
+
 /* struct member getter/setter for [u]int(8|16|32)_t */
 
 static PyObject *
@@ -835,6 +847,7 @@ static int
 struct_set_uint8(StructObject *self, PyObject *value, void *closure)
 {
     long v;
+    if (struct_check_readonly(self)) return -1;
     if (long_to_int(value, &v, 0, 255)) return -1;
     
     *((uint8_t*)((char*)self->data + (int)closure) ) = v;
@@ -851,6 +864,7 @@ static int
 struct_set_uint16(StructObject *self, PyObject *value, void *closure)
 {
     long v;
+    if (struct_check_readonly(self)) return -1;
     if (long_to_int(value, &v, 0, 65535)) return -1;
     
     *((uint16_t*)((char*)self->data + (int)closure) ) = v;
@@ -867,6 +881,7 @@ static int
 struct_set_uint32(StructObject *self, PyObject *value, void *closure)
 {
     long v;
+    if (struct_check_readonly(self)) return -1;
     if (long_to_int(value, &v, 0, 4294967295)) return -1;
     
     *((uint32_t*)((char*)self->data + (int)closure) ) = v;
@@ -883,6 +898,7 @@ static int
 struct_set_int8(StructObject *self, PyObject *value, void *closure)
 {
     long v;
+    if (struct_check_readonly(self)) return -1;
     if (long_to_int(value, &v, -128, 127)) return -1;
     
     *((int8_t*)((char*)self->data + (int)closure) ) = v;
@@ -899,6 +915,7 @@ static int
 struct_set_int16(StructObject *self, PyObject *value, void *closure)
 {
     long v;
+    if (struct_check_readonly(self)) return -1;
     if (long_to_int(value, &v, -32768, 32767)) return -1;
     
     *((int16_t*)((char*)self->data + (int)closure) ) = v;
@@ -915,6 +932,7 @@ static int
 struct_set_int32(StructObject *self, PyObject *value, void *closure)
 {
     long v;
+    if (struct_check_readonly(self)) return -1;
     if (long_to_int(value, &v, -2147483648, 2147483647)) return -1;
     
     *((int32_t*)((char*)self->data + (int)closure) ) = v;
@@ -938,6 +956,7 @@ struct_get_struct(StructObject *self, struct_closure_t *closure) {
         if (self->owner) Py_INCREF(self->owner); // owner could be NULL if data is C global
         ret->data = self->data + closure->offset;
         ret->size = closure->size;
+        ret->readonly = self->readonly;
     }
     return (PyObject*)ret;
 
@@ -947,7 +966,7 @@ struct_get_struct(StructObject *self, struct_closure_t *closure) {
 /* Generic setter for atrributes which are a struct
  *
  * Setting can be via either an object of the same type, or via a dict,
- * which is passed as a keyword argument dict to a constructor of the struct
+ * which could be passed as a keyword argument dict to a constructor of the struct
  * for the appropriate type
  *
  * NOTE: if setting items via a dict fails, some items may have been set already
@@ -956,6 +975,10 @@ static int
 struct_set_struct(StructObject *self, PyObject *value, struct_closure_t *closure) {
 
     PyObject *attr = NULL;
+    
+    if (struct_check_readonly(self)) return -1;
+
+    
     if (PyDict_Check(value)) {
         // Set attribute sub-items from dictionary items
     
@@ -983,7 +1006,7 @@ struct_set_struct(StructObject *self, PyObject *value, struct_closure_t *closure
     
     int isinstance = PyObject_IsInstance(value, (PyObject *)closure->type);
     
-    if (isinstance == -1) return -1; // error
+    if (isinstance == -1) return -1; // error in PyObject_IsInstance
     if (!isinstance) {
         PyErr_Format(PyExc_TypeError, "value should be an instance of '%s' or a dict", closure->type->tp_name);
         return -1;
@@ -999,19 +1022,17 @@ struct_set_struct(StructObject *self, PyObject *value, struct_closure_t *closure
 }
 
 
-
-
-
 static int
-pylv_mem_monitor_t_init(StructObject *self, PyObject *args, PyObject *kwds) 
+struct_init(StructObject *self, PyObject *args, PyObject *kwds, PyTypeObject *type, size_t size) 
 {
     StructObject *copy = NULL;
     // copy is a positional-only argument
-    if (!PyArg_ParseTuple(args, "|O!", &pylv_mem_monitor_t_Type, &copy)) return -1;
+    if (!PyArg_ParseTuple(args, "|O!", type, &copy)) return -1;
     
-    self->size = sizeof(lv_mem_monitor_t);
-    self->data = PyMem_Malloc(self->size);
+    self->size = size;
+    self->data = PyMem_Malloc(size);
     if (!self->data) return -1;
+    self->readonly = 0;
     
     Struct_register(self);
     
@@ -1035,6 +1056,13 @@ pylv_mem_monitor_t_init(StructObject *self, PyObject *args, PyObject *kwds)
     }
 
     return 0;
+}
+
+
+static int
+pylv_mem_monitor_t_init(StructObject *self, PyObject *args, PyObject *kwds) 
+{
+    return struct_init(self, args, kwds, &pylv_mem_monitor_t_Type, sizeof(lv_mem_monitor_t));
 }
 
 static PyGetSetDef pylv_mem_monitor_t_getset[] = {
@@ -1086,36 +1114,7 @@ static int pylv_mem_monitor_t_arg_converter(PyObject *obj, void* target) {
 static int
 pylv_ll_t_init(StructObject *self, PyObject *args, PyObject *kwds) 
 {
-    StructObject *copy = NULL;
-    // copy is a positional-only argument
-    if (!PyArg_ParseTuple(args, "|O!", &pylv_ll_t_Type, &copy)) return -1;
-    
-    self->size = sizeof(lv_ll_t);
-    self->data = PyMem_Malloc(self->size);
-    if (!self->data) return -1;
-    
-    Struct_register(self);
-    
-    if (copy) {
-        assert(self->size == copy->size); // should be same size, since same type
-        memcpy(self->data, copy->data, self->size);
-    } else {
-        memset(self->data, 0, self->size);
-    }
-    
-    self->owner = (PyObject *)self;
-
-    if (kwds) {
-        // all keyword arguments are attribute-assignments
-        PyObject *key, *value;
-        Py_ssize_t pos = 0;
-        
-        while (PyDict_Next(kwds, &pos, &key, &value)) {
-            if (PyObject_SetAttr((PyObject*)self, key, value)) return -1;
-        }   
-    }
-
-    return 0;
+    return struct_init(self, args, kwds, &pylv_ll_t_Type, sizeof(lv_ll_t));
 }
 
 static PyGetSetDef pylv_ll_t_getset[] = {
@@ -1163,36 +1162,7 @@ static int pylv_ll_t_arg_converter(PyObject *obj, void* target) {
 static int
 pylv_task_t_init(StructObject *self, PyObject *args, PyObject *kwds) 
 {
-    StructObject *copy = NULL;
-    // copy is a positional-only argument
-    if (!PyArg_ParseTuple(args, "|O!", &pylv_task_t_Type, &copy)) return -1;
-    
-    self->size = sizeof(lv_task_t);
-    self->data = PyMem_Malloc(self->size);
-    if (!self->data) return -1;
-    
-    Struct_register(self);
-    
-    if (copy) {
-        assert(self->size == copy->size); // should be same size, since same type
-        memcpy(self->data, copy->data, self->size);
-    } else {
-        memset(self->data, 0, self->size);
-    }
-    
-    self->owner = (PyObject *)self;
-
-    if (kwds) {
-        // all keyword arguments are attribute-assignments
-        PyObject *key, *value;
-        Py_ssize_t pos = 0;
-        
-        while (PyDict_Next(kwds, &pos, &key, &value)) {
-            if (PyObject_SetAttr((PyObject*)self, key, value)) return -1;
-        }   
-    }
-
-    return 0;
+    return struct_init(self, args, kwds, &pylv_task_t_Type, sizeof(lv_task_t));
 }
 
 
@@ -1277,36 +1247,7 @@ static int pylv_task_t_arg_converter(PyObject *obj, void* target) {
 static int
 pylv_color1_t_init(StructObject *self, PyObject *args, PyObject *kwds) 
 {
-    StructObject *copy = NULL;
-    // copy is a positional-only argument
-    if (!PyArg_ParseTuple(args, "|O!", &pylv_color1_t_Type, &copy)) return -1;
-    
-    self->size = sizeof(lv_color1_t);
-    self->data = PyMem_Malloc(self->size);
-    if (!self->data) return -1;
-    
-    Struct_register(self);
-    
-    if (copy) {
-        assert(self->size == copy->size); // should be same size, since same type
-        memcpy(self->data, copy->data, self->size);
-    } else {
-        memset(self->data, 0, self->size);
-    }
-    
-    self->owner = (PyObject *)self;
-
-    if (kwds) {
-        // all keyword arguments are attribute-assignments
-        PyObject *key, *value;
-        Py_ssize_t pos = 0;
-        
-        while (PyDict_Next(kwds, &pos, &key, &value)) {
-            if (PyObject_SetAttr((PyObject*)self, key, value)) return -1;
-        }   
-    }
-
-    return 0;
+    return struct_init(self, args, kwds, &pylv_color1_t_Type, sizeof(lv_color1_t));
 }
 
 
@@ -1423,36 +1364,7 @@ static int pylv_color1_t_arg_converter(PyObject *obj, void* target) {
 static int
 pylv_color8_t_init(StructObject *self, PyObject *args, PyObject *kwds) 
 {
-    StructObject *copy = NULL;
-    // copy is a positional-only argument
-    if (!PyArg_ParseTuple(args, "|O!", &pylv_color8_t_Type, &copy)) return -1;
-    
-    self->size = sizeof(lv_color8_t);
-    self->data = PyMem_Malloc(self->size);
-    if (!self->data) return -1;
-    
-    Struct_register(self);
-    
-    if (copy) {
-        assert(self->size == copy->size); // should be same size, since same type
-        memcpy(self->data, copy->data, self->size);
-    } else {
-        memset(self->data, 0, self->size);
-    }
-    
-    self->owner = (PyObject *)self;
-
-    if (kwds) {
-        // all keyword arguments are attribute-assignments
-        PyObject *key, *value;
-        Py_ssize_t pos = 0;
-        
-        while (PyDict_Next(kwds, &pos, &key, &value)) {
-            if (PyObject_SetAttr((PyObject*)self, key, value)) return -1;
-        }   
-    }
-
-    return 0;
+    return struct_init(self, args, kwds, &pylv_color8_t_Type, sizeof(lv_color8_t));
 }
 
 static PyGetSetDef pylv_color8_t_getset[] = {
@@ -1499,36 +1411,7 @@ static int pylv_color8_t_arg_converter(PyObject *obj, void* target) {
 static int
 pylv_color16_t_init(StructObject *self, PyObject *args, PyObject *kwds) 
 {
-    StructObject *copy = NULL;
-    // copy is a positional-only argument
-    if (!PyArg_ParseTuple(args, "|O!", &pylv_color16_t_Type, &copy)) return -1;
-    
-    self->size = sizeof(lv_color16_t);
-    self->data = PyMem_Malloc(self->size);
-    if (!self->data) return -1;
-    
-    Struct_register(self);
-    
-    if (copy) {
-        assert(self->size == copy->size); // should be same size, since same type
-        memcpy(self->data, copy->data, self->size);
-    } else {
-        memset(self->data, 0, self->size);
-    }
-    
-    self->owner = (PyObject *)self;
-
-    if (kwds) {
-        // all keyword arguments are attribute-assignments
-        PyObject *key, *value;
-        Py_ssize_t pos = 0;
-        
-        while (PyDict_Next(kwds, &pos, &key, &value)) {
-            if (PyObject_SetAttr((PyObject*)self, key, value)) return -1;
-        }   
-    }
-
-    return 0;
+    return struct_init(self, args, kwds, &pylv_color16_t_Type, sizeof(lv_color16_t));
 }
 
 static PyGetSetDef pylv_color16_t_getset[] = {
@@ -1575,36 +1458,7 @@ static int pylv_color16_t_arg_converter(PyObject *obj, void* target) {
 static int
 pylv_color32_t_init(StructObject *self, PyObject *args, PyObject *kwds) 
 {
-    StructObject *copy = NULL;
-    // copy is a positional-only argument
-    if (!PyArg_ParseTuple(args, "|O!", &pylv_color32_t_Type, &copy)) return -1;
-    
-    self->size = sizeof(lv_color32_t);
-    self->data = PyMem_Malloc(self->size);
-    if (!self->data) return -1;
-    
-    Struct_register(self);
-    
-    if (copy) {
-        assert(self->size == copy->size); // should be same size, since same type
-        memcpy(self->data, copy->data, self->size);
-    } else {
-        memset(self->data, 0, self->size);
-    }
-    
-    self->owner = (PyObject *)self;
-
-    if (kwds) {
-        // all keyword arguments are attribute-assignments
-        PyObject *key, *value;
-        Py_ssize_t pos = 0;
-        
-        while (PyDict_Next(kwds, &pos, &key, &value)) {
-            if (PyObject_SetAttr((PyObject*)self, key, value)) return -1;
-        }   
-    }
-
-    return 0;
+    return struct_init(self, args, kwds, &pylv_color32_t_Type, sizeof(lv_color32_t));
 }
 
 static PyGetSetDef pylv_color32_t_getset[] = {
@@ -1651,36 +1505,7 @@ static int pylv_color32_t_arg_converter(PyObject *obj, void* target) {
 static int
 pylv_color_hsv_t_init(StructObject *self, PyObject *args, PyObject *kwds) 
 {
-    StructObject *copy = NULL;
-    // copy is a positional-only argument
-    if (!PyArg_ParseTuple(args, "|O!", &pylv_color_hsv_t_Type, &copy)) return -1;
-    
-    self->size = sizeof(lv_color_hsv_t);
-    self->data = PyMem_Malloc(self->size);
-    if (!self->data) return -1;
-    
-    Struct_register(self);
-    
-    if (copy) {
-        assert(self->size == copy->size); // should be same size, since same type
-        memcpy(self->data, copy->data, self->size);
-    } else {
-        memset(self->data, 0, self->size);
-    }
-    
-    self->owner = (PyObject *)self;
-
-    if (kwds) {
-        // all keyword arguments are attribute-assignments
-        PyObject *key, *value;
-        Py_ssize_t pos = 0;
-        
-        while (PyDict_Next(kwds, &pos, &key, &value)) {
-            if (PyObject_SetAttr((PyObject*)self, key, value)) return -1;
-        }   
-    }
-
-    return 0;
+    return struct_init(self, args, kwds, &pylv_color_hsv_t_Type, sizeof(lv_color_hsv_t));
 }
 
 static PyGetSetDef pylv_color_hsv_t_getset[] = {
@@ -1728,36 +1553,7 @@ static int pylv_color_hsv_t_arg_converter(PyObject *obj, void* target) {
 static int
 pylv_point_t_init(StructObject *self, PyObject *args, PyObject *kwds) 
 {
-    StructObject *copy = NULL;
-    // copy is a positional-only argument
-    if (!PyArg_ParseTuple(args, "|O!", &pylv_point_t_Type, &copy)) return -1;
-    
-    self->size = sizeof(lv_point_t);
-    self->data = PyMem_Malloc(self->size);
-    if (!self->data) return -1;
-    
-    Struct_register(self);
-    
-    if (copy) {
-        assert(self->size == copy->size); // should be same size, since same type
-        memcpy(self->data, copy->data, self->size);
-    } else {
-        memset(self->data, 0, self->size);
-    }
-    
-    self->owner = (PyObject *)self;
-
-    if (kwds) {
-        // all keyword arguments are attribute-assignments
-        PyObject *key, *value;
-        Py_ssize_t pos = 0;
-        
-        while (PyDict_Next(kwds, &pos, &key, &value)) {
-            if (PyObject_SetAttr((PyObject*)self, key, value)) return -1;
-        }   
-    }
-
-    return 0;
+    return struct_init(self, args, kwds, &pylv_point_t_Type, sizeof(lv_point_t));
 }
 
 static PyGetSetDef pylv_point_t_getset[] = {
@@ -1804,36 +1600,7 @@ static int pylv_point_t_arg_converter(PyObject *obj, void* target) {
 static int
 pylv_area_t_init(StructObject *self, PyObject *args, PyObject *kwds) 
 {
-    StructObject *copy = NULL;
-    // copy is a positional-only argument
-    if (!PyArg_ParseTuple(args, "|O!", &pylv_area_t_Type, &copy)) return -1;
-    
-    self->size = sizeof(lv_area_t);
-    self->data = PyMem_Malloc(self->size);
-    if (!self->data) return -1;
-    
-    Struct_register(self);
-    
-    if (copy) {
-        assert(self->size == copy->size); // should be same size, since same type
-        memcpy(self->data, copy->data, self->size);
-    } else {
-        memset(self->data, 0, self->size);
-    }
-    
-    self->owner = (PyObject *)self;
-
-    if (kwds) {
-        // all keyword arguments are attribute-assignments
-        PyObject *key, *value;
-        Py_ssize_t pos = 0;
-        
-        while (PyDict_Next(kwds, &pos, &key, &value)) {
-            if (PyObject_SetAttr((PyObject*)self, key, value)) return -1;
-        }   
-    }
-
-    return 0;
+    return struct_init(self, args, kwds, &pylv_area_t_Type, sizeof(lv_area_t));
 }
 
 static PyGetSetDef pylv_area_t_getset[] = {
@@ -1882,36 +1649,7 @@ static int pylv_area_t_arg_converter(PyObject *obj, void* target) {
 static int
 pylv_disp_buf_t_init(StructObject *self, PyObject *args, PyObject *kwds) 
 {
-    StructObject *copy = NULL;
-    // copy is a positional-only argument
-    if (!PyArg_ParseTuple(args, "|O!", &pylv_disp_buf_t_Type, &copy)) return -1;
-    
-    self->size = sizeof(lv_disp_buf_t);
-    self->data = PyMem_Malloc(self->size);
-    if (!self->data) return -1;
-    
-    Struct_register(self);
-    
-    if (copy) {
-        assert(self->size == copy->size); // should be same size, since same type
-        memcpy(self->data, copy->data, self->size);
-    } else {
-        memset(self->data, 0, self->size);
-    }
-    
-    self->owner = (PyObject *)self;
-
-    if (kwds) {
-        // all keyword arguments are attribute-assignments
-        PyObject *key, *value;
-        Py_ssize_t pos = 0;
-        
-        while (PyDict_Next(kwds, &pos, &key, &value)) {
-            if (PyObject_SetAttr((PyObject*)self, key, value)) return -1;
-        }   
-    }
-
-    return 0;
+    return struct_init(self, args, kwds, &pylv_disp_buf_t_Type, sizeof(lv_disp_buf_t));
 }
 
 
@@ -1979,36 +1717,7 @@ static int pylv_disp_buf_t_arg_converter(PyObject *obj, void* target) {
 static int
 pylv_disp_drv_t_init(StructObject *self, PyObject *args, PyObject *kwds) 
 {
-    StructObject *copy = NULL;
-    // copy is a positional-only argument
-    if (!PyArg_ParseTuple(args, "|O!", &pylv_disp_drv_t_Type, &copy)) return -1;
-    
-    self->size = sizeof(lv_disp_drv_t);
-    self->data = PyMem_Malloc(self->size);
-    if (!self->data) return -1;
-    
-    Struct_register(self);
-    
-    if (copy) {
-        assert(self->size == copy->size); // should be same size, since same type
-        memcpy(self->data, copy->data, self->size);
-    } else {
-        memset(self->data, 0, self->size);
-    }
-    
-    self->owner = (PyObject *)self;
-
-    if (kwds) {
-        // all keyword arguments are attribute-assignments
-        PyObject *key, *value;
-        Py_ssize_t pos = 0;
-        
-        while (PyDict_Next(kwds, &pos, &key, &value)) {
-            if (PyObject_SetAttr((PyObject*)self, key, value)) return -1;
-        }   
-    }
-
-    return 0;
+    return struct_init(self, args, kwds, &pylv_disp_drv_t_Type, sizeof(lv_disp_drv_t));
 }
 
 
@@ -2099,36 +1808,7 @@ static int pylv_disp_drv_t_arg_converter(PyObject *obj, void* target) {
 static int
 pylv_disp_t_init(StructObject *self, PyObject *args, PyObject *kwds) 
 {
-    StructObject *copy = NULL;
-    // copy is a positional-only argument
-    if (!PyArg_ParseTuple(args, "|O!", &pylv_disp_t_Type, &copy)) return -1;
-    
-    self->size = sizeof(lv_disp_t);
-    self->data = PyMem_Malloc(self->size);
-    if (!self->data) return -1;
-    
-    Struct_register(self);
-    
-    if (copy) {
-        assert(self->size == copy->size); // should be same size, since same type
-        memcpy(self->data, copy->data, self->size);
-    } else {
-        memset(self->data, 0, self->size);
-    }
-    
-    self->owner = (PyObject *)self;
-
-    if (kwds) {
-        // all keyword arguments are attribute-assignments
-        PyObject *key, *value;
-        Py_ssize_t pos = 0;
-        
-        while (PyDict_Next(kwds, &pos, &key, &value)) {
-            if (PyObject_SetAttr((PyObject*)self, key, value)) return -1;
-        }   
-    }
-
-    return 0;
+    return struct_init(self, args, kwds, &pylv_disp_t_Type, sizeof(lv_disp_t));
 }
 
 
@@ -2200,36 +1880,7 @@ static int pylv_disp_t_arg_converter(PyObject *obj, void* target) {
 static int
 pylv_indev_data_t_init(StructObject *self, PyObject *args, PyObject *kwds) 
 {
-    StructObject *copy = NULL;
-    // copy is a positional-only argument
-    if (!PyArg_ParseTuple(args, "|O!", &pylv_indev_data_t_Type, &copy)) return -1;
-    
-    self->size = sizeof(lv_indev_data_t);
-    self->data = PyMem_Malloc(self->size);
-    if (!self->data) return -1;
-    
-    Struct_register(self);
-    
-    if (copy) {
-        assert(self->size == copy->size); // should be same size, since same type
-        memcpy(self->data, copy->data, self->size);
-    } else {
-        memset(self->data, 0, self->size);
-    }
-    
-    self->owner = (PyObject *)self;
-
-    if (kwds) {
-        // all keyword arguments are attribute-assignments
-        PyObject *key, *value;
-        Py_ssize_t pos = 0;
-        
-        while (PyDict_Next(kwds, &pos, &key, &value)) {
-            if (PyObject_SetAttr((PyObject*)self, key, value)) return -1;
-        }   
-    }
-
-    return 0;
+    return struct_init(self, args, kwds, &pylv_indev_data_t_Type, sizeof(lv_indev_data_t));
 }
 
 static PyGetSetDef pylv_indev_data_t_getset[] = {
@@ -2279,36 +1930,7 @@ static int pylv_indev_data_t_arg_converter(PyObject *obj, void* target) {
 static int
 pylv_indev_drv_t_init(StructObject *self, PyObject *args, PyObject *kwds) 
 {
-    StructObject *copy = NULL;
-    // copy is a positional-only argument
-    if (!PyArg_ParseTuple(args, "|O!", &pylv_indev_drv_t_Type, &copy)) return -1;
-    
-    self->size = sizeof(lv_indev_drv_t);
-    self->data = PyMem_Malloc(self->size);
-    if (!self->data) return -1;
-    
-    Struct_register(self);
-    
-    if (copy) {
-        assert(self->size == copy->size); // should be same size, since same type
-        memcpy(self->data, copy->data, self->size);
-    } else {
-        memset(self->data, 0, self->size);
-    }
-    
-    self->owner = (PyObject *)self;
-
-    if (kwds) {
-        // all keyword arguments are attribute-assignments
-        PyObject *key, *value;
-        Py_ssize_t pos = 0;
-        
-        while (PyDict_Next(kwds, &pos, &key, &value)) {
-            if (PyObject_SetAttr((PyObject*)self, key, value)) return -1;
-        }   
-    }
-
-    return 0;
+    return struct_init(self, args, kwds, &pylv_indev_drv_t_Type, sizeof(lv_indev_drv_t));
 }
 
 static PyGetSetDef pylv_indev_drv_t_getset[] = {
@@ -2363,36 +1985,7 @@ static int pylv_indev_drv_t_arg_converter(PyObject *obj, void* target) {
 static int
 pylv_indev_proc_t_init(StructObject *self, PyObject *args, PyObject *kwds) 
 {
-    StructObject *copy = NULL;
-    // copy is a positional-only argument
-    if (!PyArg_ParseTuple(args, "|O!", &pylv_indev_proc_t_Type, &copy)) return -1;
-    
-    self->size = sizeof(lv_indev_proc_t);
-    self->data = PyMem_Malloc(self->size);
-    if (!self->data) return -1;
-    
-    Struct_register(self);
-    
-    if (copy) {
-        assert(self->size == copy->size); // should be same size, since same type
-        memcpy(self->data, copy->data, self->size);
-    } else {
-        memset(self->data, 0, self->size);
-    }
-    
-    self->owner = (PyObject *)self;
-
-    if (kwds) {
-        // all keyword arguments are attribute-assignments
-        PyObject *key, *value;
-        Py_ssize_t pos = 0;
-        
-        while (PyDict_Next(kwds, &pos, &key, &value)) {
-            if (PyObject_SetAttr((PyObject*)self, key, value)) return -1;
-        }   
-    }
-
-    return 0;
+    return struct_init(self, args, kwds, &pylv_indev_proc_t_Type, sizeof(lv_indev_proc_t));
 }
 
 
@@ -2513,36 +2106,7 @@ static int pylv_indev_proc_t_arg_converter(PyObject *obj, void* target) {
 static int
 pylv_indev_t_init(StructObject *self, PyObject *args, PyObject *kwds) 
 {
-    StructObject *copy = NULL;
-    // copy is a positional-only argument
-    if (!PyArg_ParseTuple(args, "|O!", &pylv_indev_t_Type, &copy)) return -1;
-    
-    self->size = sizeof(lv_indev_t);
-    self->data = PyMem_Malloc(self->size);
-    if (!self->data) return -1;
-    
-    Struct_register(self);
-    
-    if (copy) {
-        assert(self->size == copy->size); // should be same size, since same type
-        memcpy(self->data, copy->data, self->size);
-    } else {
-        memset(self->data, 0, self->size);
-    }
-    
-    self->owner = (PyObject *)self;
-
-    if (kwds) {
-        // all keyword arguments are attribute-assignments
-        PyObject *key, *value;
-        Py_ssize_t pos = 0;
-        
-        while (PyDict_Next(kwds, &pos, &key, &value)) {
-            if (PyObject_SetAttr((PyObject*)self, key, value)) return -1;
-        }   
-    }
-
-    return 0;
+    return struct_init(self, args, kwds, &pylv_indev_t_Type, sizeof(lv_indev_t));
 }
 
 static PyGetSetDef pylv_indev_t_getset[] = {
@@ -2592,36 +2156,7 @@ static int pylv_indev_t_arg_converter(PyObject *obj, void* target) {
 static int
 pylv_font_glyph_dsc_t_init(StructObject *self, PyObject *args, PyObject *kwds) 
 {
-    StructObject *copy = NULL;
-    // copy is a positional-only argument
-    if (!PyArg_ParseTuple(args, "|O!", &pylv_font_glyph_dsc_t_Type, &copy)) return -1;
-    
-    self->size = sizeof(lv_font_glyph_dsc_t);
-    self->data = PyMem_Malloc(self->size);
-    if (!self->data) return -1;
-    
-    Struct_register(self);
-    
-    if (copy) {
-        assert(self->size == copy->size); // should be same size, since same type
-        memcpy(self->data, copy->data, self->size);
-    } else {
-        memset(self->data, 0, self->size);
-    }
-    
-    self->owner = (PyObject *)self;
-
-    if (kwds) {
-        // all keyword arguments are attribute-assignments
-        PyObject *key, *value;
-        Py_ssize_t pos = 0;
-        
-        while (PyDict_Next(kwds, &pos, &key, &value)) {
-            if (PyObject_SetAttr((PyObject*)self, key, value)) return -1;
-        }   
-    }
-
-    return 0;
+    return struct_init(self, args, kwds, &pylv_font_glyph_dsc_t_Type, sizeof(lv_font_glyph_dsc_t));
 }
 
 
@@ -2702,36 +2237,7 @@ static int pylv_font_glyph_dsc_t_arg_converter(PyObject *obj, void* target) {
 static int
 pylv_font_unicode_map_t_init(StructObject *self, PyObject *args, PyObject *kwds) 
 {
-    StructObject *copy = NULL;
-    // copy is a positional-only argument
-    if (!PyArg_ParseTuple(args, "|O!", &pylv_font_unicode_map_t_Type, &copy)) return -1;
-    
-    self->size = sizeof(lv_font_unicode_map_t);
-    self->data = PyMem_Malloc(self->size);
-    if (!self->data) return -1;
-    
-    Struct_register(self);
-    
-    if (copy) {
-        assert(self->size == copy->size); // should be same size, since same type
-        memcpy(self->data, copy->data, self->size);
-    } else {
-        memset(self->data, 0, self->size);
-    }
-    
-    self->owner = (PyObject *)self;
-
-    if (kwds) {
-        // all keyword arguments are attribute-assignments
-        PyObject *key, *value;
-        Py_ssize_t pos = 0;
-        
-        while (PyDict_Next(kwds, &pos, &key, &value)) {
-            if (PyObject_SetAttr((PyObject*)self, key, value)) return -1;
-        }   
-    }
-
-    return 0;
+    return struct_init(self, args, kwds, &pylv_font_unicode_map_t_Type, sizeof(lv_font_unicode_map_t));
 }
 
 
@@ -2812,36 +2318,7 @@ static int pylv_font_unicode_map_t_arg_converter(PyObject *obj, void* target) {
 static int
 pylv_font_t_init(StructObject *self, PyObject *args, PyObject *kwds) 
 {
-    StructObject *copy = NULL;
-    // copy is a positional-only argument
-    if (!PyArg_ParseTuple(args, "|O!", &pylv_font_t_Type, &copy)) return -1;
-    
-    self->size = sizeof(lv_font_t);
-    self->data = PyMem_Malloc(self->size);
-    if (!self->data) return -1;
-    
-    Struct_register(self);
-    
-    if (copy) {
-        assert(self->size == copy->size); // should be same size, since same type
-        memcpy(self->data, copy->data, self->size);
-    } else {
-        memset(self->data, 0, self->size);
-    }
-    
-    self->owner = (PyObject *)self;
-
-    if (kwds) {
-        // all keyword arguments are attribute-assignments
-        PyObject *key, *value;
-        Py_ssize_t pos = 0;
-        
-        while (PyDict_Next(kwds, &pos, &key, &value)) {
-            if (PyObject_SetAttr((PyObject*)self, key, value)) return -1;
-        }   
-    }
-
-    return 0;
+    return struct_init(self, args, kwds, &pylv_font_t_Type, sizeof(lv_font_t));
 }
 
 
@@ -2949,36 +2426,7 @@ static int pylv_font_t_arg_converter(PyObject *obj, void* target) {
 static int
 pylv_anim_t_init(StructObject *self, PyObject *args, PyObject *kwds) 
 {
-    StructObject *copy = NULL;
-    // copy is a positional-only argument
-    if (!PyArg_ParseTuple(args, "|O!", &pylv_anim_t_Type, &copy)) return -1;
-    
-    self->size = sizeof(lv_anim_t);
-    self->data = PyMem_Malloc(self->size);
-    if (!self->data) return -1;
-    
-    Struct_register(self);
-    
-    if (copy) {
-        assert(self->size == copy->size); // should be same size, since same type
-        memcpy(self->data, copy->data, self->size);
-    } else {
-        memset(self->data, 0, self->size);
-    }
-    
-    self->owner = (PyObject *)self;
-
-    if (kwds) {
-        // all keyword arguments are attribute-assignments
-        PyObject *key, *value;
-        Py_ssize_t pos = 0;
-        
-        while (PyDict_Next(kwds, &pos, &key, &value)) {
-            if (PyObject_SetAttr((PyObject*)self, key, value)) return -1;
-        }   
-    }
-
-    return 0;
+    return struct_init(self, args, kwds, &pylv_anim_t_Type, sizeof(lv_anim_t));
 }
 
 
@@ -3106,36 +2554,7 @@ static int pylv_anim_t_arg_converter(PyObject *obj, void* target) {
 static int
 pylv_style_t_init(StructObject *self, PyObject *args, PyObject *kwds) 
 {
-    StructObject *copy = NULL;
-    // copy is a positional-only argument
-    if (!PyArg_ParseTuple(args, "|O!", &pylv_style_t_Type, &copy)) return -1;
-    
-    self->size = sizeof(lv_style_t);
-    self->data = PyMem_Malloc(self->size);
-    if (!self->data) return -1;
-    
-    Struct_register(self);
-    
-    if (copy) {
-        assert(self->size == copy->size); // should be same size, since same type
-        memcpy(self->data, copy->data, self->size);
-    } else {
-        memset(self->data, 0, self->size);
-    }
-    
-    self->owner = (PyObject *)self;
-
-    if (kwds) {
-        // all keyword arguments are attribute-assignments
-        PyObject *key, *value;
-        Py_ssize_t pos = 0;
-        
-        while (PyDict_Next(kwds, &pos, &key, &value)) {
-            if (PyObject_SetAttr((PyObject*)self, key, value)) return -1;
-        }   
-    }
-
-    return 0;
+    return struct_init(self, args, kwds, &pylv_style_t_Type, sizeof(lv_style_t));
 }
 
 
@@ -3202,36 +2621,7 @@ static int pylv_style_t_arg_converter(PyObject *obj, void* target) {
 static int
 pylv_style_anim_dsc_t_init(StructObject *self, PyObject *args, PyObject *kwds) 
 {
-    StructObject *copy = NULL;
-    // copy is a positional-only argument
-    if (!PyArg_ParseTuple(args, "|O!", &pylv_style_anim_dsc_t_Type, &copy)) return -1;
-    
-    self->size = sizeof(lv_style_anim_dsc_t);
-    self->data = PyMem_Malloc(self->size);
-    if (!self->data) return -1;
-    
-    Struct_register(self);
-    
-    if (copy) {
-        assert(self->size == copy->size); // should be same size, since same type
-        memcpy(self->data, copy->data, self->size);
-    } else {
-        memset(self->data, 0, self->size);
-    }
-    
-    self->owner = (PyObject *)self;
-
-    if (kwds) {
-        // all keyword arguments are attribute-assignments
-        PyObject *key, *value;
-        Py_ssize_t pos = 0;
-        
-        while (PyDict_Next(kwds, &pos, &key, &value)) {
-            if (PyObject_SetAttr((PyObject*)self, key, value)) return -1;
-        }   
-    }
-
-    return 0;
+    return struct_init(self, args, kwds, &pylv_style_anim_dsc_t_Type, sizeof(lv_style_anim_dsc_t));
 }
 
 static PyGetSetDef pylv_style_anim_dsc_t_getset[] = {
@@ -3280,36 +2670,7 @@ static int pylv_style_anim_dsc_t_arg_converter(PyObject *obj, void* target) {
 static int
 pylv_reailgn_t_init(StructObject *self, PyObject *args, PyObject *kwds) 
 {
-    StructObject *copy = NULL;
-    // copy is a positional-only argument
-    if (!PyArg_ParseTuple(args, "|O!", &pylv_reailgn_t_Type, &copy)) return -1;
-    
-    self->size = sizeof(lv_reailgn_t);
-    self->data = PyMem_Malloc(self->size);
-    if (!self->data) return -1;
-    
-    Struct_register(self);
-    
-    if (copy) {
-        assert(self->size == copy->size); // should be same size, since same type
-        memcpy(self->data, copy->data, self->size);
-    } else {
-        memset(self->data, 0, self->size);
-    }
-    
-    self->owner = (PyObject *)self;
-
-    if (kwds) {
-        // all keyword arguments are attribute-assignments
-        PyObject *key, *value;
-        Py_ssize_t pos = 0;
-        
-        while (PyDict_Next(kwds, &pos, &key, &value)) {
-            if (PyObject_SetAttr((PyObject*)self, key, value)) return -1;
-        }   
-    }
-
-    return 0;
+    return struct_init(self, args, kwds, &pylv_reailgn_t_Type, sizeof(lv_reailgn_t));
 }
 
 
@@ -3394,36 +2755,7 @@ static int pylv_reailgn_t_arg_converter(PyObject *obj, void* target) {
 static int
 pylv_obj_t_init(StructObject *self, PyObject *args, PyObject *kwds) 
 {
-    StructObject *copy = NULL;
-    // copy is a positional-only argument
-    if (!PyArg_ParseTuple(args, "|O!", &pylv_obj_t_Type, &copy)) return -1;
-    
-    self->size = sizeof(lv_obj_t);
-    self->data = PyMem_Malloc(self->size);
-    if (!self->data) return -1;
-    
-    Struct_register(self);
-    
-    if (copy) {
-        assert(self->size == copy->size); // should be same size, since same type
-        memcpy(self->data, copy->data, self->size);
-    } else {
-        memset(self->data, 0, self->size);
-    }
-    
-    self->owner = (PyObject *)self;
-
-    if (kwds) {
-        // all keyword arguments are attribute-assignments
-        PyObject *key, *value;
-        Py_ssize_t pos = 0;
-        
-        while (PyDict_Next(kwds, &pos, &key, &value)) {
-            if (PyObject_SetAttr((PyObject*)self, key, value)) return -1;
-        }   
-    }
-
-    return 0;
+    return struct_init(self, args, kwds, &pylv_obj_t_Type, sizeof(lv_obj_t));
 }
 
 
@@ -3662,36 +2994,7 @@ static int pylv_obj_t_arg_converter(PyObject *obj, void* target) {
 static int
 pylv_obj_type_t_init(StructObject *self, PyObject *args, PyObject *kwds) 
 {
-    StructObject *copy = NULL;
-    // copy is a positional-only argument
-    if (!PyArg_ParseTuple(args, "|O!", &pylv_obj_type_t_Type, &copy)) return -1;
-    
-    self->size = sizeof(lv_obj_type_t);
-    self->data = PyMem_Malloc(self->size);
-    if (!self->data) return -1;
-    
-    Struct_register(self);
-    
-    if (copy) {
-        assert(self->size == copy->size); // should be same size, since same type
-        memcpy(self->data, copy->data, self->size);
-    } else {
-        memset(self->data, 0, self->size);
-    }
-    
-    self->owner = (PyObject *)self;
-
-    if (kwds) {
-        // all keyword arguments are attribute-assignments
-        PyObject *key, *value;
-        Py_ssize_t pos = 0;
-        
-        while (PyDict_Next(kwds, &pos, &key, &value)) {
-            if (PyObject_SetAttr((PyObject*)self, key, value)) return -1;
-        }   
-    }
-
-    return 0;
+    return struct_init(self, args, kwds, &pylv_obj_type_t_Type, sizeof(lv_obj_type_t));
 }
 
 static PyGetSetDef pylv_obj_type_t_getset[] = {
@@ -3737,36 +3040,7 @@ static int pylv_obj_type_t_arg_converter(PyObject *obj, void* target) {
 static int
 pylv_group_t_init(StructObject *self, PyObject *args, PyObject *kwds) 
 {
-    StructObject *copy = NULL;
-    // copy is a positional-only argument
-    if (!PyArg_ParseTuple(args, "|O!", &pylv_group_t_Type, &copy)) return -1;
-    
-    self->size = sizeof(lv_group_t);
-    self->data = PyMem_Malloc(self->size);
-    if (!self->data) return -1;
-    
-    Struct_register(self);
-    
-    if (copy) {
-        assert(self->size == copy->size); // should be same size, since same type
-        memcpy(self->data, copy->data, self->size);
-    } else {
-        memset(self->data, 0, self->size);
-    }
-    
-    self->owner = (PyObject *)self;
-
-    if (kwds) {
-        // all keyword arguments are attribute-assignments
-        PyObject *key, *value;
-        Py_ssize_t pos = 0;
-        
-        while (PyDict_Next(kwds, &pos, &key, &value)) {
-            if (PyObject_SetAttr((PyObject*)self, key, value)) return -1;
-        }   
-    }
-
-    return 0;
+    return struct_init(self, args, kwds, &pylv_group_t_Type, sizeof(lv_group_t));
 }
 
 
@@ -3908,36 +3182,7 @@ static int pylv_group_t_arg_converter(PyObject *obj, void* target) {
 static int
 pylv_theme_t_init(StructObject *self, PyObject *args, PyObject *kwds) 
 {
-    StructObject *copy = NULL;
-    // copy is a positional-only argument
-    if (!PyArg_ParseTuple(args, "|O!", &pylv_theme_t_Type, &copy)) return -1;
-    
-    self->size = sizeof(lv_theme_t);
-    self->data = PyMem_Malloc(self->size);
-    if (!self->data) return -1;
-    
-    Struct_register(self);
-    
-    if (copy) {
-        assert(self->size == copy->size); // should be same size, since same type
-        memcpy(self->data, copy->data, self->size);
-    } else {
-        memset(self->data, 0, self->size);
-    }
-    
-    self->owner = (PyObject *)self;
-
-    if (kwds) {
-        // all keyword arguments are attribute-assignments
-        PyObject *key, *value;
-        Py_ssize_t pos = 0;
-        
-        while (PyDict_Next(kwds, &pos, &key, &value)) {
-            if (PyObject_SetAttr((PyObject*)self, key, value)) return -1;
-        }   
-    }
-
-    return 0;
+    return struct_init(self, args, kwds, &pylv_theme_t_Type, sizeof(lv_theme_t));
 }
 
 static PyGetSetDef pylv_theme_t_getset[] = {
@@ -3984,36 +3229,7 @@ static int pylv_theme_t_arg_converter(PyObject *obj, void* target) {
 static int
 pylv_cont_ext_t_init(StructObject *self, PyObject *args, PyObject *kwds) 
 {
-    StructObject *copy = NULL;
-    // copy is a positional-only argument
-    if (!PyArg_ParseTuple(args, "|O!", &pylv_cont_ext_t_Type, &copy)) return -1;
-    
-    self->size = sizeof(lv_cont_ext_t);
-    self->data = PyMem_Malloc(self->size);
-    if (!self->data) return -1;
-    
-    Struct_register(self);
-    
-    if (copy) {
-        assert(self->size == copy->size); // should be same size, since same type
-        memcpy(self->data, copy->data, self->size);
-    } else {
-        memset(self->data, 0, self->size);
-    }
-    
-    self->owner = (PyObject *)self;
-
-    if (kwds) {
-        // all keyword arguments are attribute-assignments
-        PyObject *key, *value;
-        Py_ssize_t pos = 0;
-        
-        while (PyDict_Next(kwds, &pos, &key, &value)) {
-            if (PyObject_SetAttr((PyObject*)self, key, value)) return -1;
-        }   
-    }
-
-    return 0;
+    return struct_init(self, args, kwds, &pylv_cont_ext_t_Type, sizeof(lv_cont_ext_t));
 }
 
 
@@ -4148,36 +3364,7 @@ static int pylv_cont_ext_t_arg_converter(PyObject *obj, void* target) {
 static int
 pylv_btn_ext_t_init(StructObject *self, PyObject *args, PyObject *kwds) 
 {
-    StructObject *copy = NULL;
-    // copy is a positional-only argument
-    if (!PyArg_ParseTuple(args, "|O!", &pylv_btn_ext_t_Type, &copy)) return -1;
-    
-    self->size = sizeof(lv_btn_ext_t);
-    self->data = PyMem_Malloc(self->size);
-    if (!self->data) return -1;
-    
-    Struct_register(self);
-    
-    if (copy) {
-        assert(self->size == copy->size); // should be same size, since same type
-        memcpy(self->data, copy->data, self->size);
-    } else {
-        memset(self->data, 0, self->size);
-    }
-    
-    self->owner = (PyObject *)self;
-
-    if (kwds) {
-        // all keyword arguments are attribute-assignments
-        PyObject *key, *value;
-        Py_ssize_t pos = 0;
-        
-        while (PyDict_Next(kwds, &pos, &key, &value)) {
-            if (PyObject_SetAttr((PyObject*)self, key, value)) return -1;
-        }   
-    }
-
-    return 0;
+    return struct_init(self, args, kwds, &pylv_btn_ext_t_Type, sizeof(lv_btn_ext_t));
 }
 
 
@@ -4263,36 +3450,7 @@ static int pylv_btn_ext_t_arg_converter(PyObject *obj, void* target) {
 static int
 pylv_fs_file_t_init(StructObject *self, PyObject *args, PyObject *kwds) 
 {
-    StructObject *copy = NULL;
-    // copy is a positional-only argument
-    if (!PyArg_ParseTuple(args, "|O!", &pylv_fs_file_t_Type, &copy)) return -1;
-    
-    self->size = sizeof(lv_fs_file_t);
-    self->data = PyMem_Malloc(self->size);
-    if (!self->data) return -1;
-    
-    Struct_register(self);
-    
-    if (copy) {
-        assert(self->size == copy->size); // should be same size, since same type
-        memcpy(self->data, copy->data, self->size);
-    } else {
-        memset(self->data, 0, self->size);
-    }
-    
-    self->owner = (PyObject *)self;
-
-    if (kwds) {
-        // all keyword arguments are attribute-assignments
-        PyObject *key, *value;
-        Py_ssize_t pos = 0;
-        
-        while (PyDict_Next(kwds, &pos, &key, &value)) {
-            if (PyObject_SetAttr((PyObject*)self, key, value)) return -1;
-        }   
-    }
-
-    return 0;
+    return struct_init(self, args, kwds, &pylv_fs_file_t_Type, sizeof(lv_fs_file_t));
 }
 
 static PyGetSetDef pylv_fs_file_t_getset[] = {
@@ -4339,36 +3497,7 @@ static int pylv_fs_file_t_arg_converter(PyObject *obj, void* target) {
 static int
 pylv_fs_dir_t_init(StructObject *self, PyObject *args, PyObject *kwds) 
 {
-    StructObject *copy = NULL;
-    // copy is a positional-only argument
-    if (!PyArg_ParseTuple(args, "|O!", &pylv_fs_dir_t_Type, &copy)) return -1;
-    
-    self->size = sizeof(lv_fs_dir_t);
-    self->data = PyMem_Malloc(self->size);
-    if (!self->data) return -1;
-    
-    Struct_register(self);
-    
-    if (copy) {
-        assert(self->size == copy->size); // should be same size, since same type
-        memcpy(self->data, copy->data, self->size);
-    } else {
-        memset(self->data, 0, self->size);
-    }
-    
-    self->owner = (PyObject *)self;
-
-    if (kwds) {
-        // all keyword arguments are attribute-assignments
-        PyObject *key, *value;
-        Py_ssize_t pos = 0;
-        
-        while (PyDict_Next(kwds, &pos, &key, &value)) {
-            if (PyObject_SetAttr((PyObject*)self, key, value)) return -1;
-        }   
-    }
-
-    return 0;
+    return struct_init(self, args, kwds, &pylv_fs_dir_t_Type, sizeof(lv_fs_dir_t));
 }
 
 static PyGetSetDef pylv_fs_dir_t_getset[] = {
@@ -4415,36 +3544,7 @@ static int pylv_fs_dir_t_arg_converter(PyObject *obj, void* target) {
 static int
 pylv_fs_drv_t_init(StructObject *self, PyObject *args, PyObject *kwds) 
 {
-    StructObject *copy = NULL;
-    // copy is a positional-only argument
-    if (!PyArg_ParseTuple(args, "|O!", &pylv_fs_drv_t_Type, &copy)) return -1;
-    
-    self->size = sizeof(lv_fs_drv_t);
-    self->data = PyMem_Malloc(self->size);
-    if (!self->data) return -1;
-    
-    Struct_register(self);
-    
-    if (copy) {
-        assert(self->size == copy->size); // should be same size, since same type
-        memcpy(self->data, copy->data, self->size);
-    } else {
-        memset(self->data, 0, self->size);
-    }
-    
-    self->owner = (PyObject *)self;
-
-    if (kwds) {
-        // all keyword arguments are attribute-assignments
-        PyObject *key, *value;
-        Py_ssize_t pos = 0;
-        
-        while (PyDict_Next(kwds, &pos, &key, &value)) {
-            if (PyObject_SetAttr((PyObject*)self, key, value)) return -1;
-        }   
-    }
-
-    return 0;
+    return struct_init(self, args, kwds, &pylv_fs_drv_t_Type, sizeof(lv_fs_drv_t));
 }
 
 static PyGetSetDef pylv_fs_drv_t_getset[] = {
@@ -4507,36 +3607,7 @@ static int pylv_fs_drv_t_arg_converter(PyObject *obj, void* target) {
 static int
 pylv_img_header_t_init(StructObject *self, PyObject *args, PyObject *kwds) 
 {
-    StructObject *copy = NULL;
-    // copy is a positional-only argument
-    if (!PyArg_ParseTuple(args, "|O!", &pylv_img_header_t_Type, &copy)) return -1;
-    
-    self->size = sizeof(lv_img_header_t);
-    self->data = PyMem_Malloc(self->size);
-    if (!self->data) return -1;
-    
-    Struct_register(self);
-    
-    if (copy) {
-        assert(self->size == copy->size); // should be same size, since same type
-        memcpy(self->data, copy->data, self->size);
-    } else {
-        memset(self->data, 0, self->size);
-    }
-    
-    self->owner = (PyObject *)self;
-
-    if (kwds) {
-        // all keyword arguments are attribute-assignments
-        PyObject *key, *value;
-        Py_ssize_t pos = 0;
-        
-        while (PyDict_Next(kwds, &pos, &key, &value)) {
-            if (PyObject_SetAttr((PyObject*)self, key, value)) return -1;
-        }   
-    }
-
-    return 0;
+    return struct_init(self, args, kwds, &pylv_img_header_t_Type, sizeof(lv_img_header_t));
 }
 
 
@@ -4671,36 +3742,7 @@ static int pylv_img_header_t_arg_converter(PyObject *obj, void* target) {
 static int
 pylv_img_dsc_t_init(StructObject *self, PyObject *args, PyObject *kwds) 
 {
-    StructObject *copy = NULL;
-    // copy is a positional-only argument
-    if (!PyArg_ParseTuple(args, "|O!", &pylv_img_dsc_t_Type, &copy)) return -1;
-    
-    self->size = sizeof(lv_img_dsc_t);
-    self->data = PyMem_Malloc(self->size);
-    if (!self->data) return -1;
-    
-    Struct_register(self);
-    
-    if (copy) {
-        assert(self->size == copy->size); // should be same size, since same type
-        memcpy(self->data, copy->data, self->size);
-    } else {
-        memset(self->data, 0, self->size);
-    }
-    
-    self->owner = (PyObject *)self;
-
-    if (kwds) {
-        // all keyword arguments are attribute-assignments
-        PyObject *key, *value;
-        Py_ssize_t pos = 0;
-        
-        while (PyDict_Next(kwds, &pos, &key, &value)) {
-            if (PyObject_SetAttr((PyObject*)self, key, value)) return -1;
-        }   
-    }
-
-    return 0;
+    return struct_init(self, args, kwds, &pylv_img_dsc_t_Type, sizeof(lv_img_dsc_t));
 }
 
 static PyGetSetDef pylv_img_dsc_t_getset[] = {
@@ -4748,36 +3790,7 @@ static int pylv_img_dsc_t_arg_converter(PyObject *obj, void* target) {
 static int
 pylv_img_decoder_t_init(StructObject *self, PyObject *args, PyObject *kwds) 
 {
-    StructObject *copy = NULL;
-    // copy is a positional-only argument
-    if (!PyArg_ParseTuple(args, "|O!", &pylv_img_decoder_t_Type, &copy)) return -1;
-    
-    self->size = sizeof(lv_img_decoder_t);
-    self->data = PyMem_Malloc(self->size);
-    if (!self->data) return -1;
-    
-    Struct_register(self);
-    
-    if (copy) {
-        assert(self->size == copy->size); // should be same size, since same type
-        memcpy(self->data, copy->data, self->size);
-    } else {
-        memset(self->data, 0, self->size);
-    }
-    
-    self->owner = (PyObject *)self;
-
-    if (kwds) {
-        // all keyword arguments are attribute-assignments
-        PyObject *key, *value;
-        Py_ssize_t pos = 0;
-        
-        while (PyDict_Next(kwds, &pos, &key, &value)) {
-            if (PyObject_SetAttr((PyObject*)self, key, value)) return -1;
-        }   
-    }
-
-    return 0;
+    return struct_init(self, args, kwds, &pylv_img_decoder_t_Type, sizeof(lv_img_decoder_t));
 }
 
 static PyGetSetDef pylv_img_decoder_t_getset[] = {
@@ -4827,36 +3840,7 @@ static int pylv_img_decoder_t_arg_converter(PyObject *obj, void* target) {
 static int
 pylv_img_decoder_dsc_t_init(StructObject *self, PyObject *args, PyObject *kwds) 
 {
-    StructObject *copy = NULL;
-    // copy is a positional-only argument
-    if (!PyArg_ParseTuple(args, "|O!", &pylv_img_decoder_dsc_t_Type, &copy)) return -1;
-    
-    self->size = sizeof(lv_img_decoder_dsc_t);
-    self->data = PyMem_Malloc(self->size);
-    if (!self->data) return -1;
-    
-    Struct_register(self);
-    
-    if (copy) {
-        assert(self->size == copy->size); // should be same size, since same type
-        memcpy(self->data, copy->data, self->size);
-    } else {
-        memset(self->data, 0, self->size);
-    }
-    
-    self->owner = (PyObject *)self;
-
-    if (kwds) {
-        // all keyword arguments are attribute-assignments
-        PyObject *key, *value;
-        Py_ssize_t pos = 0;
-        
-        while (PyDict_Next(kwds, &pos, &key, &value)) {
-            if (PyObject_SetAttr((PyObject*)self, key, value)) return -1;
-        }   
-    }
-
-    return 0;
+    return struct_init(self, args, kwds, &pylv_img_decoder_dsc_t_Type, sizeof(lv_img_decoder_dsc_t));
 }
 
 static PyGetSetDef pylv_img_decoder_dsc_t_getset[] = {
@@ -4907,36 +3891,7 @@ static int pylv_img_decoder_dsc_t_arg_converter(PyObject *obj, void* target) {
 static int
 pylv_imgbtn_ext_t_init(StructObject *self, PyObject *args, PyObject *kwds) 
 {
-    StructObject *copy = NULL;
-    // copy is a positional-only argument
-    if (!PyArg_ParseTuple(args, "|O!", &pylv_imgbtn_ext_t_Type, &copy)) return -1;
-    
-    self->size = sizeof(lv_imgbtn_ext_t);
-    self->data = PyMem_Malloc(self->size);
-    if (!self->data) return -1;
-    
-    Struct_register(self);
-    
-    if (copy) {
-        assert(self->size == copy->size); // should be same size, since same type
-        memcpy(self->data, copy->data, self->size);
-    } else {
-        memset(self->data, 0, self->size);
-    }
-    
-    self->owner = (PyObject *)self;
-
-    if (kwds) {
-        // all keyword arguments are attribute-assignments
-        PyObject *key, *value;
-        Py_ssize_t pos = 0;
-        
-        while (PyDict_Next(kwds, &pos, &key, &value)) {
-            if (PyObject_SetAttr((PyObject*)self, key, value)) return -1;
-        }   
-    }
-
-    return 0;
+    return struct_init(self, args, kwds, &pylv_imgbtn_ext_t_Type, sizeof(lv_imgbtn_ext_t));
 }
 
 static PyGetSetDef pylv_imgbtn_ext_t_getset[] = {
@@ -4984,36 +3939,7 @@ static int pylv_imgbtn_ext_t_arg_converter(PyObject *obj, void* target) {
 static int
 pylv_label_ext_t_init(StructObject *self, PyObject *args, PyObject *kwds) 
 {
-    StructObject *copy = NULL;
-    // copy is a positional-only argument
-    if (!PyArg_ParseTuple(args, "|O!", &pylv_label_ext_t_Type, &copy)) return -1;
-    
-    self->size = sizeof(lv_label_ext_t);
-    self->data = PyMem_Malloc(self->size);
-    if (!self->data) return -1;
-    
-    Struct_register(self);
-    
-    if (copy) {
-        assert(self->size == copy->size); // should be same size, since same type
-        memcpy(self->data, copy->data, self->size);
-    } else {
-        memset(self->data, 0, self->size);
-    }
-    
-    self->owner = (PyObject *)self;
-
-    if (kwds) {
-        // all keyword arguments are attribute-assignments
-        PyObject *key, *value;
-        Py_ssize_t pos = 0;
-        
-        while (PyDict_Next(kwds, &pos, &key, &value)) {
-            if (PyObject_SetAttr((PyObject*)self, key, value)) return -1;
-        }   
-    }
-
-    return 0;
+    return struct_init(self, args, kwds, &pylv_label_ext_t_Type, sizeof(lv_label_ext_t));
 }
 
 
@@ -5191,36 +4117,7 @@ static int pylv_label_ext_t_arg_converter(PyObject *obj, void* target) {
 static int
 pylv_img_ext_t_init(StructObject *self, PyObject *args, PyObject *kwds) 
 {
-    StructObject *copy = NULL;
-    // copy is a positional-only argument
-    if (!PyArg_ParseTuple(args, "|O!", &pylv_img_ext_t_Type, &copy)) return -1;
-    
-    self->size = sizeof(lv_img_ext_t);
-    self->data = PyMem_Malloc(self->size);
-    if (!self->data) return -1;
-    
-    Struct_register(self);
-    
-    if (copy) {
-        assert(self->size == copy->size); // should be same size, since same type
-        memcpy(self->data, copy->data, self->size);
-    } else {
-        memset(self->data, 0, self->size);
-    }
-    
-    self->owner = (PyObject *)self;
-
-    if (kwds) {
-        // all keyword arguments are attribute-assignments
-        PyObject *key, *value;
-        Py_ssize_t pos = 0;
-        
-        while (PyDict_Next(kwds, &pos, &key, &value)) {
-            if (PyObject_SetAttr((PyObject*)self, key, value)) return -1;
-        }   
-    }
-
-    return 0;
+    return struct_init(self, args, kwds, &pylv_img_ext_t_Type, sizeof(lv_img_ext_t));
 }
 
 
@@ -5323,36 +4220,7 @@ static int pylv_img_ext_t_arg_converter(PyObject *obj, void* target) {
 static int
 pylv_line_ext_t_init(StructObject *self, PyObject *args, PyObject *kwds) 
 {
-    StructObject *copy = NULL;
-    // copy is a positional-only argument
-    if (!PyArg_ParseTuple(args, "|O!", &pylv_line_ext_t_Type, &copy)) return -1;
-    
-    self->size = sizeof(lv_line_ext_t);
-    self->data = PyMem_Malloc(self->size);
-    if (!self->data) return -1;
-    
-    Struct_register(self);
-    
-    if (copy) {
-        assert(self->size == copy->size); // should be same size, since same type
-        memcpy(self->data, copy->data, self->size);
-    } else {
-        memset(self->data, 0, self->size);
-    }
-    
-    self->owner = (PyObject *)self;
-
-    if (kwds) {
-        // all keyword arguments are attribute-assignments
-        PyObject *key, *value;
-        Py_ssize_t pos = 0;
-        
-        while (PyDict_Next(kwds, &pos, &key, &value)) {
-            if (PyObject_SetAttr((PyObject*)self, key, value)) return -1;
-        }   
-    }
-
-    return 0;
+    return struct_init(self, args, kwds, &pylv_line_ext_t_Type, sizeof(lv_line_ext_t));
 }
 
 
@@ -5435,36 +4303,7 @@ static int pylv_line_ext_t_arg_converter(PyObject *obj, void* target) {
 static int
 pylv_page_ext_t_init(StructObject *self, PyObject *args, PyObject *kwds) 
 {
-    StructObject *copy = NULL;
-    // copy is a positional-only argument
-    if (!PyArg_ParseTuple(args, "|O!", &pylv_page_ext_t_Type, &copy)) return -1;
-    
-    self->size = sizeof(lv_page_ext_t);
-    self->data = PyMem_Malloc(self->size);
-    if (!self->data) return -1;
-    
-    Struct_register(self);
-    
-    if (copy) {
-        assert(self->size == copy->size); // should be same size, since same type
-        memcpy(self->data, copy->data, self->size);
-    } else {
-        memset(self->data, 0, self->size);
-    }
-    
-    self->owner = (PyObject *)self;
-
-    if (kwds) {
-        // all keyword arguments are attribute-assignments
-        PyObject *key, *value;
-        Py_ssize_t pos = 0;
-        
-        while (PyDict_Next(kwds, &pos, &key, &value)) {
-            if (PyObject_SetAttr((PyObject*)self, key, value)) return -1;
-        }   
-    }
-
-    return 0;
+    return struct_init(self, args, kwds, &pylv_page_ext_t_Type, sizeof(lv_page_ext_t));
 }
 
 
@@ -5567,36 +4406,7 @@ static int pylv_page_ext_t_arg_converter(PyObject *obj, void* target) {
 static int
 pylv_list_ext_t_init(StructObject *self, PyObject *args, PyObject *kwds) 
 {
-    StructObject *copy = NULL;
-    // copy is a positional-only argument
-    if (!PyArg_ParseTuple(args, "|O!", &pylv_list_ext_t_Type, &copy)) return -1;
-    
-    self->size = sizeof(lv_list_ext_t);
-    self->data = PyMem_Malloc(self->size);
-    if (!self->data) return -1;
-    
-    Struct_register(self);
-    
-    if (copy) {
-        assert(self->size == copy->size); // should be same size, since same type
-        memcpy(self->data, copy->data, self->size);
-    } else {
-        memset(self->data, 0, self->size);
-    }
-    
-    self->owner = (PyObject *)self;
-
-    if (kwds) {
-        // all keyword arguments are attribute-assignments
-        PyObject *key, *value;
-        Py_ssize_t pos = 0;
-        
-        while (PyDict_Next(kwds, &pos, &key, &value)) {
-            if (PyObject_SetAttr((PyObject*)self, key, value)) return -1;
-        }   
-    }
-
-    return 0;
+    return struct_init(self, args, kwds, &pylv_list_ext_t_Type, sizeof(lv_list_ext_t));
 }
 
 
@@ -5666,36 +4476,7 @@ static int pylv_list_ext_t_arg_converter(PyObject *obj, void* target) {
 static int
 pylv_chart_series_t_init(StructObject *self, PyObject *args, PyObject *kwds) 
 {
-    StructObject *copy = NULL;
-    // copy is a positional-only argument
-    if (!PyArg_ParseTuple(args, "|O!", &pylv_chart_series_t_Type, &copy)) return -1;
-    
-    self->size = sizeof(lv_chart_series_t);
-    self->data = PyMem_Malloc(self->size);
-    if (!self->data) return -1;
-    
-    Struct_register(self);
-    
-    if (copy) {
-        assert(self->size == copy->size); // should be same size, since same type
-        memcpy(self->data, copy->data, self->size);
-    } else {
-        memset(self->data, 0, self->size);
-    }
-    
-    self->owner = (PyObject *)self;
-
-    if (kwds) {
-        // all keyword arguments are attribute-assignments
-        PyObject *key, *value;
-        Py_ssize_t pos = 0;
-        
-        while (PyDict_Next(kwds, &pos, &key, &value)) {
-            if (PyObject_SetAttr((PyObject*)self, key, value)) return -1;
-        }   
-    }
-
-    return 0;
+    return struct_init(self, args, kwds, &pylv_chart_series_t_Type, sizeof(lv_chart_series_t));
 }
 
 static PyGetSetDef pylv_chart_series_t_getset[] = {
@@ -5743,36 +4524,7 @@ static int pylv_chart_series_t_arg_converter(PyObject *obj, void* target) {
 static int
 pylv_chart_axis_cfg_t_init(StructObject *self, PyObject *args, PyObject *kwds) 
 {
-    StructObject *copy = NULL;
-    // copy is a positional-only argument
-    if (!PyArg_ParseTuple(args, "|O!", &pylv_chart_axis_cfg_t_Type, &copy)) return -1;
-    
-    self->size = sizeof(lv_chart_axis_cfg_t);
-    self->data = PyMem_Malloc(self->size);
-    if (!self->data) return -1;
-    
-    Struct_register(self);
-    
-    if (copy) {
-        assert(self->size == copy->size); // should be same size, since same type
-        memcpy(self->data, copy->data, self->size);
-    } else {
-        memset(self->data, 0, self->size);
-    }
-    
-    self->owner = (PyObject *)self;
-
-    if (kwds) {
-        // all keyword arguments are attribute-assignments
-        PyObject *key, *value;
-        Py_ssize_t pos = 0;
-        
-        while (PyDict_Next(kwds, &pos, &key, &value)) {
-            if (PyObject_SetAttr((PyObject*)self, key, value)) return -1;
-        }   
-    }
-
-    return 0;
+    return struct_init(self, args, kwds, &pylv_chart_axis_cfg_t_Type, sizeof(lv_chart_axis_cfg_t));
 }
 
 static PyGetSetDef pylv_chart_axis_cfg_t_getset[] = {
@@ -5822,36 +4574,7 @@ static int pylv_chart_axis_cfg_t_arg_converter(PyObject *obj, void* target) {
 static int
 pylv_chart_ext_t_init(StructObject *self, PyObject *args, PyObject *kwds) 
 {
-    StructObject *copy = NULL;
-    // copy is a positional-only argument
-    if (!PyArg_ParseTuple(args, "|O!", &pylv_chart_ext_t_Type, &copy)) return -1;
-    
-    self->size = sizeof(lv_chart_ext_t);
-    self->data = PyMem_Malloc(self->size);
-    if (!self->data) return -1;
-    
-    Struct_register(self);
-    
-    if (copy) {
-        assert(self->size == copy->size); // should be same size, since same type
-        memcpy(self->data, copy->data, self->size);
-    } else {
-        memset(self->data, 0, self->size);
-    }
-    
-    self->owner = (PyObject *)self;
-
-    if (kwds) {
-        // all keyword arguments are attribute-assignments
-        PyObject *key, *value;
-        Py_ssize_t pos = 0;
-        
-        while (PyDict_Next(kwds, &pos, &key, &value)) {
-            if (PyObject_SetAttr((PyObject*)self, key, value)) return -1;
-        }   
-    }
-
-    return 0;
+    return struct_init(self, args, kwds, &pylv_chart_ext_t_Type, sizeof(lv_chart_ext_t));
 }
 
 
@@ -5925,36 +4648,7 @@ static int pylv_chart_ext_t_arg_converter(PyObject *obj, void* target) {
 static int
 pylv_table_cell_format_t_init(StructObject *self, PyObject *args, PyObject *kwds) 
 {
-    StructObject *copy = NULL;
-    // copy is a positional-only argument
-    if (!PyArg_ParseTuple(args, "|O!", &pylv_table_cell_format_t_Type, &copy)) return -1;
-    
-    self->size = sizeof(lv_table_cell_format_t);
-    self->data = PyMem_Malloc(self->size);
-    if (!self->data) return -1;
-    
-    Struct_register(self);
-    
-    if (copy) {
-        assert(self->size == copy->size); // should be same size, since same type
-        memcpy(self->data, copy->data, self->size);
-    } else {
-        memset(self->data, 0, self->size);
-    }
-    
-    self->owner = (PyObject *)self;
-
-    if (kwds) {
-        // all keyword arguments are attribute-assignments
-        PyObject *key, *value;
-        Py_ssize_t pos = 0;
-        
-        while (PyDict_Next(kwds, &pos, &key, &value)) {
-            if (PyObject_SetAttr((PyObject*)self, key, value)) return -1;
-        }   
-    }
-
-    return 0;
+    return struct_init(self, args, kwds, &pylv_table_cell_format_t_Type, sizeof(lv_table_cell_format_t));
 }
 
 static PyGetSetDef pylv_table_cell_format_t_getset[] = {
@@ -6001,36 +4695,7 @@ static int pylv_table_cell_format_t_arg_converter(PyObject *obj, void* target) {
 static int
 pylv_table_ext_t_init(StructObject *self, PyObject *args, PyObject *kwds) 
 {
-    StructObject *copy = NULL;
-    // copy is a positional-only argument
-    if (!PyArg_ParseTuple(args, "|O!", &pylv_table_ext_t_Type, &copy)) return -1;
-    
-    self->size = sizeof(lv_table_ext_t);
-    self->data = PyMem_Malloc(self->size);
-    if (!self->data) return -1;
-    
-    Struct_register(self);
-    
-    if (copy) {
-        assert(self->size == copy->size); // should be same size, since same type
-        memcpy(self->data, copy->data, self->size);
-    } else {
-        memset(self->data, 0, self->size);
-    }
-    
-    self->owner = (PyObject *)self;
-
-    if (kwds) {
-        // all keyword arguments are attribute-assignments
-        PyObject *key, *value;
-        Py_ssize_t pos = 0;
-        
-        while (PyDict_Next(kwds, &pos, &key, &value)) {
-            if (PyObject_SetAttr((PyObject*)self, key, value)) return -1;
-        }   
-    }
-
-    return 0;
+    return struct_init(self, args, kwds, &pylv_table_ext_t_Type, sizeof(lv_table_ext_t));
 }
 
 static PyGetSetDef pylv_table_ext_t_getset[] = {
@@ -6080,36 +4745,7 @@ static int pylv_table_ext_t_arg_converter(PyObject *obj, void* target) {
 static int
 pylv_cb_ext_t_init(StructObject *self, PyObject *args, PyObject *kwds) 
 {
-    StructObject *copy = NULL;
-    // copy is a positional-only argument
-    if (!PyArg_ParseTuple(args, "|O!", &pylv_cb_ext_t_Type, &copy)) return -1;
-    
-    self->size = sizeof(lv_cb_ext_t);
-    self->data = PyMem_Malloc(self->size);
-    if (!self->data) return -1;
-    
-    Struct_register(self);
-    
-    if (copy) {
-        assert(self->size == copy->size); // should be same size, since same type
-        memcpy(self->data, copy->data, self->size);
-    } else {
-        memset(self->data, 0, self->size);
-    }
-    
-    self->owner = (PyObject *)self;
-
-    if (kwds) {
-        // all keyword arguments are attribute-assignments
-        PyObject *key, *value;
-        Py_ssize_t pos = 0;
-        
-        while (PyDict_Next(kwds, &pos, &key, &value)) {
-            if (PyObject_SetAttr((PyObject*)self, key, value)) return -1;
-        }   
-    }
-
-    return 0;
+    return struct_init(self, args, kwds, &pylv_cb_ext_t_Type, sizeof(lv_cb_ext_t));
 }
 
 static PyGetSetDef pylv_cb_ext_t_getset[] = {
@@ -6157,36 +4793,7 @@ static int pylv_cb_ext_t_arg_converter(PyObject *obj, void* target) {
 static int
 pylv_bar_ext_t_init(StructObject *self, PyObject *args, PyObject *kwds) 
 {
-    StructObject *copy = NULL;
-    // copy is a positional-only argument
-    if (!PyArg_ParseTuple(args, "|O!", &pylv_bar_ext_t_Type, &copy)) return -1;
-    
-    self->size = sizeof(lv_bar_ext_t);
-    self->data = PyMem_Malloc(self->size);
-    if (!self->data) return -1;
-    
-    Struct_register(self);
-    
-    if (copy) {
-        assert(self->size == copy->size); // should be same size, since same type
-        memcpy(self->data, copy->data, self->size);
-    } else {
-        memset(self->data, 0, self->size);
-    }
-    
-    self->owner = (PyObject *)self;
-
-    if (kwds) {
-        // all keyword arguments are attribute-assignments
-        PyObject *key, *value;
-        Py_ssize_t pos = 0;
-        
-        while (PyDict_Next(kwds, &pos, &key, &value)) {
-            if (PyObject_SetAttr((PyObject*)self, key, value)) return -1;
-        }   
-    }
-
-    return 0;
+    return struct_init(self, args, kwds, &pylv_bar_ext_t_Type, sizeof(lv_bar_ext_t));
 }
 
 
@@ -6257,36 +4864,7 @@ static int pylv_bar_ext_t_arg_converter(PyObject *obj, void* target) {
 static int
 pylv_slider_ext_t_init(StructObject *self, PyObject *args, PyObject *kwds) 
 {
-    StructObject *copy = NULL;
-    // copy is a positional-only argument
-    if (!PyArg_ParseTuple(args, "|O!", &pylv_slider_ext_t_Type, &copy)) return -1;
-    
-    self->size = sizeof(lv_slider_ext_t);
-    self->data = PyMem_Malloc(self->size);
-    if (!self->data) return -1;
-    
-    Struct_register(self);
-    
-    if (copy) {
-        assert(self->size == copy->size); // should be same size, since same type
-        memcpy(self->data, copy->data, self->size);
-    } else {
-        memset(self->data, 0, self->size);
-    }
-    
-    self->owner = (PyObject *)self;
-
-    if (kwds) {
-        // all keyword arguments are attribute-assignments
-        PyObject *key, *value;
-        Py_ssize_t pos = 0;
-        
-        while (PyDict_Next(kwds, &pos, &key, &value)) {
-            if (PyObject_SetAttr((PyObject*)self, key, value)) return -1;
-        }   
-    }
-
-    return 0;
+    return struct_init(self, args, kwds, &pylv_slider_ext_t_Type, sizeof(lv_slider_ext_t));
 }
 
 
@@ -6352,36 +4930,7 @@ static int pylv_slider_ext_t_arg_converter(PyObject *obj, void* target) {
 static int
 pylv_led_ext_t_init(StructObject *self, PyObject *args, PyObject *kwds) 
 {
-    StructObject *copy = NULL;
-    // copy is a positional-only argument
-    if (!PyArg_ParseTuple(args, "|O!", &pylv_led_ext_t_Type, &copy)) return -1;
-    
-    self->size = sizeof(lv_led_ext_t);
-    self->data = PyMem_Malloc(self->size);
-    if (!self->data) return -1;
-    
-    Struct_register(self);
-    
-    if (copy) {
-        assert(self->size == copy->size); // should be same size, since same type
-        memcpy(self->data, copy->data, self->size);
-    } else {
-        memset(self->data, 0, self->size);
-    }
-    
-    self->owner = (PyObject *)self;
-
-    if (kwds) {
-        // all keyword arguments are attribute-assignments
-        PyObject *key, *value;
-        Py_ssize_t pos = 0;
-        
-        while (PyDict_Next(kwds, &pos, &key, &value)) {
-            if (PyObject_SetAttr((PyObject*)self, key, value)) return -1;
-        }   
-    }
-
-    return 0;
+    return struct_init(self, args, kwds, &pylv_led_ext_t_Type, sizeof(lv_led_ext_t));
 }
 
 static PyGetSetDef pylv_led_ext_t_getset[] = {
@@ -6427,36 +4976,7 @@ static int pylv_led_ext_t_arg_converter(PyObject *obj, void* target) {
 static int
 pylv_btnm_ext_t_init(StructObject *self, PyObject *args, PyObject *kwds) 
 {
-    StructObject *copy = NULL;
-    // copy is a positional-only argument
-    if (!PyArg_ParseTuple(args, "|O!", &pylv_btnm_ext_t_Type, &copy)) return -1;
-    
-    self->size = sizeof(lv_btnm_ext_t);
-    self->data = PyMem_Malloc(self->size);
-    if (!self->data) return -1;
-    
-    Struct_register(self);
-    
-    if (copy) {
-        assert(self->size == copy->size); // should be same size, since same type
-        memcpy(self->data, copy->data, self->size);
-    } else {
-        memset(self->data, 0, self->size);
-    }
-    
-    self->owner = (PyObject *)self;
-
-    if (kwds) {
-        // all keyword arguments are attribute-assignments
-        PyObject *key, *value;
-        Py_ssize_t pos = 0;
-        
-        while (PyDict_Next(kwds, &pos, &key, &value)) {
-            if (PyObject_SetAttr((PyObject*)self, key, value)) return -1;
-        }   
-    }
-
-    return 0;
+    return struct_init(self, args, kwds, &pylv_btnm_ext_t_Type, sizeof(lv_btnm_ext_t));
 }
 
 
@@ -6544,36 +5064,7 @@ static int pylv_btnm_ext_t_arg_converter(PyObject *obj, void* target) {
 static int
 pylv_kb_ext_t_init(StructObject *self, PyObject *args, PyObject *kwds) 
 {
-    StructObject *copy = NULL;
-    // copy is a positional-only argument
-    if (!PyArg_ParseTuple(args, "|O!", &pylv_kb_ext_t_Type, &copy)) return -1;
-    
-    self->size = sizeof(lv_kb_ext_t);
-    self->data = PyMem_Malloc(self->size);
-    if (!self->data) return -1;
-    
-    Struct_register(self);
-    
-    if (copy) {
-        assert(self->size == copy->size); // should be same size, since same type
-        memcpy(self->data, copy->data, self->size);
-    } else {
-        memset(self->data, 0, self->size);
-    }
-    
-    self->owner = (PyObject *)self;
-
-    if (kwds) {
-        // all keyword arguments are attribute-assignments
-        PyObject *key, *value;
-        Py_ssize_t pos = 0;
-        
-        while (PyDict_Next(kwds, &pos, &key, &value)) {
-            if (PyObject_SetAttr((PyObject*)self, key, value)) return -1;
-        }   
-    }
-
-    return 0;
+    return struct_init(self, args, kwds, &pylv_kb_ext_t_Type, sizeof(lv_kb_ext_t));
 }
 
 
@@ -6639,36 +5130,7 @@ static int pylv_kb_ext_t_arg_converter(PyObject *obj, void* target) {
 static int
 pylv_ddlist_ext_t_init(StructObject *self, PyObject *args, PyObject *kwds) 
 {
-    StructObject *copy = NULL;
-    // copy is a positional-only argument
-    if (!PyArg_ParseTuple(args, "|O!", &pylv_ddlist_ext_t_Type, &copy)) return -1;
-    
-    self->size = sizeof(lv_ddlist_ext_t);
-    self->data = PyMem_Malloc(self->size);
-    if (!self->data) return -1;
-    
-    Struct_register(self);
-    
-    if (copy) {
-        assert(self->size == copy->size); // should be same size, since same type
-        memcpy(self->data, copy->data, self->size);
-    } else {
-        memset(self->data, 0, self->size);
-    }
-    
-    self->owner = (PyObject *)self;
-
-    if (kwds) {
-        // all keyword arguments are attribute-assignments
-        PyObject *key, *value;
-        Py_ssize_t pos = 0;
-        
-        while (PyDict_Next(kwds, &pos, &key, &value)) {
-            if (PyObject_SetAttr((PyObject*)self, key, value)) return -1;
-        }   
-    }
-
-    return 0;
+    return struct_init(self, args, kwds, &pylv_ddlist_ext_t_Type, sizeof(lv_ddlist_ext_t));
 }
 
 
@@ -6793,36 +5255,7 @@ static int pylv_ddlist_ext_t_arg_converter(PyObject *obj, void* target) {
 static int
 pylv_roller_ext_t_init(StructObject *self, PyObject *args, PyObject *kwds) 
 {
-    StructObject *copy = NULL;
-    // copy is a positional-only argument
-    if (!PyArg_ParseTuple(args, "|O!", &pylv_roller_ext_t_Type, &copy)) return -1;
-    
-    self->size = sizeof(lv_roller_ext_t);
-    self->data = PyMem_Malloc(self->size);
-    if (!self->data) return -1;
-    
-    Struct_register(self);
-    
-    if (copy) {
-        assert(self->size == copy->size); // should be same size, since same type
-        memcpy(self->data, copy->data, self->size);
-    } else {
-        memset(self->data, 0, self->size);
-    }
-    
-    self->owner = (PyObject *)self;
-
-    if (kwds) {
-        // all keyword arguments are attribute-assignments
-        PyObject *key, *value;
-        Py_ssize_t pos = 0;
-        
-        while (PyDict_Next(kwds, &pos, &key, &value)) {
-            if (PyObject_SetAttr((PyObject*)self, key, value)) return -1;
-        }   
-    }
-
-    return 0;
+    return struct_init(self, args, kwds, &pylv_roller_ext_t_Type, sizeof(lv_roller_ext_t));
 }
 
 
@@ -6886,36 +5319,7 @@ static int pylv_roller_ext_t_arg_converter(PyObject *obj, void* target) {
 static int
 pylv_ta_ext_t_init(StructObject *self, PyObject *args, PyObject *kwds) 
 {
-    StructObject *copy = NULL;
-    // copy is a positional-only argument
-    if (!PyArg_ParseTuple(args, "|O!", &pylv_ta_ext_t_Type, &copy)) return -1;
-    
-    self->size = sizeof(lv_ta_ext_t);
-    self->data = PyMem_Malloc(self->size);
-    if (!self->data) return -1;
-    
-    Struct_register(self);
-    
-    if (copy) {
-        assert(self->size == copy->size); // should be same size, since same type
-        memcpy(self->data, copy->data, self->size);
-    } else {
-        memset(self->data, 0, self->size);
-    }
-    
-    self->owner = (PyObject *)self;
-
-    if (kwds) {
-        // all keyword arguments are attribute-assignments
-        PyObject *key, *value;
-        Py_ssize_t pos = 0;
-        
-        while (PyDict_Next(kwds, &pos, &key, &value)) {
-            if (PyObject_SetAttr((PyObject*)self, key, value)) return -1;
-        }   
-    }
-
-    return 0;
+    return struct_init(self, args, kwds, &pylv_ta_ext_t_Type, sizeof(lv_ta_ext_t));
 }
 
 
@@ -7041,36 +5445,7 @@ static int pylv_ta_ext_t_arg_converter(PyObject *obj, void* target) {
 static int
 pylv_canvas_ext_t_init(StructObject *self, PyObject *args, PyObject *kwds) 
 {
-    StructObject *copy = NULL;
-    // copy is a positional-only argument
-    if (!PyArg_ParseTuple(args, "|O!", &pylv_canvas_ext_t_Type, &copy)) return -1;
-    
-    self->size = sizeof(lv_canvas_ext_t);
-    self->data = PyMem_Malloc(self->size);
-    if (!self->data) return -1;
-    
-    Struct_register(self);
-    
-    if (copy) {
-        assert(self->size == copy->size); // should be same size, since same type
-        memcpy(self->data, copy->data, self->size);
-    } else {
-        memset(self->data, 0, self->size);
-    }
-    
-    self->owner = (PyObject *)self;
-
-    if (kwds) {
-        // all keyword arguments are attribute-assignments
-        PyObject *key, *value;
-        Py_ssize_t pos = 0;
-        
-        while (PyDict_Next(kwds, &pos, &key, &value)) {
-            if (PyObject_SetAttr((PyObject*)self, key, value)) return -1;
-        }   
-    }
-
-    return 0;
+    return struct_init(self, args, kwds, &pylv_canvas_ext_t_Type, sizeof(lv_canvas_ext_t));
 }
 
 static PyGetSetDef pylv_canvas_ext_t_getset[] = {
@@ -7117,36 +5492,7 @@ static int pylv_canvas_ext_t_arg_converter(PyObject *obj, void* target) {
 static int
 pylv_win_ext_t_init(StructObject *self, PyObject *args, PyObject *kwds) 
 {
-    StructObject *copy = NULL;
-    // copy is a positional-only argument
-    if (!PyArg_ParseTuple(args, "|O!", &pylv_win_ext_t_Type, &copy)) return -1;
-    
-    self->size = sizeof(lv_win_ext_t);
-    self->data = PyMem_Malloc(self->size);
-    if (!self->data) return -1;
-    
-    Struct_register(self);
-    
-    if (copy) {
-        assert(self->size == copy->size); // should be same size, since same type
-        memcpy(self->data, copy->data, self->size);
-    } else {
-        memset(self->data, 0, self->size);
-    }
-    
-    self->owner = (PyObject *)self;
-
-    if (kwds) {
-        // all keyword arguments are attribute-assignments
-        PyObject *key, *value;
-        Py_ssize_t pos = 0;
-        
-        while (PyDict_Next(kwds, &pos, &key, &value)) {
-            if (PyObject_SetAttr((PyObject*)self, key, value)) return -1;
-        }   
-    }
-
-    return 0;
+    return struct_init(self, args, kwds, &pylv_win_ext_t_Type, sizeof(lv_win_ext_t));
 }
 
 static PyGetSetDef pylv_win_ext_t_getset[] = {
@@ -7197,36 +5543,7 @@ static int pylv_win_ext_t_arg_converter(PyObject *obj, void* target) {
 static int
 pylv_tabview_ext_t_init(StructObject *self, PyObject *args, PyObject *kwds) 
 {
-    StructObject *copy = NULL;
-    // copy is a positional-only argument
-    if (!PyArg_ParseTuple(args, "|O!", &pylv_tabview_ext_t_Type, &copy)) return -1;
-    
-    self->size = sizeof(lv_tabview_ext_t);
-    self->data = PyMem_Malloc(self->size);
-    if (!self->data) return -1;
-    
-    Struct_register(self);
-    
-    if (copy) {
-        assert(self->size == copy->size); // should be same size, since same type
-        memcpy(self->data, copy->data, self->size);
-    } else {
-        memset(self->data, 0, self->size);
-    }
-    
-    self->owner = (PyObject *)self;
-
-    if (kwds) {
-        // all keyword arguments are attribute-assignments
-        PyObject *key, *value;
-        Py_ssize_t pos = 0;
-        
-        while (PyDict_Next(kwds, &pos, &key, &value)) {
-            if (PyObject_SetAttr((PyObject*)self, key, value)) return -1;
-        }   
-    }
-
-    return 0;
+    return struct_init(self, args, kwds, &pylv_tabview_ext_t_Type, sizeof(lv_tabview_ext_t));
 }
 
 
@@ -7387,36 +5704,7 @@ static int pylv_tabview_ext_t_arg_converter(PyObject *obj, void* target) {
 static int
 pylv_tileview_ext_t_init(StructObject *self, PyObject *args, PyObject *kwds) 
 {
-    StructObject *copy = NULL;
-    // copy is a positional-only argument
-    if (!PyArg_ParseTuple(args, "|O!", &pylv_tileview_ext_t_Type, &copy)) return -1;
-    
-    self->size = sizeof(lv_tileview_ext_t);
-    self->data = PyMem_Malloc(self->size);
-    if (!self->data) return -1;
-    
-    Struct_register(self);
-    
-    if (copy) {
-        assert(self->size == copy->size); // should be same size, since same type
-        memcpy(self->data, copy->data, self->size);
-    } else {
-        memset(self->data, 0, self->size);
-    }
-    
-    self->owner = (PyObject *)self;
-
-    if (kwds) {
-        // all keyword arguments are attribute-assignments
-        PyObject *key, *value;
-        Py_ssize_t pos = 0;
-        
-        while (PyDict_Next(kwds, &pos, &key, &value)) {
-            if (PyObject_SetAttr((PyObject*)self, key, value)) return -1;
-        }   
-    }
-
-    return 0;
+    return struct_init(self, args, kwds, &pylv_tileview_ext_t_Type, sizeof(lv_tileview_ext_t));
 }
 
 
@@ -7573,36 +5861,7 @@ static int pylv_tileview_ext_t_arg_converter(PyObject *obj, void* target) {
 static int
 pylv_mbox_ext_t_init(StructObject *self, PyObject *args, PyObject *kwds) 
 {
-    StructObject *copy = NULL;
-    // copy is a positional-only argument
-    if (!PyArg_ParseTuple(args, "|O!", &pylv_mbox_ext_t_Type, &copy)) return -1;
-    
-    self->size = sizeof(lv_mbox_ext_t);
-    self->data = PyMem_Malloc(self->size);
-    if (!self->data) return -1;
-    
-    Struct_register(self);
-    
-    if (copy) {
-        assert(self->size == copy->size); // should be same size, since same type
-        memcpy(self->data, copy->data, self->size);
-    } else {
-        memset(self->data, 0, self->size);
-    }
-    
-    self->owner = (PyObject *)self;
-
-    if (kwds) {
-        // all keyword arguments are attribute-assignments
-        PyObject *key, *value;
-        Py_ssize_t pos = 0;
-        
-        while (PyDict_Next(kwds, &pos, &key, &value)) {
-            if (PyObject_SetAttr((PyObject*)self, key, value)) return -1;
-        }   
-    }
-
-    return 0;
+    return struct_init(self, args, kwds, &pylv_mbox_ext_t_Type, sizeof(lv_mbox_ext_t));
 }
 
 static PyGetSetDef pylv_mbox_ext_t_getset[] = {
@@ -7651,36 +5910,7 @@ static int pylv_mbox_ext_t_arg_converter(PyObject *obj, void* target) {
 static int
 pylv_lmeter_ext_t_init(StructObject *self, PyObject *args, PyObject *kwds) 
 {
-    StructObject *copy = NULL;
-    // copy is a positional-only argument
-    if (!PyArg_ParseTuple(args, "|O!", &pylv_lmeter_ext_t_Type, &copy)) return -1;
-    
-    self->size = sizeof(lv_lmeter_ext_t);
-    self->data = PyMem_Malloc(self->size);
-    if (!self->data) return -1;
-    
-    Struct_register(self);
-    
-    if (copy) {
-        assert(self->size == copy->size); // should be same size, since same type
-        memcpy(self->data, copy->data, self->size);
-    } else {
-        memset(self->data, 0, self->size);
-    }
-    
-    self->owner = (PyObject *)self;
-
-    if (kwds) {
-        // all keyword arguments are attribute-assignments
-        PyObject *key, *value;
-        Py_ssize_t pos = 0;
-        
-        while (PyDict_Next(kwds, &pos, &key, &value)) {
-            if (PyObject_SetAttr((PyObject*)self, key, value)) return -1;
-        }   
-    }
-
-    return 0;
+    return struct_init(self, args, kwds, &pylv_lmeter_ext_t_Type, sizeof(lv_lmeter_ext_t));
 }
 
 static PyGetSetDef pylv_lmeter_ext_t_getset[] = {
@@ -7730,36 +5960,7 @@ static int pylv_lmeter_ext_t_arg_converter(PyObject *obj, void* target) {
 static int
 pylv_gauge_ext_t_init(StructObject *self, PyObject *args, PyObject *kwds) 
 {
-    StructObject *copy = NULL;
-    // copy is a positional-only argument
-    if (!PyArg_ParseTuple(args, "|O!", &pylv_gauge_ext_t_Type, &copy)) return -1;
-    
-    self->size = sizeof(lv_gauge_ext_t);
-    self->data = PyMem_Malloc(self->size);
-    if (!self->data) return -1;
-    
-    Struct_register(self);
-    
-    if (copy) {
-        assert(self->size == copy->size); // should be same size, since same type
-        memcpy(self->data, copy->data, self->size);
-    } else {
-        memset(self->data, 0, self->size);
-    }
-    
-    self->owner = (PyObject *)self;
-
-    if (kwds) {
-        // all keyword arguments are attribute-assignments
-        PyObject *key, *value;
-        Py_ssize_t pos = 0;
-        
-        while (PyDict_Next(kwds, &pos, &key, &value)) {
-            if (PyObject_SetAttr((PyObject*)self, key, value)) return -1;
-        }   
-    }
-
-    return 0;
+    return struct_init(self, args, kwds, &pylv_gauge_ext_t_Type, sizeof(lv_gauge_ext_t));
 }
 
 static PyGetSetDef pylv_gauge_ext_t_getset[] = {
@@ -7809,36 +6010,7 @@ static int pylv_gauge_ext_t_arg_converter(PyObject *obj, void* target) {
 static int
 pylv_sw_ext_t_init(StructObject *self, PyObject *args, PyObject *kwds) 
 {
-    StructObject *copy = NULL;
-    // copy is a positional-only argument
-    if (!PyArg_ParseTuple(args, "|O!", &pylv_sw_ext_t_Type, &copy)) return -1;
-    
-    self->size = sizeof(lv_sw_ext_t);
-    self->data = PyMem_Malloc(self->size);
-    if (!self->data) return -1;
-    
-    Struct_register(self);
-    
-    if (copy) {
-        assert(self->size == copy->size); // should be same size, since same type
-        memcpy(self->data, copy->data, self->size);
-    } else {
-        memset(self->data, 0, self->size);
-    }
-    
-    self->owner = (PyObject *)self;
-
-    if (kwds) {
-        // all keyword arguments are attribute-assignments
-        PyObject *key, *value;
-        Py_ssize_t pos = 0;
-        
-        while (PyDict_Next(kwds, &pos, &key, &value)) {
-            if (PyObject_SetAttr((PyObject*)self, key, value)) return -1;
-        }   
-    }
-
-    return 0;
+    return struct_init(self, args, kwds, &pylv_sw_ext_t_Type, sizeof(lv_sw_ext_t));
 }
 
 
@@ -7924,36 +6096,7 @@ static int pylv_sw_ext_t_arg_converter(PyObject *obj, void* target) {
 static int
 pylv_arc_ext_t_init(StructObject *self, PyObject *args, PyObject *kwds) 
 {
-    StructObject *copy = NULL;
-    // copy is a positional-only argument
-    if (!PyArg_ParseTuple(args, "|O!", &pylv_arc_ext_t_Type, &copy)) return -1;
-    
-    self->size = sizeof(lv_arc_ext_t);
-    self->data = PyMem_Malloc(self->size);
-    if (!self->data) return -1;
-    
-    Struct_register(self);
-    
-    if (copy) {
-        assert(self->size == copy->size); // should be same size, since same type
-        memcpy(self->data, copy->data, self->size);
-    } else {
-        memset(self->data, 0, self->size);
-    }
-    
-    self->owner = (PyObject *)self;
-
-    if (kwds) {
-        // all keyword arguments are attribute-assignments
-        PyObject *key, *value;
-        Py_ssize_t pos = 0;
-        
-        while (PyDict_Next(kwds, &pos, &key, &value)) {
-            if (PyObject_SetAttr((PyObject*)self, key, value)) return -1;
-        }   
-    }
-
-    return 0;
+    return struct_init(self, args, kwds, &pylv_arc_ext_t_Type, sizeof(lv_arc_ext_t));
 }
 
 static PyGetSetDef pylv_arc_ext_t_getset[] = {
@@ -8000,36 +6143,7 @@ static int pylv_arc_ext_t_arg_converter(PyObject *obj, void* target) {
 static int
 pylv_preload_ext_t_init(StructObject *self, PyObject *args, PyObject *kwds) 
 {
-    StructObject *copy = NULL;
-    // copy is a positional-only argument
-    if (!PyArg_ParseTuple(args, "|O!", &pylv_preload_ext_t_Type, &copy)) return -1;
-    
-    self->size = sizeof(lv_preload_ext_t);
-    self->data = PyMem_Malloc(self->size);
-    if (!self->data) return -1;
-    
-    Struct_register(self);
-    
-    if (copy) {
-        assert(self->size == copy->size); // should be same size, since same type
-        memcpy(self->data, copy->data, self->size);
-    } else {
-        memset(self->data, 0, self->size);
-    }
-    
-    self->owner = (PyObject *)self;
-
-    if (kwds) {
-        // all keyword arguments are attribute-assignments
-        PyObject *key, *value;
-        Py_ssize_t pos = 0;
-        
-        while (PyDict_Next(kwds, &pos, &key, &value)) {
-            if (PyObject_SetAttr((PyObject*)self, key, value)) return -1;
-        }   
-    }
-
-    return 0;
+    return struct_init(self, args, kwds, &pylv_preload_ext_t_Type, sizeof(lv_preload_ext_t));
 }
 
 
@@ -8113,36 +6227,7 @@ static int pylv_preload_ext_t_arg_converter(PyObject *obj, void* target) {
 static int
 pylv_calendar_date_t_init(StructObject *self, PyObject *args, PyObject *kwds) 
 {
-    StructObject *copy = NULL;
-    // copy is a positional-only argument
-    if (!PyArg_ParseTuple(args, "|O!", &pylv_calendar_date_t_Type, &copy)) return -1;
-    
-    self->size = sizeof(lv_calendar_date_t);
-    self->data = PyMem_Malloc(self->size);
-    if (!self->data) return -1;
-    
-    Struct_register(self);
-    
-    if (copy) {
-        assert(self->size == copy->size); // should be same size, since same type
-        memcpy(self->data, copy->data, self->size);
-    } else {
-        memset(self->data, 0, self->size);
-    }
-    
-    self->owner = (PyObject *)self;
-
-    if (kwds) {
-        // all keyword arguments are attribute-assignments
-        PyObject *key, *value;
-        Py_ssize_t pos = 0;
-        
-        while (PyDict_Next(kwds, &pos, &key, &value)) {
-            if (PyObject_SetAttr((PyObject*)self, key, value)) return -1;
-        }   
-    }
-
-    return 0;
+    return struct_init(self, args, kwds, &pylv_calendar_date_t_Type, sizeof(lv_calendar_date_t));
 }
 
 static PyGetSetDef pylv_calendar_date_t_getset[] = {
@@ -8190,36 +6275,7 @@ static int pylv_calendar_date_t_arg_converter(PyObject *obj, void* target) {
 static int
 pylv_calendar_ext_t_init(StructObject *self, PyObject *args, PyObject *kwds) 
 {
-    StructObject *copy = NULL;
-    // copy is a positional-only argument
-    if (!PyArg_ParseTuple(args, "|O!", &pylv_calendar_ext_t_Type, &copy)) return -1;
-    
-    self->size = sizeof(lv_calendar_ext_t);
-    self->data = PyMem_Malloc(self->size);
-    if (!self->data) return -1;
-    
-    Struct_register(self);
-    
-    if (copy) {
-        assert(self->size == copy->size); // should be same size, since same type
-        memcpy(self->data, copy->data, self->size);
-    } else {
-        memset(self->data, 0, self->size);
-    }
-    
-    self->owner = (PyObject *)self;
-
-    if (kwds) {
-        // all keyword arguments are attribute-assignments
-        PyObject *key, *value;
-        Py_ssize_t pos = 0;
-        
-        while (PyDict_Next(kwds, &pos, &key, &value)) {
-            if (PyObject_SetAttr((PyObject*)self, key, value)) return -1;
-        }   
-    }
-
-    return 0;
+    return struct_init(self, args, kwds, &pylv_calendar_ext_t_Type, sizeof(lv_calendar_ext_t));
 }
 
 static PyGetSetDef pylv_calendar_ext_t_getset[] = {
@@ -8279,36 +6335,7 @@ static int pylv_calendar_ext_t_arg_converter(PyObject *obj, void* target) {
 static int
 pylv_spinbox_ext_t_init(StructObject *self, PyObject *args, PyObject *kwds) 
 {
-    StructObject *copy = NULL;
-    // copy is a positional-only argument
-    if (!PyArg_ParseTuple(args, "|O!", &pylv_spinbox_ext_t_Type, &copy)) return -1;
-    
-    self->size = sizeof(lv_spinbox_ext_t);
-    self->data = PyMem_Malloc(self->size);
-    if (!self->data) return -1;
-    
-    Struct_register(self);
-    
-    if (copy) {
-        assert(self->size == copy->size); // should be same size, since same type
-        memcpy(self->data, copy->data, self->size);
-    } else {
-        memset(self->data, 0, self->size);
-    }
-    
-    self->owner = (PyObject *)self;
-
-    if (kwds) {
-        // all keyword arguments are attribute-assignments
-        PyObject *key, *value;
-        Py_ssize_t pos = 0;
-        
-        while (PyDict_Next(kwds, &pos, &key, &value)) {
-            if (PyObject_SetAttr((PyObject*)self, key, value)) return -1;
-        }   
-    }
-
-    return 0;
+    return struct_init(self, args, kwds, &pylv_spinbox_ext_t_Type, sizeof(lv_spinbox_ext_t));
 }
 
 
@@ -10191,7 +8218,7 @@ error:
 }
 
 void pylv_event_cb(lv_obj_t *obj, lv_event_t event) {
-    pylv_Obj *self = (PyObject *)*lv_obj_get_user_data_ptr(obj);
+    pylv_Obj *self = (pylv_Obj *)*lv_obj_get_user_data_ptr(obj);
     assert(self && self->event_cb);
     
     PyObject *result = PyObject_CallFunction(self->event_cb, "I", event);
@@ -11062,7 +9089,7 @@ pylv_obj_get_style(pylv_Obj *self, PyObject *args, PyObject *kwds)
     LVGL_LOCK        
     const lv_style_t* result = lv_obj_get_style(self->ref);
     LVGL_UNLOCK
-    return pystruct_from_lv((void *)result);            
+    return pystruct_from_lv(result);            
 }
 
 static PyObject*
@@ -11244,20 +9271,6 @@ pylv_obj_get_event_cb(pylv_Obj *self, PyObject *args, PyObject *kwds)
 }
 
 static PyObject*
-pylv_obj_get_user_data_ptr(pylv_Obj *self, PyObject *args, PyObject *kwds)
-{
-    PyErr_SetString(PyExc_NotImplementedError, "not implemented: lv_obj_get_user_data_ptr: Return type not found >lv_obj_user_data_t*< ");
-    return NULL;
-}
-
-static PyObject*
-pylv_obj_set_user_data(pylv_Obj *self, PyObject *args, PyObject *kwds)
-{
-    PyErr_SetString(PyExc_NotImplementedError, "not implemented: lv_obj_set_user_data: Parameter type not found >lv_obj_user_data_t< ");
-    return NULL;
-}
-
-static PyObject*
 pylv_obj_get_group(pylv_Obj *self, PyObject *args, PyObject *kwds)
 {
     PyErr_SetString(PyExc_NotImplementedError, "not implemented: lv_obj_get_group: Return type not found >void*< ");
@@ -11349,8 +9362,6 @@ static PyMethodDef pylv_obj_methods[] = {
     {"get_design_cb", (PyCFunction) pylv_obj_get_design_cb, METH_VARARGS | METH_KEYWORDS, "lv_design_cb_t lv_obj_get_design_cb(const lv_obj_t *obj)"},
     {"get_event_cb", (PyCFunction) pylv_obj_get_event_cb, METH_VARARGS | METH_KEYWORDS, "lv_event_cb_t lv_obj_get_event_cb(const lv_obj_t *obj)"},
     {"get_type", (PyCFunction) pylv_obj_get_type, METH_VARARGS | METH_KEYWORDS, ""},
-    {"get_user_data_ptr", (PyCFunction) pylv_obj_get_user_data_ptr, METH_VARARGS | METH_KEYWORDS, "lv_obj_user_data_t *lv_obj_get_user_data_ptr(lv_obj_t *obj)"},
-    {"set_user_data", (PyCFunction) pylv_obj_set_user_data, METH_VARARGS | METH_KEYWORDS, "void lv_obj_set_user_data(lv_obj_t *obj, lv_obj_user_data_t data)"},
     {"get_group", (PyCFunction) pylv_obj_get_group, METH_VARARGS | METH_KEYWORDS, "void *lv_obj_get_group(const lv_obj_t *obj)"},
     {"is_focused", (PyCFunction) pylv_obj_is_focused, METH_VARARGS | METH_KEYWORDS, "bool lv_obj_is_focused(const lv_obj_t *obj)"},
     {"get_children", (PyCFunction) pylv_obj_get_children, METH_VARARGS | METH_KEYWORDS, ""},
@@ -11774,7 +9785,7 @@ pylv_btn_get_style(pylv_Obj *self, PyObject *args, PyObject *kwds)
     LVGL_LOCK        
     const lv_style_t* result = lv_btn_get_style(self->ref, type);
     LVGL_UNLOCK
-    return pystruct_from_lv((void *)result);            
+    return pystruct_from_lv(result);            
 }
 
 
@@ -11887,7 +9898,7 @@ pylv_imgbtn_get_style(pylv_Obj *self, PyObject *args, PyObject *kwds)
     LVGL_LOCK        
     const lv_style_t* result = lv_imgbtn_get_style(self->ref, type);
     LVGL_UNLOCK
-    return pystruct_from_lv((void *)result);            
+    return pystruct_from_lv(result);            
 }
 
 
@@ -13066,7 +11077,7 @@ pylv_page_get_style(pylv_Obj *self, PyObject *args, PyObject *kwds)
     LVGL_LOCK        
     const lv_style_t* result = lv_page_get_style(self->ref, type);
     LVGL_UNLOCK
-    return pystruct_from_lv((void *)result);            
+    return pystruct_from_lv(result);            
 }
 
 static PyObject*
@@ -13481,7 +11492,7 @@ pylv_list_get_style(pylv_Obj *self, PyObject *args, PyObject *kwds)
     LVGL_LOCK        
     const lv_style_t* result = lv_list_get_style(self->ref, type);
     LVGL_UNLOCK
-    return pystruct_from_lv((void *)result);            
+    return pystruct_from_lv(result);            
 }
 
 static PyObject*
@@ -14222,7 +12233,7 @@ pylv_table_get_style(pylv_Obj *self, PyObject *args, PyObject *kwds)
     LVGL_LOCK        
     const lv_style_t* result = lv_table_get_style(self->ref, type);
     LVGL_UNLOCK
-    return pystruct_from_lv((void *)result);            
+    return pystruct_from_lv(result);            
 }
 
 
@@ -14407,7 +12418,7 @@ pylv_cb_get_style(pylv_Obj *self, PyObject *args, PyObject *kwds)
     LVGL_LOCK        
     const lv_style_t* result = lv_cb_get_style(self->ref, type);
     LVGL_UNLOCK
-    return pystruct_from_lv((void *)result);            
+    return pystruct_from_lv(result);            
 }
 
 
@@ -14597,7 +12608,7 @@ pylv_bar_get_style(pylv_Obj *self, PyObject *args, PyObject *kwds)
     LVGL_LOCK        
     const lv_style_t* result = lv_bar_get_style(self->ref, type);
     LVGL_UNLOCK
-    return pystruct_from_lv((void *)result);            
+    return pystruct_from_lv(result);            
 }
 
 
@@ -14745,7 +12756,7 @@ pylv_slider_get_style(pylv_Obj *self, PyObject *args, PyObject *kwds)
     LVGL_LOCK        
     const lv_style_t* result = lv_slider_get_style(self->ref, type);
     LVGL_UNLOCK
-    return pystruct_from_lv((void *)result);            
+    return pystruct_from_lv(result);            
 }
 
 
@@ -15169,7 +13180,7 @@ pylv_btnm_get_style(pylv_Obj *self, PyObject *args, PyObject *kwds)
     LVGL_LOCK        
     const lv_style_t* result = lv_btnm_get_style(self->ref, type);
     LVGL_UNLOCK
-    return pystruct_from_lv((void *)result);            
+    return pystruct_from_lv(result);            
 }
 
 static PyObject*
@@ -15369,7 +13380,7 @@ pylv_kb_get_style(pylv_Obj *self, PyObject *args, PyObject *kwds)
     LVGL_LOCK        
     const lv_style_t* result = lv_kb_get_style(self->ref, type);
     LVGL_UNLOCK
-    return pystruct_from_lv((void *)result);            
+    return pystruct_from_lv(result);            
 }
 
 static PyObject*
@@ -15675,7 +13686,7 @@ pylv_ddlist_get_style(pylv_Obj *self, PyObject *args, PyObject *kwds)
     LVGL_LOCK        
     const lv_style_t* result = lv_ddlist_get_style(self->ref, type);
     LVGL_UNLOCK
-    return pystruct_from_lv((void *)result);            
+    return pystruct_from_lv(result);            
 }
 
 static PyObject*
@@ -15919,7 +13930,7 @@ pylv_roller_get_style(pylv_Obj *self, PyObject *args, PyObject *kwds)
     LVGL_LOCK        
     const lv_style_t* result = lv_roller_get_style(self->ref, type);
     LVGL_UNLOCK
-    return pystruct_from_lv((void *)result);            
+    return pystruct_from_lv(result);            
 }
 
 
@@ -16341,7 +14352,7 @@ pylv_ta_get_style(pylv_Obj *self, PyObject *args, PyObject *kwds)
     LVGL_LOCK        
     const lv_style_t* result = lv_ta_get_style(self->ref, type);
     LVGL_UNLOCK
-    return pystruct_from_lv((void *)result);            
+    return pystruct_from_lv(result);            
 }
 
 static PyObject*
@@ -16579,7 +14590,7 @@ pylv_canvas_get_style(pylv_Obj *self, PyObject *args, PyObject *kwds)
     LVGL_LOCK        
     const lv_style_t* result = lv_canvas_get_style(self->ref, type);
     LVGL_UNLOCK
-    return pystruct_from_lv((void *)result);            
+    return pystruct_from_lv(result);            
 }
 
 static PyObject*
@@ -16958,7 +14969,7 @@ pylv_win_get_style(pylv_Obj *self, PyObject *args, PyObject *kwds)
     LVGL_LOCK        
     const lv_style_t* result = lv_win_get_style(self->ref, type);
     LVGL_UNLOCK
-    return pystruct_from_lv((void *)result);            
+    return pystruct_from_lv(result);            
 }
 
 static PyObject*
@@ -17275,7 +15286,7 @@ pylv_tabview_get_style(pylv_Obj *self, PyObject *args, PyObject *kwds)
     LVGL_LOCK        
     const lv_style_t* result = lv_tabview_get_style(self->ref, type);
     LVGL_UNLOCK
-    return pystruct_from_lv((void *)result);            
+    return pystruct_from_lv(result);            
 }
 
 static PyObject*
@@ -17440,7 +15451,7 @@ pylv_tileview_get_style(pylv_Obj *self, PyObject *args, PyObject *kwds)
     LVGL_LOCK        
     const lv_style_t* result = lv_tileview_get_style(self->ref, type);
     LVGL_UNLOCK
-    return pystruct_from_lv((void *)result);            
+    return pystruct_from_lv(result);            
 }
 
 
@@ -17659,7 +15670,7 @@ pylv_mbox_get_style(pylv_Obj *self, PyObject *args, PyObject *kwds)
     LVGL_LOCK        
     const lv_style_t* result = lv_mbox_get_style(self->ref, type);
     LVGL_UNLOCK
-    return pystruct_from_lv((void *)result);            
+    return pystruct_from_lv(result);            
 }
 
 static PyObject*
@@ -18200,7 +16211,7 @@ pylv_sw_get_style(pylv_Obj *self, PyObject *args, PyObject *kwds)
     LVGL_LOCK        
     const lv_style_t* result = lv_sw_get_style(self->ref, type);
     LVGL_UNLOCK
-    return pystruct_from_lv((void *)result);            
+    return pystruct_from_lv(result);            
 }
 
 static PyObject*
@@ -18348,7 +16359,7 @@ pylv_arc_get_style(pylv_Obj *self, PyObject *args, PyObject *kwds)
     LVGL_LOCK        
     const lv_style_t* result = lv_arc_get_style(self->ref, type);
     LVGL_UNLOCK
-    return pystruct_from_lv((void *)result);            
+    return pystruct_from_lv(result);            
 }
 
 
@@ -18521,7 +16532,7 @@ pylv_preload_get_style(pylv_Obj *self, PyObject *args, PyObject *kwds)
     LVGL_LOCK        
     const lv_style_t* result = lv_preload_get_style(self->ref, type);
     LVGL_UNLOCK
-    return pystruct_from_lv((void *)result);            
+    return pystruct_from_lv(result);            
 }
 
 static PyObject*
@@ -18733,7 +16744,7 @@ pylv_calendar_get_style(pylv_Obj *self, PyObject *args, PyObject *kwds)
     LVGL_LOCK        
     const lv_style_t* result = lv_calendar_get_style(self->ref, type);
     LVGL_UNLOCK
-    return pystruct_from_lv((void *)result);            
+    return pystruct_from_lv(result);            
 }
 
 
