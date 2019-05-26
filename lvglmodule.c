@@ -1,7 +1,7 @@
 #include "Python.h"
 #include "structmember.h"
-#undef B0 // Workaround for lvgl Issue 941 https://github.com/littlevgl/lvgl/issues/941
 #include "lvgl/lvgl.h"
+
 
 #if LV_COLOR_DEPTH != 16
 #error Only 16 bits color depth is currently supported
@@ -654,71 +654,7 @@ static PyObject *pystruct_from_lv(const void *c_struct) {
 }
 
 
-/****************************************************************
- * Custom types: constclass                                     *  
- ****************************************************************/
 
-static PyType_Slot constclass_slots[] = {
-    {0, 0},
-};
-
-/* Create a new class which represents a set of constants
- * Used for C enum constants, symbols and colors
- *
- * variadic arguments are char* name, <type> value, ... , NULL
- * representing the enum values
- *
- * dtype: 'd' for integers, 's' for strings
- *
- */
-static PyObject* build_constclass(char dtype, char *name, ...) {
-
-    va_list args;
-    va_start(args, name);
-
-    PyType_Spec spec = {
-        .name = name,
-        .basicsize = sizeof(PyObject),
-        .itemsize = 0,
-        .flags = Py_TPFLAGS_DEFAULT,
-        .slots = constclass_slots /* terminated by slot==0. */
-    };
-    
-    PyObject *constclass_type = PyType_FromSpec(&spec);
-    if (!constclass_type) return NULL;
-    
-    ((PyTypeObject*)constclass_type)->tp_new = NULL; // objects cannot be instantiated
-    
-    while(1) {
-        char *name = va_arg(args, char*);
-        if (!name) break;
-        
-        PyObject *value=NULL;
-        
-        switch(dtype) {
-            case 'd':
-                value = PyLong_FromLong(va_arg(args, int));
-                break;
-            case 's':
-                value = PyUnicode_FromString(va_arg(args, char *));
-                break;
-            default:
-                assert(0);
-        }
-        
-        if (!value) goto error;
-        
-        PyObject_SetAttrString(constclass_type, name, value);
-        Py_DECREF(value);
-    }
-
-    return constclass_type;
-
-error:
-    Py_DECREF(constclass_type);
-    return NULL;
-
-}
 
 
 
@@ -789,14 +725,24 @@ static int Struct_register(StructObject *obj) {
 // This also adds those Python objects to struct_dict so that they can be
 // returned from object calls
 static PyObject *
-Struct_fromglobal(PyTypeObject *type, const void* ptr, size_t size) {
+pystruct_from_c(PyTypeObject *type, const void* ptr, size_t size, bool copy) {
     StructObject *ret = 0;
 
     ret = (StructObject*)PyObject_New(StructObject, type);
     if (!ret) return NULL;
 
-    ret->owner = NULL; // owner = NULL means: global data, do not free
-    ret->data = (void*)ptr; // cast const to non-const, but we set readonly to prevent writing
+    if (copy) {
+        ret->data = PyMem_Malloc(size);
+        if (!ret->data) {
+            Py_DECREF(ret);
+            return NULL;
+        }
+        memcpy(ret->data, ptr, size);
+        ret->owner = (PyObject *)ret; // This Python object is the owner of the data; free the data on delete
+    } else {
+        ret->owner = NULL; // owner = NULL means: global data, do not free
+        ret->data = (void*)ptr; // cast const to non-const, but we set readonly to prevent writing
+    }
     ret->size = size;
     ret->readonly = 1;
     
@@ -8161,6 +8107,77 @@ static PyTypeObject pylv_ta_ext_t_cursor_Type = {
 };
 
 
+
+/****************************************************************
+ * Custom types: constclass                                     *  
+ ****************************************************************/
+
+static PyType_Slot constclass_slots[] = {
+    {0, 0},
+};
+
+/* Create a new class which represents a set of constants
+ * Used for C enum constants, symbols and colors
+ *
+ * variadic arguments are char* name, <type> value, ... , NULL
+ * representing the enum values
+ *
+ * dtype: 'd' for integers, 's' for strings, 'C' for colors (lv_color_t)
+ *
+ */
+static PyObject* build_constclass(char dtype, char *name, ...) {
+
+    va_list args;
+    va_start(args, name);
+
+    PyType_Spec spec = {
+        .name = name,
+        .basicsize = sizeof(PyObject),
+        .itemsize = 0,
+        .flags = Py_TPFLAGS_DEFAULT,
+        .slots = constclass_slots /* terminated by slot==0. */
+    };
+    
+    PyObject *constclass_type = PyType_FromSpec(&spec);
+    if (!constclass_type) return NULL;
+    
+    ((PyTypeObject*)constclass_type)->tp_new = NULL; // objects cannot be instantiated
+    
+    while(1) {
+        char *name = va_arg(args, char*);
+        if (!name) break;
+        
+        PyObject *value=NULL;
+        lv_color_t color;
+        
+        switch(dtype) {
+            case 'd':
+                value = PyLong_FromLong(va_arg(args, int));
+                break;
+            case 's':
+                value = PyUnicode_FromString(va_arg(args, char *));
+                break;
+            case 'C':
+                color = va_arg(args, lv_color_t);
+                value = pystruct_from_c(&pylv_color16_t_Type, &color, sizeof(lv_color_t), 1);
+                break;
+            default:
+                assert(0);
+        }
+        
+        if (!value) goto error;
+        
+        PyObject_SetAttrString(constclass_type, name, value);
+        Py_DECREF(value);
+    }
+
+    return constclass_type;
+
+error:
+    Py_DECREF(constclass_type);
+    return NULL;
+
+}
 
 
 /****************************************************************
@@ -17874,36 +17891,39 @@ PyInit_lvgl(void) {
     PyModule_AddObject(module, "SYMBOL", build_constclass('s', "SYMBOL", "AUDIO", LV_SYMBOL_AUDIO, "VIDEO", LV_SYMBOL_VIDEO, "LIST", LV_SYMBOL_LIST, "OK", LV_SYMBOL_OK, "CLOSE", LV_SYMBOL_CLOSE, "POWER", LV_SYMBOL_POWER, "SETTINGS", LV_SYMBOL_SETTINGS, "TRASH", LV_SYMBOL_TRASH, "HOME", LV_SYMBOL_HOME, "DOWNLOAD", LV_SYMBOL_DOWNLOAD, "DRIVE", LV_SYMBOL_DRIVE, "REFRESH", LV_SYMBOL_REFRESH, "MUTE", LV_SYMBOL_MUTE, "VOLUME_MID", LV_SYMBOL_VOLUME_MID, "VOLUME_MAX", LV_SYMBOL_VOLUME_MAX, "IMAGE", LV_SYMBOL_IMAGE, "EDIT", LV_SYMBOL_EDIT, "PREV", LV_SYMBOL_PREV, "PLAY", LV_SYMBOL_PLAY, "PAUSE", LV_SYMBOL_PAUSE, "STOP", LV_SYMBOL_STOP, "NEXT", LV_SYMBOL_NEXT, "EJECT", LV_SYMBOL_EJECT, "LEFT", LV_SYMBOL_LEFT, "RIGHT", LV_SYMBOL_RIGHT, "PLUS", LV_SYMBOL_PLUS, "MINUS", LV_SYMBOL_MINUS, "WARNING", LV_SYMBOL_WARNING, "SHUFFLE", LV_SYMBOL_SHUFFLE, "UP", LV_SYMBOL_UP, "DOWN", LV_SYMBOL_DOWN, "LOOP", LV_SYMBOL_LOOP, "DIRECTORY", LV_SYMBOL_DIRECTORY, "UPLOAD", LV_SYMBOL_UPLOAD, "CALL", LV_SYMBOL_CALL, "CUT", LV_SYMBOL_CUT, "COPY", LV_SYMBOL_COPY, "SAVE", LV_SYMBOL_SAVE, "CHARGE", LV_SYMBOL_CHARGE, "BELL", LV_SYMBOL_BELL, "KEYBOARD", LV_SYMBOL_KEYBOARD, "GPS", LV_SYMBOL_GPS, "FILE", LV_SYMBOL_FILE, "WIFI", LV_SYMBOL_WIFI, "BATTERY_FULL", LV_SYMBOL_BATTERY_FULL, "BATTERY_3", LV_SYMBOL_BATTERY_3, "BATTERY_2", LV_SYMBOL_BATTERY_2, "BATTERY_1", LV_SYMBOL_BATTERY_1, "BATTERY_EMPTY", LV_SYMBOL_BATTERY_EMPTY, "BLUETOOTH", LV_SYMBOL_BLUETOOTH, "DUMMY", LV_SYMBOL_DUMMY, NULL));
 
 
-   PyModule_AddObject(module, "font_dejavu_10", Struct_fromglobal(&pylv_font_t_Type, &lv_font_dejavu_10, sizeof(lv_font_t)));
-   PyModule_AddObject(module, "font_dejavu_10_latin_sup", Struct_fromglobal(&pylv_font_t_Type, &lv_font_dejavu_10_latin_sup, sizeof(lv_font_t)));
-   PyModule_AddObject(module, "font_dejavu_10_cyrillic", Struct_fromglobal(&pylv_font_t_Type, &lv_font_dejavu_10_cyrillic, sizeof(lv_font_t)));
-   PyModule_AddObject(module, "font_symbol_10", Struct_fromglobal(&pylv_font_t_Type, &lv_font_symbol_10, sizeof(lv_font_t)));
-   PyModule_AddObject(module, "font_dejavu_20", Struct_fromglobal(&pylv_font_t_Type, &lv_font_dejavu_20, sizeof(lv_font_t)));
-   PyModule_AddObject(module, "font_dejavu_20_latin_sup", Struct_fromglobal(&pylv_font_t_Type, &lv_font_dejavu_20_latin_sup, sizeof(lv_font_t)));
-   PyModule_AddObject(module, "font_dejavu_20_cyrillic", Struct_fromglobal(&pylv_font_t_Type, &lv_font_dejavu_20_cyrillic, sizeof(lv_font_t)));
-   PyModule_AddObject(module, "font_symbol_20", Struct_fromglobal(&pylv_font_t_Type, &lv_font_symbol_20, sizeof(lv_font_t)));
-   PyModule_AddObject(module, "font_dejavu_30", Struct_fromglobal(&pylv_font_t_Type, &lv_font_dejavu_30, sizeof(lv_font_t)));
-   PyModule_AddObject(module, "font_dejavu_30_latin_sup", Struct_fromglobal(&pylv_font_t_Type, &lv_font_dejavu_30_latin_sup, sizeof(lv_font_t)));
-   PyModule_AddObject(module, "font_dejavu_30_cyrillic", Struct_fromglobal(&pylv_font_t_Type, &lv_font_dejavu_30_cyrillic, sizeof(lv_font_t)));
-   PyModule_AddObject(module, "font_symbol_30", Struct_fromglobal(&pylv_font_t_Type, &lv_font_symbol_30, sizeof(lv_font_t)));
-   PyModule_AddObject(module, "font_dejavu_40", Struct_fromglobal(&pylv_font_t_Type, &lv_font_dejavu_40, sizeof(lv_font_t)));
-   PyModule_AddObject(module, "font_dejavu_40_latin_sup", Struct_fromglobal(&pylv_font_t_Type, &lv_font_dejavu_40_latin_sup, sizeof(lv_font_t)));
-   PyModule_AddObject(module, "font_dejavu_40_cyrillic", Struct_fromglobal(&pylv_font_t_Type, &lv_font_dejavu_40_cyrillic, sizeof(lv_font_t)));
-   PyModule_AddObject(module, "font_symbol_40", Struct_fromglobal(&pylv_font_t_Type, &lv_font_symbol_40, sizeof(lv_font_t)));
-   PyModule_AddObject(module, "font_monospace_8", Struct_fromglobal(&pylv_font_t_Type, &lv_font_monospace_8, sizeof(lv_font_t)));
-   PyModule_AddObject(module, "style_scr", Struct_fromglobal(&pylv_style_t_Type, &lv_style_scr, sizeof(lv_style_t)));
-   PyModule_AddObject(module, "style_transp", Struct_fromglobal(&pylv_style_t_Type, &lv_style_transp, sizeof(lv_style_t)));
-   PyModule_AddObject(module, "style_transp_fit", Struct_fromglobal(&pylv_style_t_Type, &lv_style_transp_fit, sizeof(lv_style_t)));
-   PyModule_AddObject(module, "style_transp_tight", Struct_fromglobal(&pylv_style_t_Type, &lv_style_transp_tight, sizeof(lv_style_t)));
-   PyModule_AddObject(module, "style_plain", Struct_fromglobal(&pylv_style_t_Type, &lv_style_plain, sizeof(lv_style_t)));
-   PyModule_AddObject(module, "style_plain_color", Struct_fromglobal(&pylv_style_t_Type, &lv_style_plain_color, sizeof(lv_style_t)));
-   PyModule_AddObject(module, "style_pretty", Struct_fromglobal(&pylv_style_t_Type, &lv_style_pretty, sizeof(lv_style_t)));
-   PyModule_AddObject(module, "style_pretty_color", Struct_fromglobal(&pylv_style_t_Type, &lv_style_pretty_color, sizeof(lv_style_t)));
-   PyModule_AddObject(module, "style_btn_rel", Struct_fromglobal(&pylv_style_t_Type, &lv_style_btn_rel, sizeof(lv_style_t)));
-   PyModule_AddObject(module, "style_btn_pr", Struct_fromglobal(&pylv_style_t_Type, &lv_style_btn_pr, sizeof(lv_style_t)));
-   PyModule_AddObject(module, "style_btn_tgl_rel", Struct_fromglobal(&pylv_style_t_Type, &lv_style_btn_tgl_rel, sizeof(lv_style_t)));
-   PyModule_AddObject(module, "style_btn_tgl_pr", Struct_fromglobal(&pylv_style_t_Type, &lv_style_btn_tgl_pr, sizeof(lv_style_t)));
-   PyModule_AddObject(module, "style_btn_ina", Struct_fromglobal(&pylv_style_t_Type, &lv_style_btn_ina, sizeof(lv_style_t)));
+    PyModule_AddObject(module, "COLOR", build_constclass('C', "COLOR", "WHITE", LV_COLOR_WHITE, "SILVER", LV_COLOR_SILVER, "GRAY", LV_COLOR_GRAY, "BLACK", LV_COLOR_BLACK, "RED", LV_COLOR_RED, "MAROON", LV_COLOR_MAROON, "YELLOW", LV_COLOR_YELLOW, "OLIVE", LV_COLOR_OLIVE, "LIME", LV_COLOR_LIME, "GREEN", LV_COLOR_GREEN, "CYAN", LV_COLOR_CYAN, "AQUA", LV_COLOR_AQUA, "TEAL", LV_COLOR_TEAL, "BLUE", LV_COLOR_BLUE, "NAVY", LV_COLOR_NAVY, "MAGENTA", LV_COLOR_MAGENTA, "PURPLE", LV_COLOR_PURPLE, "ORANGE", LV_COLOR_ORANGE, "SIZE", LV_COLOR_SIZE, NULL));
+
+
+   PyModule_AddObject(module, "font_dejavu_10", pystruct_from_c(&pylv_font_t_Type, &lv_font_dejavu_10, sizeof(lv_font_t), 0));
+   PyModule_AddObject(module, "font_dejavu_10_latin_sup", pystruct_from_c(&pylv_font_t_Type, &lv_font_dejavu_10_latin_sup, sizeof(lv_font_t), 0));
+   PyModule_AddObject(module, "font_dejavu_10_cyrillic", pystruct_from_c(&pylv_font_t_Type, &lv_font_dejavu_10_cyrillic, sizeof(lv_font_t), 0));
+   PyModule_AddObject(module, "font_symbol_10", pystruct_from_c(&pylv_font_t_Type, &lv_font_symbol_10, sizeof(lv_font_t), 0));
+   PyModule_AddObject(module, "font_dejavu_20", pystruct_from_c(&pylv_font_t_Type, &lv_font_dejavu_20, sizeof(lv_font_t), 0));
+   PyModule_AddObject(module, "font_dejavu_20_latin_sup", pystruct_from_c(&pylv_font_t_Type, &lv_font_dejavu_20_latin_sup, sizeof(lv_font_t), 0));
+   PyModule_AddObject(module, "font_dejavu_20_cyrillic", pystruct_from_c(&pylv_font_t_Type, &lv_font_dejavu_20_cyrillic, sizeof(lv_font_t), 0));
+   PyModule_AddObject(module, "font_symbol_20", pystruct_from_c(&pylv_font_t_Type, &lv_font_symbol_20, sizeof(lv_font_t), 0));
+   PyModule_AddObject(module, "font_dejavu_30", pystruct_from_c(&pylv_font_t_Type, &lv_font_dejavu_30, sizeof(lv_font_t), 0));
+   PyModule_AddObject(module, "font_dejavu_30_latin_sup", pystruct_from_c(&pylv_font_t_Type, &lv_font_dejavu_30_latin_sup, sizeof(lv_font_t), 0));
+   PyModule_AddObject(module, "font_dejavu_30_cyrillic", pystruct_from_c(&pylv_font_t_Type, &lv_font_dejavu_30_cyrillic, sizeof(lv_font_t), 0));
+   PyModule_AddObject(module, "font_symbol_30", pystruct_from_c(&pylv_font_t_Type, &lv_font_symbol_30, sizeof(lv_font_t), 0));
+   PyModule_AddObject(module, "font_dejavu_40", pystruct_from_c(&pylv_font_t_Type, &lv_font_dejavu_40, sizeof(lv_font_t), 0));
+   PyModule_AddObject(module, "font_dejavu_40_latin_sup", pystruct_from_c(&pylv_font_t_Type, &lv_font_dejavu_40_latin_sup, sizeof(lv_font_t), 0));
+   PyModule_AddObject(module, "font_dejavu_40_cyrillic", pystruct_from_c(&pylv_font_t_Type, &lv_font_dejavu_40_cyrillic, sizeof(lv_font_t), 0));
+   PyModule_AddObject(module, "font_symbol_40", pystruct_from_c(&pylv_font_t_Type, &lv_font_symbol_40, sizeof(lv_font_t), 0));
+   PyModule_AddObject(module, "font_monospace_8", pystruct_from_c(&pylv_font_t_Type, &lv_font_monospace_8, sizeof(lv_font_t), 0));
+   PyModule_AddObject(module, "style_scr", pystruct_from_c(&pylv_style_t_Type, &lv_style_scr, sizeof(lv_style_t), 0));
+   PyModule_AddObject(module, "style_transp", pystruct_from_c(&pylv_style_t_Type, &lv_style_transp, sizeof(lv_style_t), 0));
+   PyModule_AddObject(module, "style_transp_fit", pystruct_from_c(&pylv_style_t_Type, &lv_style_transp_fit, sizeof(lv_style_t), 0));
+   PyModule_AddObject(module, "style_transp_tight", pystruct_from_c(&pylv_style_t_Type, &lv_style_transp_tight, sizeof(lv_style_t), 0));
+   PyModule_AddObject(module, "style_plain", pystruct_from_c(&pylv_style_t_Type, &lv_style_plain, sizeof(lv_style_t), 0));
+   PyModule_AddObject(module, "style_plain_color", pystruct_from_c(&pylv_style_t_Type, &lv_style_plain_color, sizeof(lv_style_t), 0));
+   PyModule_AddObject(module, "style_pretty", pystruct_from_c(&pylv_style_t_Type, &lv_style_pretty, sizeof(lv_style_t), 0));
+   PyModule_AddObject(module, "style_pretty_color", pystruct_from_c(&pylv_style_t_Type, &lv_style_pretty_color, sizeof(lv_style_t), 0));
+   PyModule_AddObject(module, "style_btn_rel", pystruct_from_c(&pylv_style_t_Type, &lv_style_btn_rel, sizeof(lv_style_t), 0));
+   PyModule_AddObject(module, "style_btn_pr", pystruct_from_c(&pylv_style_t_Type, &lv_style_btn_pr, sizeof(lv_style_t), 0));
+   PyModule_AddObject(module, "style_btn_tgl_rel", pystruct_from_c(&pylv_style_t_Type, &lv_style_btn_tgl_rel, sizeof(lv_style_t), 0));
+   PyModule_AddObject(module, "style_btn_tgl_pr", pystruct_from_c(&pylv_style_t_Type, &lv_style_btn_tgl_pr, sizeof(lv_style_t), 0));
+   PyModule_AddObject(module, "style_btn_ina", pystruct_from_c(&pylv_style_t_Type, &lv_style_btn_ina, sizeof(lv_style_t), 0));
 
 
     // refcount for typesdict is initally 1; it is used by pyobj_from_lv

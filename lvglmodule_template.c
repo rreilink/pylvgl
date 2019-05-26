@@ -1,7 +1,7 @@
 #include "Python.h"
 #include "structmember.h"
-#undef B0 // Workaround for lvgl Issue 941 https://github.com/littlevgl/lvgl/issues/941
 #include "lvgl/lvgl.h"
+
 
 #if LV_COLOR_DEPTH != 16
 #error Only 16 bits color depth is currently supported
@@ -280,71 +280,7 @@ static PyObject *pystruct_from_lv(const void *c_struct) {
 }
 
 
-/****************************************************************
- * Custom types: constclass                                     *  
- ****************************************************************/
 
-static PyType_Slot constclass_slots[] = {
-    {0, 0},
-};
-
-/* Create a new class which represents a set of constants
- * Used for C enum constants, symbols and colors
- *
- * variadic arguments are char* name, <type> value, ... , NULL
- * representing the enum values
- *
- * dtype: 'd' for integers, 's' for strings
- *
- */
-static PyObject* build_constclass(char dtype, char *name, ...) {
-
-    va_list args;
-    va_start(args, name);
-
-    PyType_Spec spec = {
-        .name = name,
-        .basicsize = sizeof(PyObject),
-        .itemsize = 0,
-        .flags = Py_TPFLAGS_DEFAULT,
-        .slots = constclass_slots /* terminated by slot==0. */
-    };
-    
-    PyObject *constclass_type = PyType_FromSpec(&spec);
-    if (!constclass_type) return NULL;
-    
-    ((PyTypeObject*)constclass_type)->tp_new = NULL; // objects cannot be instantiated
-    
-    while(1) {
-        char *name = va_arg(args, char*);
-        if (!name) break;
-        
-        PyObject *value=NULL;
-        
-        switch(dtype) {
-            case 'd':
-                value = PyLong_FromLong(va_arg(args, int));
-                break;
-            case 's':
-                value = PyUnicode_FromString(va_arg(args, char *));
-                break;
-            default:
-                assert(0);
-        }
-        
-        if (!value) goto error;
-        
-        PyObject_SetAttrString(constclass_type, name, value);
-        Py_DECREF(value);
-    }
-
-    return constclass_type;
-
-error:
-    Py_DECREF(constclass_type);
-    return NULL;
-
-}
 
 
 
@@ -415,14 +351,24 @@ static int Struct_register(StructObject *obj) {
 // This also adds those Python objects to struct_dict so that they can be
 // returned from object calls
 static PyObject *
-Struct_fromglobal(PyTypeObject *type, const void* ptr, size_t size) {
+pystruct_from_c(PyTypeObject *type, const void* ptr, size_t size, bool copy) {
     StructObject *ret = 0;
 
     ret = (StructObject*)PyObject_New(StructObject, type);
     if (!ret) return NULL;
 
-    ret->owner = NULL; // owner = NULL means: global data, do not free
-    ret->data = (void*)ptr; // cast const to non-const, but we set readonly to prevent writing
+    if (copy) {
+        ret->data = PyMem_Malloc(size);
+        if (!ret->data) {
+            Py_DECREF(ret);
+            return NULL;
+        }
+        memcpy(ret->data, ptr, size);
+        ret->owner = (PyObject *)ret; // This Python object is the owner of the data; free the data on delete
+    } else {
+        ret->owner = NULL; // owner = NULL means: global data, do not free
+        ret->data = (void*)ptr; // cast const to non-const, but we set readonly to prevent writing
+    }
     ret->size = size;
     ret->readonly = 1;
     
@@ -677,6 +623,77 @@ static PyTypeObject pylv_{name}_Type = {{
 }};
 
 >>>
+
+/****************************************************************
+ * Custom types: constclass                                     *  
+ ****************************************************************/
+
+static PyType_Slot constclass_slots[] = {
+    {0, 0},
+};
+
+/* Create a new class which represents a set of constants
+ * Used for C enum constants, symbols and colors
+ *
+ * variadic arguments are char* name, <type> value, ... , NULL
+ * representing the enum values
+ *
+ * dtype: 'd' for integers, 's' for strings, 'C' for colors (lv_color_t)
+ *
+ */
+static PyObject* build_constclass(char dtype, char *name, ...) {
+
+    va_list args;
+    va_start(args, name);
+
+    PyType_Spec spec = {
+        .name = name,
+        .basicsize = sizeof(PyObject),
+        .itemsize = 0,
+        .flags = Py_TPFLAGS_DEFAULT,
+        .slots = constclass_slots /* terminated by slot==0. */
+    };
+    
+    PyObject *constclass_type = PyType_FromSpec(&spec);
+    if (!constclass_type) return NULL;
+    
+    ((PyTypeObject*)constclass_type)->tp_new = NULL; // objects cannot be instantiated
+    
+    while(1) {
+        char *name = va_arg(args, char*);
+        if (!name) break;
+        
+        PyObject *value=NULL;
+        lv_color_t color;
+        
+        switch(dtype) {
+            case 'd':
+                value = PyLong_FromLong(va_arg(args, int));
+                break;
+            case 's':
+                value = PyUnicode_FromString(va_arg(args, char *));
+                break;
+            case 'C':
+                color = va_arg(args, lv_color_t);
+                value = pystruct_from_c(&<<LV_COLOR_TYPE>>, &color, sizeof(lv_color_t), 1);
+                break;
+            default:
+                assert(0);
+        }
+        
+        if (!value) goto error;
+        
+        PyObject_SetAttrString(constclass_type, name, value);
+        Py_DECREF(value);
+    }
+
+    return constclass_type;
+
+error:
+    Py_DECREF(constclass_type);
+    return NULL;
+
+}
 
 
 /****************************************************************
@@ -1117,6 +1134,8 @@ PyInit_lvgl(void) {
 <<ENUM_ASSIGNMENTS>>
 
 <<SYMBOL_ASSIGNMENTS>>
+
+<<COLOR_ASSIGNMENTS>>
 
 <<GLOBALS_ASSIGNMENTS>>
 

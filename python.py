@@ -419,12 +419,21 @@ class PythonBindingsGenerator(BindingsGenerator):
         items = ''.join(f', "{name[10:]}", {name}' for name in self.parseresult.defines if name.startswith('LV_SYMBOL_') and name not in skip)
         return f'    PyModule_AddObject(module, "SYMBOL", build_constclass(\'s\', "SYMBOL"{items}, NULL));\n'
 
-            
+    def get_COLOR_ASSIGNMENTS(self):
+        
+        skip = {'LV_COLOR_H', 'LV_COLOR_MAKE'}
+        
+        items = ''.join(f', "{name[9:]}", {name}' for name in self.parseresult.defines if name.startswith('LV_COLOR_') and name not in skip)
+        return f'    PyModule_AddObject(module, "COLOR", build_constclass(\'C\', "COLOR"{items}, NULL));\n'
+    
+    def get_LV_COLOR_TYPE(self):
+        return 'py' + self.deref_typedef('lv_color_t') + '_Type'
+    
     def get_GLOBALS_ASSIGNMENTS(self):
         code = ''
         for name, type in self.parseresult.declarations.items():
             typename = type_repr(type)
-            code += f'   PyModule_AddObject(module, "{name}", Struct_fromglobal(&py{typename}_Type, &{type.declname}, sizeof({typename})));\n'
+            code += f'   PyModule_AddObject(module, "{name}", pystruct_from_c(&py{typename}_Type, &{type.declname}, sizeof({typename}), 0));\n'
             
         return code
 
