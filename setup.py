@@ -15,7 +15,7 @@ for path in 'lv_core', 'lv_draw', 'lv_hal', 'lv_misc', 'lv_objx', 'lv_themes', '
 
 module1 = Extension('lvgl',
     sources = sources,
-    extra_compile_args = ["-g", "-Wno-unused-function"]
+    extra_compile_args = [] if os.name =='nt' else ["-g","-Wno-unused-function"]
     )
 
 dist = setup (name = 'lvgl',

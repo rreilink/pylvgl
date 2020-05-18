@@ -663,7 +663,7 @@ static PyObject *pystruct_from_lv(const void *c_struct) {
  ****************************************************************/
 typedef struct {
     PyObject_HEAD
-    void *data;
+    char *data;
     size_t size;
     PyObject *owner; // NULL = reference to global C data, self=allocated @ init, other object=sharing from that object; decref owner when we are deallocated
     bool readonly;
@@ -1064,7 +1064,7 @@ static int pylv_mem_monitor_t_arg_converter(PyObject *obj, void* target) {
     if (isinst != 1) {
         return 0;
     }
-    *(lv_mem_monitor_t **)target = ((StructObject*)obj) -> data;
+    *(lv_mem_monitor_t **)target = (void *)((StructObject*)obj) -> data;
     Py_INCREF(obj); // Required since **target now uses the data. TODO: this leaks a reference; also support Py_CLEANUP_SUPPORTED
     return 1;
 
@@ -1112,7 +1112,7 @@ static int pylv_ll_t_arg_converter(PyObject *obj, void* target) {
     if (isinst != 1) {
         return 0;
     }
-    *(lv_ll_t **)target = ((StructObject*)obj) -> data;
+    *(lv_ll_t **)target = (void *)((StructObject*)obj) -> data;
     Py_INCREF(obj); // Required since **target now uses the data. TODO: this leaks a reference; also support Py_CLEANUP_SUPPORTED
     return 1;
 
@@ -1197,7 +1197,7 @@ static int pylv_task_t_arg_converter(PyObject *obj, void* target) {
     if (isinst != 1) {
         return 0;
     }
-    *(lv_task_t **)target = ((StructObject*)obj) -> data;
+    *(lv_task_t **)target = (void *)((StructObject*)obj) -> data;
     Py_INCREF(obj); // Required since **target now uses the data. TODO: this leaks a reference; also support Py_CLEANUP_SUPPORTED
     return 1;
 
@@ -1314,7 +1314,7 @@ static int pylv_color1_t_arg_converter(PyObject *obj, void* target) {
     if (isinst != 1) {
         return 0;
     }
-    *(lv_color1_t **)target = ((StructObject*)obj) -> data;
+    *(lv_color1_t **)target = (void *)((StructObject*)obj) -> data;
     Py_INCREF(obj); // Required since **target now uses the data. TODO: this leaks a reference; also support Py_CLEANUP_SUPPORTED
     return 1;
 
@@ -1361,7 +1361,7 @@ static int pylv_color8_t_arg_converter(PyObject *obj, void* target) {
     if (isinst != 1) {
         return 0;
     }
-    *(lv_color8_t **)target = ((StructObject*)obj) -> data;
+    *(lv_color8_t **)target = (void *)((StructObject*)obj) -> data;
     Py_INCREF(obj); // Required since **target now uses the data. TODO: this leaks a reference; also support Py_CLEANUP_SUPPORTED
     return 1;
 
@@ -1408,7 +1408,7 @@ static int pylv_color16_t_arg_converter(PyObject *obj, void* target) {
     if (isinst != 1) {
         return 0;
     }
-    *(lv_color16_t **)target = ((StructObject*)obj) -> data;
+    *(lv_color16_t **)target = (void *)((StructObject*)obj) -> data;
     Py_INCREF(obj); // Required since **target now uses the data. TODO: this leaks a reference; also support Py_CLEANUP_SUPPORTED
     return 1;
 
@@ -1455,7 +1455,7 @@ static int pylv_color32_t_arg_converter(PyObject *obj, void* target) {
     if (isinst != 1) {
         return 0;
     }
-    *(lv_color32_t **)target = ((StructObject*)obj) -> data;
+    *(lv_color32_t **)target = (void *)((StructObject*)obj) -> data;
     Py_INCREF(obj); // Required since **target now uses the data. TODO: this leaks a reference; also support Py_CLEANUP_SUPPORTED
     return 1;
 
@@ -1503,7 +1503,7 @@ static int pylv_color_hsv_t_arg_converter(PyObject *obj, void* target) {
     if (isinst != 1) {
         return 0;
     }
-    *(lv_color_hsv_t **)target = ((StructObject*)obj) -> data;
+    *(lv_color_hsv_t **)target = (void *)((StructObject*)obj) -> data;
     Py_INCREF(obj); // Required since **target now uses the data. TODO: this leaks a reference; also support Py_CLEANUP_SUPPORTED
     return 1;
 
@@ -1550,7 +1550,7 @@ static int pylv_point_t_arg_converter(PyObject *obj, void* target) {
     if (isinst != 1) {
         return 0;
     }
-    *(lv_point_t **)target = ((StructObject*)obj) -> data;
+    *(lv_point_t **)target = (void *)((StructObject*)obj) -> data;
     Py_INCREF(obj); // Required since **target now uses the data. TODO: this leaks a reference; also support Py_CLEANUP_SUPPORTED
     return 1;
 
@@ -1599,7 +1599,7 @@ static int pylv_area_t_arg_converter(PyObject *obj, void* target) {
     if (isinst != 1) {
         return 0;
     }
-    *(lv_area_t **)target = ((StructObject*)obj) -> data;
+    *(lv_area_t **)target = (void *)((StructObject*)obj) -> data;
     Py_INCREF(obj); // Required since **target now uses the data. TODO: this leaks a reference; also support Py_CLEANUP_SUPPORTED
     return 1;
 
@@ -1667,7 +1667,7 @@ static int pylv_disp_buf_t_arg_converter(PyObject *obj, void* target) {
     if (isinst != 1) {
         return 0;
     }
-    *(lv_disp_buf_t **)target = ((StructObject*)obj) -> data;
+    *(lv_disp_buf_t **)target = (void *)((StructObject*)obj) -> data;
     Py_INCREF(obj); // Required since **target now uses the data. TODO: this leaks a reference; also support Py_CLEANUP_SUPPORTED
     return 1;
 
@@ -1758,7 +1758,7 @@ static int pylv_disp_drv_t_arg_converter(PyObject *obj, void* target) {
     if (isinst != 1) {
         return 0;
     }
-    *(lv_disp_drv_t **)target = ((StructObject*)obj) -> data;
+    *(lv_disp_drv_t **)target = (void *)((StructObject*)obj) -> data;
     Py_INCREF(obj); // Required since **target now uses the data. TODO: this leaks a reference; also support Py_CLEANUP_SUPPORTED
     return 1;
 
@@ -1830,7 +1830,7 @@ static int pylv_disp_t_arg_converter(PyObject *obj, void* target) {
     if (isinst != 1) {
         return 0;
     }
-    *(lv_disp_t **)target = ((StructObject*)obj) -> data;
+    *(lv_disp_t **)target = (void *)((StructObject*)obj) -> data;
     Py_INCREF(obj); // Required since **target now uses the data. TODO: this leaks a reference; also support Py_CLEANUP_SUPPORTED
     return 1;
 
@@ -1880,7 +1880,7 @@ static int pylv_indev_data_t_arg_converter(PyObject *obj, void* target) {
     if (isinst != 1) {
         return 0;
     }
-    *(lv_indev_data_t **)target = ((StructObject*)obj) -> data;
+    *(lv_indev_data_t **)target = (void *)((StructObject*)obj) -> data;
     Py_INCREF(obj); // Required since **target now uses the data. TODO: this leaks a reference; also support Py_CLEANUP_SUPPORTED
     return 1;
 
@@ -1935,7 +1935,7 @@ static int pylv_indev_drv_t_arg_converter(PyObject *obj, void* target) {
     if (isinst != 1) {
         return 0;
     }
-    *(lv_indev_drv_t **)target = ((StructObject*)obj) -> data;
+    *(lv_indev_drv_t **)target = (void *)((StructObject*)obj) -> data;
     Py_INCREF(obj); // Required since **target now uses the data. TODO: this leaks a reference; also support Py_CLEANUP_SUPPORTED
     return 1;
 
@@ -2056,7 +2056,7 @@ static int pylv_indev_proc_t_arg_converter(PyObject *obj, void* target) {
     if (isinst != 1) {
         return 0;
     }
-    *(lv_indev_proc_t **)target = ((StructObject*)obj) -> data;
+    *(lv_indev_proc_t **)target = (void *)((StructObject*)obj) -> data;
     Py_INCREF(obj); // Required since **target now uses the data. TODO: this leaks a reference; also support Py_CLEANUP_SUPPORTED
     return 1;
 
@@ -2106,7 +2106,7 @@ static int pylv_indev_t_arg_converter(PyObject *obj, void* target) {
     if (isinst != 1) {
         return 0;
     }
-    *(lv_indev_t **)target = ((StructObject*)obj) -> data;
+    *(lv_indev_t **)target = (void *)((StructObject*)obj) -> data;
     Py_INCREF(obj); // Required since **target now uses the data. TODO: this leaks a reference; also support Py_CLEANUP_SUPPORTED
     return 1;
 
@@ -2187,7 +2187,7 @@ static int pylv_font_glyph_dsc_t_arg_converter(PyObject *obj, void* target) {
     if (isinst != 1) {
         return 0;
     }
-    *(lv_font_glyph_dsc_t **)target = ((StructObject*)obj) -> data;
+    *(lv_font_glyph_dsc_t **)target = (void *)((StructObject*)obj) -> data;
     Py_INCREF(obj); // Required since **target now uses the data. TODO: this leaks a reference; also support Py_CLEANUP_SUPPORTED
     return 1;
 
@@ -2268,7 +2268,7 @@ static int pylv_font_unicode_map_t_arg_converter(PyObject *obj, void* target) {
     if (isinst != 1) {
         return 0;
     }
-    *(lv_font_unicode_map_t **)target = ((StructObject*)obj) -> data;
+    *(lv_font_unicode_map_t **)target = (void *)((StructObject*)obj) -> data;
     Py_INCREF(obj); // Required since **target now uses the data. TODO: this leaks a reference; also support Py_CLEANUP_SUPPORTED
     return 1;
 
@@ -2376,7 +2376,7 @@ static int pylv_font_t_arg_converter(PyObject *obj, void* target) {
     if (isinst != 1) {
         return 0;
     }
-    *(lv_font_t **)target = ((StructObject*)obj) -> data;
+    *(lv_font_t **)target = (void *)((StructObject*)obj) -> data;
     Py_INCREF(obj); // Required since **target now uses the data. TODO: this leaks a reference; also support Py_CLEANUP_SUPPORTED
     return 1;
 
@@ -2504,7 +2504,7 @@ static int pylv_anim_t_arg_converter(PyObject *obj, void* target) {
     if (isinst != 1) {
         return 0;
     }
-    *(lv_anim_t **)target = ((StructObject*)obj) -> data;
+    *(lv_anim_t **)target = (void *)((StructObject*)obj) -> data;
     Py_INCREF(obj); // Required since **target now uses the data. TODO: this leaks a reference; also support Py_CLEANUP_SUPPORTED
     return 1;
 
@@ -2571,7 +2571,7 @@ static int pylv_style_t_arg_converter(PyObject *obj, void* target) {
     if (isinst != 1) {
         return 0;
     }
-    *(lv_style_t **)target = ((StructObject*)obj) -> data;
+    *(lv_style_t **)target = (void *)((StructObject*)obj) -> data;
     Py_INCREF(obj); // Required since **target now uses the data. TODO: this leaks a reference; also support Py_CLEANUP_SUPPORTED
     return 1;
 
@@ -2620,7 +2620,7 @@ static int pylv_style_anim_dsc_t_arg_converter(PyObject *obj, void* target) {
     if (isinst != 1) {
         return 0;
     }
-    *(lv_style_anim_dsc_t **)target = ((StructObject*)obj) -> data;
+    *(lv_style_anim_dsc_t **)target = (void *)((StructObject*)obj) -> data;
     Py_INCREF(obj); // Required since **target now uses the data. TODO: this leaks a reference; also support Py_CLEANUP_SUPPORTED
     return 1;
 
@@ -2705,7 +2705,7 @@ static int pylv_reailgn_t_arg_converter(PyObject *obj, void* target) {
     if (isinst != 1) {
         return 0;
     }
-    *(lv_reailgn_t **)target = ((StructObject*)obj) -> data;
+    *(lv_reailgn_t **)target = (void *)((StructObject*)obj) -> data;
     Py_INCREF(obj); // Required since **target now uses the data. TODO: this leaks a reference; also support Py_CLEANUP_SUPPORTED
     return 1;
 
@@ -2944,7 +2944,7 @@ static int pylv_obj_t_arg_converter(PyObject *obj, void* target) {
     if (isinst != 1) {
         return 0;
     }
-    *(lv_obj_t **)target = ((StructObject*)obj) -> data;
+    *(lv_obj_t **)target = (void *)((StructObject*)obj) -> data;
     Py_INCREF(obj); // Required since **target now uses the data. TODO: this leaks a reference; also support Py_CLEANUP_SUPPORTED
     return 1;
 
@@ -2990,7 +2990,7 @@ static int pylv_obj_type_t_arg_converter(PyObject *obj, void* target) {
     if (isinst != 1) {
         return 0;
     }
-    *(lv_obj_type_t **)target = ((StructObject*)obj) -> data;
+    *(lv_obj_type_t **)target = (void *)((StructObject*)obj) -> data;
     Py_INCREF(obj); // Required since **target now uses the data. TODO: this leaks a reference; also support Py_CLEANUP_SUPPORTED
     return 1;
 
@@ -3132,7 +3132,7 @@ static int pylv_group_t_arg_converter(PyObject *obj, void* target) {
     if (isinst != 1) {
         return 0;
     }
-    *(lv_group_t **)target = ((StructObject*)obj) -> data;
+    *(lv_group_t **)target = (void *)((StructObject*)obj) -> data;
     Py_INCREF(obj); // Required since **target now uses the data. TODO: this leaks a reference; also support Py_CLEANUP_SUPPORTED
     return 1;
 
@@ -3179,7 +3179,7 @@ static int pylv_theme_t_arg_converter(PyObject *obj, void* target) {
     if (isinst != 1) {
         return 0;
     }
-    *(lv_theme_t **)target = ((StructObject*)obj) -> data;
+    *(lv_theme_t **)target = (void *)((StructObject*)obj) -> data;
     Py_INCREF(obj); // Required since **target now uses the data. TODO: this leaks a reference; also support Py_CLEANUP_SUPPORTED
     return 1;
 
@@ -3314,7 +3314,7 @@ static int pylv_cont_ext_t_arg_converter(PyObject *obj, void* target) {
     if (isinst != 1) {
         return 0;
     }
-    *(lv_cont_ext_t **)target = ((StructObject*)obj) -> data;
+    *(lv_cont_ext_t **)target = (void *)((StructObject*)obj) -> data;
     Py_INCREF(obj); // Required since **target now uses the data. TODO: this leaks a reference; also support Py_CLEANUP_SUPPORTED
     return 1;
 
@@ -3400,7 +3400,7 @@ static int pylv_btn_ext_t_arg_converter(PyObject *obj, void* target) {
     if (isinst != 1) {
         return 0;
     }
-    *(lv_btn_ext_t **)target = ((StructObject*)obj) -> data;
+    *(lv_btn_ext_t **)target = (void *)((StructObject*)obj) -> data;
     Py_INCREF(obj); // Required since **target now uses the data. TODO: this leaks a reference; also support Py_CLEANUP_SUPPORTED
     return 1;
 
@@ -3447,7 +3447,7 @@ static int pylv_fs_file_t_arg_converter(PyObject *obj, void* target) {
     if (isinst != 1) {
         return 0;
     }
-    *(lv_fs_file_t **)target = ((StructObject*)obj) -> data;
+    *(lv_fs_file_t **)target = (void *)((StructObject*)obj) -> data;
     Py_INCREF(obj); // Required since **target now uses the data. TODO: this leaks a reference; also support Py_CLEANUP_SUPPORTED
     return 1;
 
@@ -3494,7 +3494,7 @@ static int pylv_fs_dir_t_arg_converter(PyObject *obj, void* target) {
     if (isinst != 1) {
         return 0;
     }
-    *(lv_fs_dir_t **)target = ((StructObject*)obj) -> data;
+    *(lv_fs_dir_t **)target = (void *)((StructObject*)obj) -> data;
     Py_INCREF(obj); // Required since **target now uses the data. TODO: this leaks a reference; also support Py_CLEANUP_SUPPORTED
     return 1;
 
@@ -3557,7 +3557,7 @@ static int pylv_fs_drv_t_arg_converter(PyObject *obj, void* target) {
     if (isinst != 1) {
         return 0;
     }
-    *(lv_fs_drv_t **)target = ((StructObject*)obj) -> data;
+    *(lv_fs_drv_t **)target = (void *)((StructObject*)obj) -> data;
     Py_INCREF(obj); // Required since **target now uses the data. TODO: this leaks a reference; also support Py_CLEANUP_SUPPORTED
     return 1;
 
@@ -3692,7 +3692,7 @@ static int pylv_img_header_t_arg_converter(PyObject *obj, void* target) {
     if (isinst != 1) {
         return 0;
     }
-    *(lv_img_header_t **)target = ((StructObject*)obj) -> data;
+    *(lv_img_header_t **)target = (void *)((StructObject*)obj) -> data;
     Py_INCREF(obj); // Required since **target now uses the data. TODO: this leaks a reference; also support Py_CLEANUP_SUPPORTED
     return 1;
 
@@ -3740,7 +3740,7 @@ static int pylv_img_dsc_t_arg_converter(PyObject *obj, void* target) {
     if (isinst != 1) {
         return 0;
     }
-    *(lv_img_dsc_t **)target = ((StructObject*)obj) -> data;
+    *(lv_img_dsc_t **)target = (void *)((StructObject*)obj) -> data;
     Py_INCREF(obj); // Required since **target now uses the data. TODO: this leaks a reference; also support Py_CLEANUP_SUPPORTED
     return 1;
 
@@ -3790,7 +3790,7 @@ static int pylv_img_decoder_t_arg_converter(PyObject *obj, void* target) {
     if (isinst != 1) {
         return 0;
     }
-    *(lv_img_decoder_t **)target = ((StructObject*)obj) -> data;
+    *(lv_img_decoder_t **)target = (void *)((StructObject*)obj) -> data;
     Py_INCREF(obj); // Required since **target now uses the data. TODO: this leaks a reference; also support Py_CLEANUP_SUPPORTED
     return 1;
 
@@ -3841,7 +3841,7 @@ static int pylv_img_decoder_dsc_t_arg_converter(PyObject *obj, void* target) {
     if (isinst != 1) {
         return 0;
     }
-    *(lv_img_decoder_dsc_t **)target = ((StructObject*)obj) -> data;
+    *(lv_img_decoder_dsc_t **)target = (void *)((StructObject*)obj) -> data;
     Py_INCREF(obj); // Required since **target now uses the data. TODO: this leaks a reference; also support Py_CLEANUP_SUPPORTED
     return 1;
 
@@ -3889,7 +3889,7 @@ static int pylv_imgbtn_ext_t_arg_converter(PyObject *obj, void* target) {
     if (isinst != 1) {
         return 0;
     }
-    *(lv_imgbtn_ext_t **)target = ((StructObject*)obj) -> data;
+    *(lv_imgbtn_ext_t **)target = (void *)((StructObject*)obj) -> data;
     Py_INCREF(obj); // Required since **target now uses the data. TODO: this leaks a reference; also support Py_CLEANUP_SUPPORTED
     return 1;
 
@@ -4067,7 +4067,7 @@ static int pylv_label_ext_t_arg_converter(PyObject *obj, void* target) {
     if (isinst != 1) {
         return 0;
     }
-    *(lv_label_ext_t **)target = ((StructObject*)obj) -> data;
+    *(lv_label_ext_t **)target = (void *)((StructObject*)obj) -> data;
     Py_INCREF(obj); // Required since **target now uses the data. TODO: this leaks a reference; also support Py_CLEANUP_SUPPORTED
     return 1;
 
@@ -4170,7 +4170,7 @@ static int pylv_img_ext_t_arg_converter(PyObject *obj, void* target) {
     if (isinst != 1) {
         return 0;
     }
-    *(lv_img_ext_t **)target = ((StructObject*)obj) -> data;
+    *(lv_img_ext_t **)target = (void *)((StructObject*)obj) -> data;
     Py_INCREF(obj); // Required since **target now uses the data. TODO: this leaks a reference; also support Py_CLEANUP_SUPPORTED
     return 1;
 
@@ -4253,7 +4253,7 @@ static int pylv_line_ext_t_arg_converter(PyObject *obj, void* target) {
     if (isinst != 1) {
         return 0;
     }
-    *(lv_line_ext_t **)target = ((StructObject*)obj) -> data;
+    *(lv_line_ext_t **)target = (void *)((StructObject*)obj) -> data;
     Py_INCREF(obj); // Required since **target now uses the data. TODO: this leaks a reference; also support Py_CLEANUP_SUPPORTED
     return 1;
 
@@ -4356,7 +4356,7 @@ static int pylv_page_ext_t_arg_converter(PyObject *obj, void* target) {
     if (isinst != 1) {
         return 0;
     }
-    *(lv_page_ext_t **)target = ((StructObject*)obj) -> data;
+    *(lv_page_ext_t **)target = (void *)((StructObject*)obj) -> data;
     Py_INCREF(obj); // Required since **target now uses the data. TODO: this leaks a reference; also support Py_CLEANUP_SUPPORTED
     return 1;
 
@@ -4426,7 +4426,7 @@ static int pylv_list_ext_t_arg_converter(PyObject *obj, void* target) {
     if (isinst != 1) {
         return 0;
     }
-    *(lv_list_ext_t **)target = ((StructObject*)obj) -> data;
+    *(lv_list_ext_t **)target = (void *)((StructObject*)obj) -> data;
     Py_INCREF(obj); // Required since **target now uses the data. TODO: this leaks a reference; also support Py_CLEANUP_SUPPORTED
     return 1;
 
@@ -4474,7 +4474,7 @@ static int pylv_chart_series_t_arg_converter(PyObject *obj, void* target) {
     if (isinst != 1) {
         return 0;
     }
-    *(lv_chart_series_t **)target = ((StructObject*)obj) -> data;
+    *(lv_chart_series_t **)target = (void *)((StructObject*)obj) -> data;
     Py_INCREF(obj); // Required since **target now uses the data. TODO: this leaks a reference; also support Py_CLEANUP_SUPPORTED
     return 1;
 
@@ -4524,7 +4524,7 @@ static int pylv_chart_axis_cfg_t_arg_converter(PyObject *obj, void* target) {
     if (isinst != 1) {
         return 0;
     }
-    *(lv_chart_axis_cfg_t **)target = ((StructObject*)obj) -> data;
+    *(lv_chart_axis_cfg_t **)target = (void *)((StructObject*)obj) -> data;
     Py_INCREF(obj); // Required since **target now uses the data. TODO: this leaks a reference; also support Py_CLEANUP_SUPPORTED
     return 1;
 
@@ -4598,7 +4598,7 @@ static int pylv_chart_ext_t_arg_converter(PyObject *obj, void* target) {
     if (isinst != 1) {
         return 0;
     }
-    *(lv_chart_ext_t **)target = ((StructObject*)obj) -> data;
+    *(lv_chart_ext_t **)target = (void *)((StructObject*)obj) -> data;
     Py_INCREF(obj); // Required since **target now uses the data. TODO: this leaks a reference; also support Py_CLEANUP_SUPPORTED
     return 1;
 
@@ -4645,7 +4645,7 @@ static int pylv_table_cell_format_t_arg_converter(PyObject *obj, void* target) {
     if (isinst != 1) {
         return 0;
     }
-    *(lv_table_cell_format_t **)target = ((StructObject*)obj) -> data;
+    *(lv_table_cell_format_t **)target = (void *)((StructObject*)obj) -> data;
     Py_INCREF(obj); // Required since **target now uses the data. TODO: this leaks a reference; also support Py_CLEANUP_SUPPORTED
     return 1;
 
@@ -4695,7 +4695,7 @@ static int pylv_table_ext_t_arg_converter(PyObject *obj, void* target) {
     if (isinst != 1) {
         return 0;
     }
-    *(lv_table_ext_t **)target = ((StructObject*)obj) -> data;
+    *(lv_table_ext_t **)target = (void *)((StructObject*)obj) -> data;
     Py_INCREF(obj); // Required since **target now uses the data. TODO: this leaks a reference; also support Py_CLEANUP_SUPPORTED
     return 1;
 
@@ -4743,7 +4743,7 @@ static int pylv_cb_ext_t_arg_converter(PyObject *obj, void* target) {
     if (isinst != 1) {
         return 0;
     }
-    *(lv_cb_ext_t **)target = ((StructObject*)obj) -> data;
+    *(lv_cb_ext_t **)target = (void *)((StructObject*)obj) -> data;
     Py_INCREF(obj); // Required since **target now uses the data. TODO: this leaks a reference; also support Py_CLEANUP_SUPPORTED
     return 1;
 
@@ -4814,7 +4814,7 @@ static int pylv_bar_ext_t_arg_converter(PyObject *obj, void* target) {
     if (isinst != 1) {
         return 0;
     }
-    *(lv_bar_ext_t **)target = ((StructObject*)obj) -> data;
+    *(lv_bar_ext_t **)target = (void *)((StructObject*)obj) -> data;
     Py_INCREF(obj); // Required since **target now uses the data. TODO: this leaks a reference; also support Py_CLEANUP_SUPPORTED
     return 1;
 
@@ -4880,7 +4880,7 @@ static int pylv_slider_ext_t_arg_converter(PyObject *obj, void* target) {
     if (isinst != 1) {
         return 0;
     }
-    *(lv_slider_ext_t **)target = ((StructObject*)obj) -> data;
+    *(lv_slider_ext_t **)target = (void *)((StructObject*)obj) -> data;
     Py_INCREF(obj); // Required since **target now uses the data. TODO: this leaks a reference; also support Py_CLEANUP_SUPPORTED
     return 1;
 
@@ -4926,7 +4926,7 @@ static int pylv_led_ext_t_arg_converter(PyObject *obj, void* target) {
     if (isinst != 1) {
         return 0;
     }
-    *(lv_led_ext_t **)target = ((StructObject*)obj) -> data;
+    *(lv_led_ext_t **)target = (void *)((StructObject*)obj) -> data;
     Py_INCREF(obj); // Required since **target now uses the data. TODO: this leaks a reference; also support Py_CLEANUP_SUPPORTED
     return 1;
 
@@ -5014,7 +5014,7 @@ static int pylv_btnm_ext_t_arg_converter(PyObject *obj, void* target) {
     if (isinst != 1) {
         return 0;
     }
-    *(lv_btnm_ext_t **)target = ((StructObject*)obj) -> data;
+    *(lv_btnm_ext_t **)target = (void *)((StructObject*)obj) -> data;
     Py_INCREF(obj); // Required since **target now uses the data. TODO: this leaks a reference; also support Py_CLEANUP_SUPPORTED
     return 1;
 
@@ -5080,7 +5080,7 @@ static int pylv_kb_ext_t_arg_converter(PyObject *obj, void* target) {
     if (isinst != 1) {
         return 0;
     }
-    *(lv_kb_ext_t **)target = ((StructObject*)obj) -> data;
+    *(lv_kb_ext_t **)target = (void *)((StructObject*)obj) -> data;
     Py_INCREF(obj); // Required since **target now uses the data. TODO: this leaks a reference; also support Py_CLEANUP_SUPPORTED
     return 1;
 
@@ -5205,7 +5205,7 @@ static int pylv_ddlist_ext_t_arg_converter(PyObject *obj, void* target) {
     if (isinst != 1) {
         return 0;
     }
-    *(lv_ddlist_ext_t **)target = ((StructObject*)obj) -> data;
+    *(lv_ddlist_ext_t **)target = (void *)((StructObject*)obj) -> data;
     Py_INCREF(obj); // Required since **target now uses the data. TODO: this leaks a reference; also support Py_CLEANUP_SUPPORTED
     return 1;
 
@@ -5269,7 +5269,7 @@ static int pylv_roller_ext_t_arg_converter(PyObject *obj, void* target) {
     if (isinst != 1) {
         return 0;
     }
-    *(lv_roller_ext_t **)target = ((StructObject*)obj) -> data;
+    *(lv_roller_ext_t **)target = (void *)((StructObject*)obj) -> data;
     Py_INCREF(obj); // Required since **target now uses the data. TODO: this leaks a reference; also support Py_CLEANUP_SUPPORTED
     return 1;
 
@@ -5395,7 +5395,7 @@ static int pylv_ta_ext_t_arg_converter(PyObject *obj, void* target) {
     if (isinst != 1) {
         return 0;
     }
-    *(lv_ta_ext_t **)target = ((StructObject*)obj) -> data;
+    *(lv_ta_ext_t **)target = (void *)((StructObject*)obj) -> data;
     Py_INCREF(obj); // Required since **target now uses the data. TODO: this leaks a reference; also support Py_CLEANUP_SUPPORTED
     return 1;
 
@@ -5442,7 +5442,7 @@ static int pylv_canvas_ext_t_arg_converter(PyObject *obj, void* target) {
     if (isinst != 1) {
         return 0;
     }
-    *(lv_canvas_ext_t **)target = ((StructObject*)obj) -> data;
+    *(lv_canvas_ext_t **)target = (void *)((StructObject*)obj) -> data;
     Py_INCREF(obj); // Required since **target now uses the data. TODO: this leaks a reference; also support Py_CLEANUP_SUPPORTED
     return 1;
 
@@ -5493,7 +5493,7 @@ static int pylv_win_ext_t_arg_converter(PyObject *obj, void* target) {
     if (isinst != 1) {
         return 0;
     }
-    *(lv_win_ext_t **)target = ((StructObject*)obj) -> data;
+    *(lv_win_ext_t **)target = (void *)((StructObject*)obj) -> data;
     Py_INCREF(obj); // Required since **target now uses the data. TODO: this leaks a reference; also support Py_CLEANUP_SUPPORTED
     return 1;
 
@@ -5654,7 +5654,7 @@ static int pylv_tabview_ext_t_arg_converter(PyObject *obj, void* target) {
     if (isinst != 1) {
         return 0;
     }
-    *(lv_tabview_ext_t **)target = ((StructObject*)obj) -> data;
+    *(lv_tabview_ext_t **)target = (void *)((StructObject*)obj) -> data;
     Py_INCREF(obj); // Required since **target now uses the data. TODO: this leaks a reference; also support Py_CLEANUP_SUPPORTED
     return 1;
 
@@ -5811,7 +5811,7 @@ static int pylv_tileview_ext_t_arg_converter(PyObject *obj, void* target) {
     if (isinst != 1) {
         return 0;
     }
-    *(lv_tileview_ext_t **)target = ((StructObject*)obj) -> data;
+    *(lv_tileview_ext_t **)target = (void *)((StructObject*)obj) -> data;
     Py_INCREF(obj); // Required since **target now uses the data. TODO: this leaks a reference; also support Py_CLEANUP_SUPPORTED
     return 1;
 
@@ -5860,7 +5860,7 @@ static int pylv_mbox_ext_t_arg_converter(PyObject *obj, void* target) {
     if (isinst != 1) {
         return 0;
     }
-    *(lv_mbox_ext_t **)target = ((StructObject*)obj) -> data;
+    *(lv_mbox_ext_t **)target = (void *)((StructObject*)obj) -> data;
     Py_INCREF(obj); // Required since **target now uses the data. TODO: this leaks a reference; also support Py_CLEANUP_SUPPORTED
     return 1;
 
@@ -5910,7 +5910,7 @@ static int pylv_lmeter_ext_t_arg_converter(PyObject *obj, void* target) {
     if (isinst != 1) {
         return 0;
     }
-    *(lv_lmeter_ext_t **)target = ((StructObject*)obj) -> data;
+    *(lv_lmeter_ext_t **)target = (void *)((StructObject*)obj) -> data;
     Py_INCREF(obj); // Required since **target now uses the data. TODO: this leaks a reference; also support Py_CLEANUP_SUPPORTED
     return 1;
 
@@ -5960,7 +5960,7 @@ static int pylv_gauge_ext_t_arg_converter(PyObject *obj, void* target) {
     if (isinst != 1) {
         return 0;
     }
-    *(lv_gauge_ext_t **)target = ((StructObject*)obj) -> data;
+    *(lv_gauge_ext_t **)target = (void *)((StructObject*)obj) -> data;
     Py_INCREF(obj); // Required since **target now uses the data. TODO: this leaks a reference; also support Py_CLEANUP_SUPPORTED
     return 1;
 
@@ -6046,7 +6046,7 @@ static int pylv_sw_ext_t_arg_converter(PyObject *obj, void* target) {
     if (isinst != 1) {
         return 0;
     }
-    *(lv_sw_ext_t **)target = ((StructObject*)obj) -> data;
+    *(lv_sw_ext_t **)target = (void *)((StructObject*)obj) -> data;
     Py_INCREF(obj); // Required since **target now uses the data. TODO: this leaks a reference; also support Py_CLEANUP_SUPPORTED
     return 1;
 
@@ -6093,7 +6093,7 @@ static int pylv_arc_ext_t_arg_converter(PyObject *obj, void* target) {
     if (isinst != 1) {
         return 0;
     }
-    *(lv_arc_ext_t **)target = ((StructObject*)obj) -> data;
+    *(lv_arc_ext_t **)target = (void *)((StructObject*)obj) -> data;
     Py_INCREF(obj); // Required since **target now uses the data. TODO: this leaks a reference; also support Py_CLEANUP_SUPPORTED
     return 1;
 
@@ -6177,7 +6177,7 @@ static int pylv_preload_ext_t_arg_converter(PyObject *obj, void* target) {
     if (isinst != 1) {
         return 0;
     }
-    *(lv_preload_ext_t **)target = ((StructObject*)obj) -> data;
+    *(lv_preload_ext_t **)target = (void *)((StructObject*)obj) -> data;
     Py_INCREF(obj); // Required since **target now uses the data. TODO: this leaks a reference; also support Py_CLEANUP_SUPPORTED
     return 1;
 
@@ -6225,7 +6225,7 @@ static int pylv_calendar_date_t_arg_converter(PyObject *obj, void* target) {
     if (isinst != 1) {
         return 0;
     }
-    *(lv_calendar_date_t **)target = ((StructObject*)obj) -> data;
+    *(lv_calendar_date_t **)target = (void *)((StructObject*)obj) -> data;
     Py_INCREF(obj); // Required since **target now uses the data. TODO: this leaks a reference; also support Py_CLEANUP_SUPPORTED
     return 1;
 
@@ -6285,7 +6285,7 @@ static int pylv_calendar_ext_t_arg_converter(PyObject *obj, void* target) {
     if (isinst != 1) {
         return 0;
     }
-    *(lv_calendar_ext_t **)target = ((StructObject*)obj) -> data;
+    *(lv_calendar_ext_t **)target = (void *)((StructObject*)obj) -> data;
     Py_INCREF(obj); // Required since **target now uses the data. TODO: this leaks a reference; also support Py_CLEANUP_SUPPORTED
     return 1;
 
@@ -6389,7 +6389,7 @@ static int pylv_spinbox_ext_t_arg_converter(PyObject *obj, void* target) {
     if (isinst != 1) {
         return 0;
     }
-    *(lv_spinbox_ext_t **)target = ((StructObject*)obj) -> data;
+    *(lv_spinbox_ext_t **)target = (void *)((StructObject*)obj) -> data;
     Py_INCREF(obj); // Required since **target now uses the data. TODO: this leaks a reference; also support Py_CLEANUP_SUPPORTED
     return 1;
 

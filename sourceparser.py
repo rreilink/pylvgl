@@ -57,10 +57,15 @@ class LvglSourceParser:
         self.lexer = pycparser.ply.lex.lex(module = pycparser.ply.cpp)
 
     def parse_file(self, filename):
-        args = ['-I../pycparser/utils/fake_libc_include']
+        if os.name == 'nt':
+            args = ['-Ipycparser/utils/fake_libc_include']
+            cpp_path = r'C:\Program Files\LLVM\bin\clang.exe'
+        else:
+            args = ['-I../pycparser/utils/fake_libc_include']
+            cpp_path = 'gcc'
         
         # TODO: preprocessor for Windows
-        return pycparser.parse_file(filename, use_cpp=True, cpp_path='gcc', cpp_args=['-E'] + args)
+        return pycparser.parse_file(filename, use_cpp=True, cpp_path=cpp_path, cpp_args=['-E'] + args)
         
     @staticmethod
     def enum_to_dict(enum_node):

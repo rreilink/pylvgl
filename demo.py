@@ -63,7 +63,7 @@ lst.set_style(lvgl.LIST_STYLE.SCRL, st1)
 
 style = lvgl.style_t(lvgl.style_plain)
 style.body.main_color = {'full' : 0xffff}
-style.body.grad_color = {'full' : 0xffff}
+style.body.grad_color = lvgl.COLOR.WHITE
 style.text.color = {'full': 0}
 style.body.padding.top = 0
 style.body.padding.bottom = 0
@@ -119,7 +119,7 @@ class MainMenu(lvgl.Obj):
         self.btnSettings.set_width(160)
         self.btnSettings.set_height(90)
         self.lblStatus=lvgl.Label(self)
-        self.lblStatus.set_text('\uf026 heating')
+        self.lblStatus.set_text(lvgl.SYMBOL.CHARGE + ' heating')
         self.lblStatus.align(self, lvgl.ALIGN.IN_BOTTOM_LEFT, 5, -5)
         
 

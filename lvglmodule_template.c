@@ -289,7 +289,7 @@ static PyObject *pystruct_from_lv(const void *c_struct) {
  ****************************************************************/
 typedef struct {
     PyObject_HEAD
-    void *data;
+    char *data;
     size_t size;
     PyObject *owner; // NULL = reference to global C data, self=allocated @ init, other object=sharing from that object; decref owner when we are deallocated
     bool readonly;
@@ -595,7 +595,7 @@ static int pylv_{name}_arg_converter(PyObject *obj, void* target) {{
     if (isinst != 1) {{
         return 0;
     }}
-    *(lv_{name} **)target = ((StructObject*)obj) -> data;
+    *(lv_{name} **)target = (void *)((StructObject*)obj) -> data;
     Py_INCREF(obj); // Required since **target now uses the data. TODO: this leaks a reference; also support Py_CLEANUP_SUPPORTED
     return 1;
 

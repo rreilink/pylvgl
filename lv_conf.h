@@ -161,7 +161,11 @@ typedef void * lv_img_decoder_user_data_t;
 #define LV_ATTRIBUTE_MEM_ALIGN
 
 /* 1: Variable length array is supported*/
+#ifdef _WIN32
+#define LV_COMPILER_VLA_SUPPORTED            0
+#else
 #define LV_COMPILER_VLA_SUPPORTED            1
+#endif
 
 /* 1: Initialization with non constant values are supported */
 #define LV_COMPILER_NON_CONST_INIT_SUPPORTED 1
