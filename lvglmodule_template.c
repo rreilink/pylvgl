@@ -163,7 +163,7 @@ void lv_set_lock_unlock( void (*flock)(void *), void * flock_arg,
  */
 static lv_res_t pylv_signal_cb(lv_obj_t * obj, lv_signal_t sign, void * param)
 {
-    pylv_Obj* py_obj = (pylv_Obj*)(*lv_obj_get_user_data_ptr(obj));
+    pylv_Obj* py_obj = (pylv_Obj*)(obj->user_data);
     
     // store a reference to the original signal callback, since during the
     // CLEANUP signal, py_obj may get deallocated and then this reference is gone
@@ -179,7 +179,7 @@ static lv_res_t pylv_signal_cb(lv_obj_t * obj, lv_signal_t sign, void * param)
             lv_obj_set_signal_cb(obj, py_obj->orig_signal_cb); 
             
             // remove reference to Python object
-            (*lv_obj_get_user_data_ptr(obj)) = NULL;
+            obj->user_data = NULL;
             Py_DECREF(py_obj); 
         }
 
@@ -221,7 +221,7 @@ PyObject * pyobj_from_lv(lv_obj_t *obj) {
         Py_RETURN_NONE;
     }
     
-    pyobj = *lv_obj_get_user_data_ptr(obj);
+    pyobj = obj->user_data;
     
     if (!pyobj) {
         // Python object for this lv object does not yet exist. Create a new one
@@ -239,7 +239,7 @@ PyObject * pyobj_from_lv(lv_obj_t *obj) {
         memset(pyobj, 0, tp->tp_basicsize);
         PyObject_Init((PyObject *)pyobj, tp);
         pyobj -> ref = obj;
-        *lv_obj_get_user_data_ptr(obj) = pyobj;
+        obj->user_data = pyobj;
         install_signal_cb(pyobj);
         // reference count for pyobj is 1 -- the reference stored in the lvgl object user_data
     }
@@ -249,6 +249,86 @@ PyObject * pyobj_from_lv(lv_obj_t *obj) {
     return (PyObject *)pyobj;
 }
 
+/* lvgl.Style class
+ *
+ *
+ *
+ *
+ *
+ */
+
+typedef struct {
+    PyObject_HEAD
+    lv_style_t *style;
+} StyleObject;
+static PyTypeObject Style_Type;
+
+
+static PyObject*
+Style_repr(StyleObject *self) {
+    return PyUnicode_FromFormat("<%s object at %p referencing %p>", Py_TYPE(self)->tp_name, self, self->style);
+}
+
+static int
+Style_init(StyleObject *self, PyObject *args, PyObject *kwds)
+{
+    self->style = PyMem_Malloc(sizeof(lv_style_t));
+    lv_style_init(self->style);
+    return 0;
+}
+
+<<<stylesetters:
+static PyObject *
+pylv_Style_{methodname}(PyObject *self, PyObject *args) {{
+    int value;
+    int state;
+    if (!PyArg_ParseTuple(args, "ii", &state, &value)) return NULL;
+    LVGL_LOCK
+    {name}(((StyleObject*)self)->style, state, value);
+    LVGL_UNLOCK
+    Py_RETURN_NONE;
+}}
+>>>
+
+static PyMethodDef Style_methods[] = {
+<<<stylesetters:
+    {{"{methodname}", (PyCFunction) pylv_Style_{methodname}, METH_VARARGS, "test doc"}},
+>>>
+    {NULL}
+};
+
+static PyTypeObject Style_Type = {
+    PyVarObject_HEAD_INIT(NULL, 0)
+    .tp_name = "lvgl.Style",
+    .tp_doc = "lvgl style",
+    .tp_basicsize = sizeof(StyleObject),
+    .tp_itemsize = 0,
+    .tp_flags = Py_TPFLAGS_DEFAULT | Py_TPFLAGS_BASETYPE,
+    .tp_new = PyType_GenericNew,
+    .tp_init = (initproc) Style_init,
+    //.tp_dealloc = (destructor) Style_dealloc,
+    .tp_repr = (reprfunc) Style_repr,
+    .tp_methods = Style_methods
+};
+
+
+static int pylv_style_t_arg_converter(PyObject *obj, void* target) {
+    int isinst;
+    isinst = PyObject_IsInstance(obj, (PyObject*)&Style_Type);
+    if (isinst == 0) {
+        PyErr_Format(PyExc_TypeError, "argument should be a Style object");
+    }
+    if (isinst != 1) {
+        return 0;
+    }
+    *(lv_style_t **)target = (void *)((StyleObject*)obj) -> style;
+    Py_INCREF(obj); // Required since **target now uses the data. TODO: this leaks a reference; also support Py_CLEANUP_SUPPORTED
+    return 1;
+
+}
+
+
+ 
 /* Given a pointer to a c struct, return the Python struct object
  * of that struct.
  *
@@ -767,7 +847,7 @@ error:
 }
 
 void pylv_event_cb(lv_obj_t *obj, lv_event_t event) {
-    pylv_Obj *self = (pylv_Obj *)*lv_obj_get_user_data_ptr(obj);
+    pylv_Obj *self = (pylv_Obj *)obj->user_data;
     assert(self && self->event_cb);
     
     PyObject *result = PyObject_CallFunction(self->event_cb, "I", event);
@@ -837,7 +917,7 @@ pylv_label_get_letter_on(pylv_Label *self, PyObject *args, PyObject *kwds)
 }
 
 
-
+/*
 
 static PyObject*
 pylv_list_add(pylv_List *self, PyObject *args, PyObject *kwds)
@@ -863,7 +943,7 @@ pylv_list_add(pylv_List *self, PyObject *args, PyObject *kwds)
     return ret;
 
 }
-
+*/
 
 // lv_list_focus takes lv_obj_t* as first argument, but it is not the list itself!
 static PyObject*
@@ -928,7 +1008,7 @@ pylv_{name}_init(pylv_{pyname} *self, PyObject *args, PyObject *kwds)
     
     LVGL_LOCK
     self->ref = lv_{name}_create(parent ? parent->ref : NULL, copy ? copy->ref : NULL);
-    *lv_obj_get_user_data_ptr(self->ref) = self;
+    self->ref->user_data = self;
     Py_INCREF(self); // since reference is stored in lv_obj user data
     install_signal_cb(self);
     LVGL_UNLOCK
@@ -1102,8 +1182,7 @@ PyInit_lvgl(void) {
     pylv_obj_Type.tp_repr = (reprfunc) Obj_repr;   
     
     if (PyType_Ready(&Ptr_Type) < 0) return NULL;
-    PyModule_AddObject(module, "ptr1", PtrObject_fromptr((void*) 4592));
-    PyModule_AddObject(module, "ptr2", PtrObject_fromptr((void*) 4592));
+    if (PyType_Ready(&Style_Type) < 0) return NULL;
     
 <<<objects:
     pylv_{name}_Type.tp_base = {base};
@@ -1138,6 +1217,9 @@ PyInit_lvgl(void) {
 <<COLOR_ASSIGNMENTS>>
 
 <<GLOBALS_ASSIGNMENTS>>
+
+    Py_INCREF(&Style_Type);
+    PyModule_AddObject(module, "Style", (PyObject *) &Style_Type);
 
     // refcount for typesdict is initally 1; it is used by pyobj_from_lv
     // refcounts to py{name}_Type objects are incremented due to "O" format

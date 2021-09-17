@@ -24,11 +24,11 @@ class LvglWindow(QtWidgets.QLabel):
         # Poll lvgl and display the framebuffer
         for i in range(10):
             lvgl.poll()
-    
+
         data = bytes(lvgl.framebuffer)
-        img = QtGui.QImage(data, lvgl.HOR_RES, lvgl.VER_RES, QtGui.QImage.Format_RGB16) 
+        img = QtGui.QImage(data, lvgl.HOR_RES, lvgl.VER_RES, QtGui.QImage.Format_RGB16)
         pm = QtGui.QPixmap.fromImage(img)
-        
+
         self.setPixmap(pm)
 
 win = LvglWindow();
@@ -48,13 +48,32 @@ l1.set_text('Push 1')
 s1 = lvgl.Slider(lvgl.scr_act())
 s1.align(b1, lvgl.ALIGN.OUT_BOTTOM_MID, 0, 10)
 
+
+EVENT_NAMES = {getattr(lvgl.EVENT, name) : name for name in dir(lvgl.EVENT) if not name.startswith('_')}
+def print_event(id):
+    print(EVENT_NAMES.get(id, '?'))
+
+b1.set_event_cb(print_event)
+s1.set_event_cb(print_event)
+
+# set_style_local
+l1.set_style_local_text_letter_space(lvgl.BTN_PART.MAIN, lvgl.STATE.DEFAULT, 10)
+
+style = lvgl.Style()
+style.set_radius(lvgl.STATE.DEFAULT, 10)
+b1.add_style(lvgl.BTN_PART.MAIN, style)
+
+#b1.set_style_local_radius(lvgl.BTN_PART.MAIN, lvgl.STATE.DEFAULT, 10)
+
+
+
 s1 = lvgl.scr_act()
 
 s2 = lvgl.Obj()
 lst = lvgl.List(s2)
 lst.set_width(320)
 lst.set_height(200)
-lst.set_sb_mode(lvgl.SB_MODE.AUTO)
+lst.set_scrlbar_mode(lvgl.SCROLLBAR_MODE.AUTO)
 
 # No spacing between items
 st1 = lvgl.style_t(lst.get_style(lvgl.LIST_STYLE.SCRL))
@@ -89,12 +108,12 @@ class SymbolButton(lvgl.Btn):
         self.symbol.set_text(symbol)
         self.symbol.set_style(symbolstyle)
         self.symbol.align(self, lvgl.ALIGN.CENTER,0,0)
-        
+
         self.label = lvgl.Label(self)
         self.label.set_text(text)
         self.label.align(self, lvgl.ALIGN.CENTER,20,0)
-        
-        
+
+
 class MainMenu(lvgl.Obj):
     def __init__(self, *args, **kwds):
         super().__init__(*args, **kwds)
@@ -121,7 +140,7 @@ class MainMenu(lvgl.Obj):
         self.lblStatus=lvgl.Label(self)
         self.lblStatus.set_text(lvgl.SYMBOL.CHARGE + ' heating')
         self.lblStatus.align(self, lvgl.ALIGN.IN_BOTTOM_LEFT, 5, -5)
-        
+
 
 s3 = MainMenu()
 

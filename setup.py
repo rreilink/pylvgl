@@ -10,7 +10,7 @@ from distutils.core import setup, Extension
 
 
 sources = ['lvglmodule.c']
-for path in 'lv_core', 'lv_draw', 'lv_hal', 'lv_misc', 'lv_objx', 'lv_themes', 'lv_fonts':
+for path in 'lv_core', 'lv_draw', 'lv_hal', 'lv_misc', 'lv_widgets', 'lv_themes', 'lv_font':
     sources.extend(glob.glob('lvgl/src/'+ path + '/*.c'))
 
 module1 = Extension('lvgl',

@@ -180,12 +180,24 @@ class Object:
         
         return actions
 
+class StyleSetter:
+    '''
+    Representation of an Lvgl style set function for which to generate bindings
+    
+    To be overridden by language-specific classes
+
+    '''
+    def __init__(self, name, decl, bindingsgenerator):
+        self.name = name
+        self.decl = decl
+        self.bindingsgenerator = bindingsgenerator
 
 
 class BindingsGenerator:
     templatefile = None
     objectclass = None
     structclass = None
+    stylesetterclass = None
     outputfile = None
     sourcepath = 'lvgl'
     
@@ -211,6 +223,12 @@ class BindingsGenerator:
         for name, struct in self.parseresult.structs.items():
             structs[name] = self.structclass(name, struct.decls, self)
         
+        self.stylesetters = stylesetters = collections.OrderedDict()
+        for name, function in self.parseresult.style_functions.items():
+            if name.startswith('lv_style_set_'):
+                stylesetters[name] = self.stylesetterclass(name, function.decl, self)
+        
+        
         
         self.customize()
         
@@ -228,10 +246,7 @@ class BindingsGenerator:
             def __init__(self, item):
                 self.item = item
             def __getitem__(self, name):
-                try:
-                    return getattr(self.item, name)
-                except AttributeError:
-                    raise IndexError(f'{self.item!r} has no attribute {name!r}')
+                return getattr(self.item, name)
             
         def substitute_per_item(match):
             '''

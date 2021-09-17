@@ -2,15 +2,10 @@ import collections
 import re
 import keyword
 
-from bindingsgen import Object, Struct, BindingsGenerator, c_ast, stripstart, generate_c, CustomMethod, type_repr, flatten_struct, MissingConversionException
+from bindingsgen import Object, Struct, StyleSetter, BindingsGenerator, c_ast, stripstart, generate_c, CustomMethod, type_repr, flatten_struct, MissingConversionException
 
 # TODO: should be common for all bindings generators
 skipfunctions = {
-    
-    # user_data is used to store reference to Python objects, don't tamper with that!
-    'lv_obj_get_user_data',
-    'lv_obj_set_user_data',
-    'lv_obj_get_user_data_ptr',
     
     # Just use Python attributes for custom properties of objects
     'lv_obj_allocate_ext_attr',
@@ -40,7 +35,7 @@ class PythonObject(Object):
         }
     # TODO: from structs!
 
-    TYPECONV.update({'const lv_style_t*':     ('O&', 'lv_style_t *')})
+    TYPECONV.update({'lv_style_t*':     ('O&', 'lv_style_t *')})
 
     TYPECONV_PARAMETER = TYPECONV.copy()
     TYPECONV_PARAMETER.update({'const lv_obj_t*': ('O!', 'pylv_Obj *')})
@@ -85,6 +80,9 @@ py{method.decl.name}(pylv_Obj *self, PyObject *args, PyObject *kwds)
         paramctypes = []
         paramfmts = []
         for param in method.decl.type.args.params:
+            if isinstance(param, c_ast.EllipsisParam):
+                raise MissingConversionException(f'{method.decl.name}: variable arguments not supported')
+                
             paramtype = type_repr(param.type)
             paramtype_derefed = self.bindingsgenerator.deref_typedef(paramtype)
             
@@ -349,14 +347,21 @@ static int
         
         return bitfieldscode + code
 
-
+class PythonStyleSetter(StyleSetter):
+    @property
+    def methodname(self): # The name of the attribute lv_style_set_radius -> set_radius
+        return stripstart(self.name, 'lv_style_') 
+    
 class PythonBindingsGenerator(BindingsGenerator):
     templatefile = 'lvglmodule_template.c'
     objectclass = PythonObject
     structclass = PythonStruct
+    stylesetterclass = PythonStyleSetter
+
     outputfile = 'lvglmodule.c'
 
     def customize(self):
+        del self.structs['style_t']
         # Create self.substructs , which is a collection of derived structs (i.e. structs within structs like lv_style_t_body_border)
         self.substructs = collections.OrderedDict()
         for struct in self.structs.values():
@@ -370,7 +375,7 @@ class PythonBindingsGenerator(BindingsGenerator):
         objects = self.objects
         objects['obj'].customstructfields.extend(['PyObject_HEAD', 'PyObject *weakreflist;', 'lv_obj_t *ref;', 'PyObject *event_cb;', 'lv_signal_cb_t orig_signal_cb;'])
 
-        for custom in ('lv_obj_get_children', 'lv_obj_set_event_cb', 'lv_label_get_letter_pos', 'lv_label_get_letter_on', 'lv_list_add' ,'lv_obj_get_type', 'lv_list_focus'):
+        for custom in ('lv_obj_get_children', 'lv_obj_set_event_cb', 'lv_label_get_letter_pos', 'lv_label_get_letter_on', 'lv_obj_get_type', 'lv_list_focus'):
             
             obj, method = re.match('lv_([A-Za-z0-9]+)_(\w+)$', custom).groups()
             objects[obj].methods[method] = CustomMethod(custom)
@@ -378,6 +383,14 @@ class PythonBindingsGenerator(BindingsGenerator):
         for function in skipfunctions:
             obj, method = re.match('lv_([A-Za-z0-9]+)_(\w+)$', function).groups()
             del objects[obj].methods[method]
+            
+        
+        removestylesetters = [name for name, stylesetter in self.stylesetters.items()
+            if type_repr(stylesetter.decl.type.args.params[2].type)!='lv_style_int_t']
+        
+        for name in removestylesetters:
+            del self.stylesetters[name]
+                
         
     @property
     def struct_inttypes(self):
@@ -432,7 +445,7 @@ class PythonBindingsGenerator(BindingsGenerator):
     def get_GLOBALS_ASSIGNMENTS(self):
         code = ''
         for name, type in self.parseresult.declarations.items():
-            typename = type_repr(type)
+            typename = type_repr(type, noqualifiers=True)
             code += f'   PyModule_AddObject(module, "{name}", pystruct_from_c(&py{typename}_Type, &{type.declname}, sizeof({typename}), 0));\n'
             
         return code

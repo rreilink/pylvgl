@@ -3,4 +3,4 @@
 	url = https://github.com/rreilink/pycparser.git
 [submodule "lvgl"]
 	path = lvgl
-	url = https://github.com/rreilink/lvgl.git
+	url = https://github.com/lvgl/lvgl.git
