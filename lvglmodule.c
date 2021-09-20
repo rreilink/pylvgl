@@ -654,9 +654,9 @@ Style_init(StyleObject *self, PyObject *args, PyObject *kwds)
 
 static PyObject *
 pylv_Style_set_radius(PyObject *self, PyObject *args) {
-    int value;
+    short int value;
     int state;
-    if (!PyArg_ParseTuple(args, "ii", &state, &value)) return NULL;
+    if (!PyArg_ParseTuple(args, "ih", &state, &value)) return NULL;
     LVGL_LOCK
     lv_style_set_radius(((StyleObject*)self)->style, state, value);
     LVGL_UNLOCK
@@ -664,10 +664,21 @@ pylv_Style_set_radius(PyObject *self, PyObject *args) {
 }
 
 static PyObject *
-pylv_Style_set_size(PyObject *self, PyObject *args) {
+pylv_Style_set_clip_corner(PyObject *self, PyObject *args) {
     int value;
     int state;
-    if (!PyArg_ParseTuple(args, "ii", &state, &value)) return NULL;
+    if (!PyArg_ParseTuple(args, "ip", &state, &value)) return NULL;
+    LVGL_LOCK
+    lv_style_set_clip_corner(((StyleObject*)self)->style, state, value);
+    LVGL_UNLOCK
+    Py_RETURN_NONE;
+}
+
+static PyObject *
+pylv_Style_set_size(PyObject *self, PyObject *args) {
+    short int value;
+    int state;
+    if (!PyArg_ParseTuple(args, "ih", &state, &value)) return NULL;
     LVGL_LOCK
     lv_style_set_size(((StyleObject*)self)->style, state, value);
     LVGL_UNLOCK
@@ -676,9 +687,9 @@ pylv_Style_set_size(PyObject *self, PyObject *args) {
 
 static PyObject *
 pylv_Style_set_transform_width(PyObject *self, PyObject *args) {
-    int value;
+    short int value;
     int state;
-    if (!PyArg_ParseTuple(args, "ii", &state, &value)) return NULL;
+    if (!PyArg_ParseTuple(args, "ih", &state, &value)) return NULL;
     LVGL_LOCK
     lv_style_set_transform_width(((StyleObject*)self)->style, state, value);
     LVGL_UNLOCK
@@ -687,9 +698,9 @@ pylv_Style_set_transform_width(PyObject *self, PyObject *args) {
 
 static PyObject *
 pylv_Style_set_transform_height(PyObject *self, PyObject *args) {
-    int value;
+    short int value;
     int state;
-    if (!PyArg_ParseTuple(args, "ii", &state, &value)) return NULL;
+    if (!PyArg_ParseTuple(args, "ih", &state, &value)) return NULL;
     LVGL_LOCK
     lv_style_set_transform_height(((StyleObject*)self)->style, state, value);
     LVGL_UNLOCK
@@ -698,9 +709,9 @@ pylv_Style_set_transform_height(PyObject *self, PyObject *args) {
 
 static PyObject *
 pylv_Style_set_transform_angle(PyObject *self, PyObject *args) {
-    int value;
+    short int value;
     int state;
-    if (!PyArg_ParseTuple(args, "ii", &state, &value)) return NULL;
+    if (!PyArg_ParseTuple(args, "ih", &state, &value)) return NULL;
     LVGL_LOCK
     lv_style_set_transform_angle(((StyleObject*)self)->style, state, value);
     LVGL_UNLOCK
@@ -709,9 +720,9 @@ pylv_Style_set_transform_angle(PyObject *self, PyObject *args) {
 
 static PyObject *
 pylv_Style_set_transform_zoom(PyObject *self, PyObject *args) {
-    int value;
+    short int value;
     int state;
-    if (!PyArg_ParseTuple(args, "ii", &state, &value)) return NULL;
+    if (!PyArg_ParseTuple(args, "ih", &state, &value)) return NULL;
     LVGL_LOCK
     lv_style_set_transform_zoom(((StyleObject*)self)->style, state, value);
     LVGL_UNLOCK
@@ -719,10 +730,21 @@ pylv_Style_set_transform_zoom(PyObject *self, PyObject *args) {
 }
 
 static PyObject *
-pylv_Style_set_pad_top(PyObject *self, PyObject *args) {
-    int value;
+pylv_Style_set_opa_scale(PyObject *self, PyObject *args) {
+    unsigned char value;
     int state;
-    if (!PyArg_ParseTuple(args, "ii", &state, &value)) return NULL;
+    if (!PyArg_ParseTuple(args, "ib", &state, &value)) return NULL;
+    LVGL_LOCK
+    lv_style_set_opa_scale(((StyleObject*)self)->style, state, value);
+    LVGL_UNLOCK
+    Py_RETURN_NONE;
+}
+
+static PyObject *
+pylv_Style_set_pad_top(PyObject *self, PyObject *args) {
+    short int value;
+    int state;
+    if (!PyArg_ParseTuple(args, "ih", &state, &value)) return NULL;
     LVGL_LOCK
     lv_style_set_pad_top(((StyleObject*)self)->style, state, value);
     LVGL_UNLOCK
@@ -731,9 +753,9 @@ pylv_Style_set_pad_top(PyObject *self, PyObject *args) {
 
 static PyObject *
 pylv_Style_set_pad_bottom(PyObject *self, PyObject *args) {
-    int value;
+    short int value;
     int state;
-    if (!PyArg_ParseTuple(args, "ii", &state, &value)) return NULL;
+    if (!PyArg_ParseTuple(args, "ih", &state, &value)) return NULL;
     LVGL_LOCK
     lv_style_set_pad_bottom(((StyleObject*)self)->style, state, value);
     LVGL_UNLOCK
@@ -742,9 +764,9 @@ pylv_Style_set_pad_bottom(PyObject *self, PyObject *args) {
 
 static PyObject *
 pylv_Style_set_pad_left(PyObject *self, PyObject *args) {
-    int value;
+    short int value;
     int state;
-    if (!PyArg_ParseTuple(args, "ii", &state, &value)) return NULL;
+    if (!PyArg_ParseTuple(args, "ih", &state, &value)) return NULL;
     LVGL_LOCK
     lv_style_set_pad_left(((StyleObject*)self)->style, state, value);
     LVGL_UNLOCK
@@ -753,9 +775,9 @@ pylv_Style_set_pad_left(PyObject *self, PyObject *args) {
 
 static PyObject *
 pylv_Style_set_pad_right(PyObject *self, PyObject *args) {
-    int value;
+    short int value;
     int state;
-    if (!PyArg_ParseTuple(args, "ii", &state, &value)) return NULL;
+    if (!PyArg_ParseTuple(args, "ih", &state, &value)) return NULL;
     LVGL_LOCK
     lv_style_set_pad_right(((StyleObject*)self)->style, state, value);
     LVGL_UNLOCK
@@ -764,9 +786,9 @@ pylv_Style_set_pad_right(PyObject *self, PyObject *args) {
 
 static PyObject *
 pylv_Style_set_pad_inner(PyObject *self, PyObject *args) {
-    int value;
+    short int value;
     int state;
-    if (!PyArg_ParseTuple(args, "ii", &state, &value)) return NULL;
+    if (!PyArg_ParseTuple(args, "ih", &state, &value)) return NULL;
     LVGL_LOCK
     lv_style_set_pad_inner(((StyleObject*)self)->style, state, value);
     LVGL_UNLOCK
@@ -775,9 +797,9 @@ pylv_Style_set_pad_inner(PyObject *self, PyObject *args) {
 
 static PyObject *
 pylv_Style_set_margin_top(PyObject *self, PyObject *args) {
-    int value;
+    short int value;
     int state;
-    if (!PyArg_ParseTuple(args, "ii", &state, &value)) return NULL;
+    if (!PyArg_ParseTuple(args, "ih", &state, &value)) return NULL;
     LVGL_LOCK
     lv_style_set_margin_top(((StyleObject*)self)->style, state, value);
     LVGL_UNLOCK
@@ -786,9 +808,9 @@ pylv_Style_set_margin_top(PyObject *self, PyObject *args) {
 
 static PyObject *
 pylv_Style_set_margin_bottom(PyObject *self, PyObject *args) {
-    int value;
+    short int value;
     int state;
-    if (!PyArg_ParseTuple(args, "ii", &state, &value)) return NULL;
+    if (!PyArg_ParseTuple(args, "ih", &state, &value)) return NULL;
     LVGL_LOCK
     lv_style_set_margin_bottom(((StyleObject*)self)->style, state, value);
     LVGL_UNLOCK
@@ -797,9 +819,9 @@ pylv_Style_set_margin_bottom(PyObject *self, PyObject *args) {
 
 static PyObject *
 pylv_Style_set_margin_left(PyObject *self, PyObject *args) {
-    int value;
+    short int value;
     int state;
-    if (!PyArg_ParseTuple(args, "ii", &state, &value)) return NULL;
+    if (!PyArg_ParseTuple(args, "ih", &state, &value)) return NULL;
     LVGL_LOCK
     lv_style_set_margin_left(((StyleObject*)self)->style, state, value);
     LVGL_UNLOCK
@@ -808,9 +830,9 @@ pylv_Style_set_margin_left(PyObject *self, PyObject *args) {
 
 static PyObject *
 pylv_Style_set_margin_right(PyObject *self, PyObject *args) {
-    int value;
+    short int value;
     int state;
-    if (!PyArg_ParseTuple(args, "ii", &state, &value)) return NULL;
+    if (!PyArg_ParseTuple(args, "ih", &state, &value)) return NULL;
     LVGL_LOCK
     lv_style_set_margin_right(((StyleObject*)self)->style, state, value);
     LVGL_UNLOCK
@@ -818,10 +840,21 @@ pylv_Style_set_margin_right(PyObject *self, PyObject *args) {
 }
 
 static PyObject *
-pylv_Style_set_bg_main_stop(PyObject *self, PyObject *args) {
-    int value;
+pylv_Style_set_bg_blend_mode(PyObject *self, PyObject *args) {
+    unsigned char value;
     int state;
-    if (!PyArg_ParseTuple(args, "ii", &state, &value)) return NULL;
+    if (!PyArg_ParseTuple(args, "ib", &state, &value)) return NULL;
+    LVGL_LOCK
+    lv_style_set_bg_blend_mode(((StyleObject*)self)->style, state, value);
+    LVGL_UNLOCK
+    Py_RETURN_NONE;
+}
+
+static PyObject *
+pylv_Style_set_bg_main_stop(PyObject *self, PyObject *args) {
+    short int value;
+    int state;
+    if (!PyArg_ParseTuple(args, "ih", &state, &value)) return NULL;
     LVGL_LOCK
     lv_style_set_bg_main_stop(((StyleObject*)self)->style, state, value);
     LVGL_UNLOCK
@@ -830,9 +863,9 @@ pylv_Style_set_bg_main_stop(PyObject *self, PyObject *args) {
 
 static PyObject *
 pylv_Style_set_bg_grad_stop(PyObject *self, PyObject *args) {
-    int value;
+    short int value;
     int state;
-    if (!PyArg_ParseTuple(args, "ii", &state, &value)) return NULL;
+    if (!PyArg_ParseTuple(args, "ih", &state, &value)) return NULL;
     LVGL_LOCK
     lv_style_set_bg_grad_stop(((StyleObject*)self)->style, state, value);
     LVGL_UNLOCK
@@ -840,10 +873,54 @@ pylv_Style_set_bg_grad_stop(PyObject *self, PyObject *args) {
 }
 
 static PyObject *
-pylv_Style_set_border_width(PyObject *self, PyObject *args) {
-    int value;
+pylv_Style_set_bg_grad_dir(PyObject *self, PyObject *args) {
+    unsigned char value;
     int state;
-    if (!PyArg_ParseTuple(args, "ii", &state, &value)) return NULL;
+    if (!PyArg_ParseTuple(args, "ib", &state, &value)) return NULL;
+    LVGL_LOCK
+    lv_style_set_bg_grad_dir(((StyleObject*)self)->style, state, value);
+    LVGL_UNLOCK
+    Py_RETURN_NONE;
+}
+
+static PyObject *
+pylv_Style_set_bg_color(PyObject *self, PyObject *args) {
+    lv_color16_t value;
+    int state;
+    if (!PyArg_ParseTuple(args, "iH", &state, &value.full)) return NULL;
+    LVGL_LOCK
+    lv_style_set_bg_color(((StyleObject*)self)->style, state, value);
+    LVGL_UNLOCK
+    Py_RETURN_NONE;
+}
+
+static PyObject *
+pylv_Style_set_bg_grad_color(PyObject *self, PyObject *args) {
+    lv_color16_t value;
+    int state;
+    if (!PyArg_ParseTuple(args, "iH", &state, &value.full)) return NULL;
+    LVGL_LOCK
+    lv_style_set_bg_grad_color(((StyleObject*)self)->style, state, value);
+    LVGL_UNLOCK
+    Py_RETURN_NONE;
+}
+
+static PyObject *
+pylv_Style_set_bg_opa(PyObject *self, PyObject *args) {
+    unsigned char value;
+    int state;
+    if (!PyArg_ParseTuple(args, "ib", &state, &value)) return NULL;
+    LVGL_LOCK
+    lv_style_set_bg_opa(((StyleObject*)self)->style, state, value);
+    LVGL_UNLOCK
+    Py_RETURN_NONE;
+}
+
+static PyObject *
+pylv_Style_set_border_width(PyObject *self, PyObject *args) {
+    short int value;
+    int state;
+    if (!PyArg_ParseTuple(args, "ih", &state, &value)) return NULL;
     LVGL_LOCK
     lv_style_set_border_width(((StyleObject*)self)->style, state, value);
     LVGL_UNLOCK
@@ -851,10 +928,65 @@ pylv_Style_set_border_width(PyObject *self, PyObject *args) {
 }
 
 static PyObject *
-pylv_Style_set_outline_width(PyObject *self, PyObject *args) {
+pylv_Style_set_border_side(PyObject *self, PyObject *args) {
+    unsigned char value;
+    int state;
+    if (!PyArg_ParseTuple(args, "ib", &state, &value)) return NULL;
+    LVGL_LOCK
+    lv_style_set_border_side(((StyleObject*)self)->style, state, value);
+    LVGL_UNLOCK
+    Py_RETURN_NONE;
+}
+
+static PyObject *
+pylv_Style_set_border_blend_mode(PyObject *self, PyObject *args) {
+    unsigned char value;
+    int state;
+    if (!PyArg_ParseTuple(args, "ib", &state, &value)) return NULL;
+    LVGL_LOCK
+    lv_style_set_border_blend_mode(((StyleObject*)self)->style, state, value);
+    LVGL_UNLOCK
+    Py_RETURN_NONE;
+}
+
+static PyObject *
+pylv_Style_set_border_post(PyObject *self, PyObject *args) {
     int value;
     int state;
-    if (!PyArg_ParseTuple(args, "ii", &state, &value)) return NULL;
+    if (!PyArg_ParseTuple(args, "ip", &state, &value)) return NULL;
+    LVGL_LOCK
+    lv_style_set_border_post(((StyleObject*)self)->style, state, value);
+    LVGL_UNLOCK
+    Py_RETURN_NONE;
+}
+
+static PyObject *
+pylv_Style_set_border_color(PyObject *self, PyObject *args) {
+    lv_color16_t value;
+    int state;
+    if (!PyArg_ParseTuple(args, "iH", &state, &value.full)) return NULL;
+    LVGL_LOCK
+    lv_style_set_border_color(((StyleObject*)self)->style, state, value);
+    LVGL_UNLOCK
+    Py_RETURN_NONE;
+}
+
+static PyObject *
+pylv_Style_set_border_opa(PyObject *self, PyObject *args) {
+    unsigned char value;
+    int state;
+    if (!PyArg_ParseTuple(args, "ib", &state, &value)) return NULL;
+    LVGL_LOCK
+    lv_style_set_border_opa(((StyleObject*)self)->style, state, value);
+    LVGL_UNLOCK
+    Py_RETURN_NONE;
+}
+
+static PyObject *
+pylv_Style_set_outline_width(PyObject *self, PyObject *args) {
+    short int value;
+    int state;
+    if (!PyArg_ParseTuple(args, "ih", &state, &value)) return NULL;
     LVGL_LOCK
     lv_style_set_outline_width(((StyleObject*)self)->style, state, value);
     LVGL_UNLOCK
@@ -863,9 +995,9 @@ pylv_Style_set_outline_width(PyObject *self, PyObject *args) {
 
 static PyObject *
 pylv_Style_set_outline_pad(PyObject *self, PyObject *args) {
-    int value;
+    short int value;
     int state;
-    if (!PyArg_ParseTuple(args, "ii", &state, &value)) return NULL;
+    if (!PyArg_ParseTuple(args, "ih", &state, &value)) return NULL;
     LVGL_LOCK
     lv_style_set_outline_pad(((StyleObject*)self)->style, state, value);
     LVGL_UNLOCK
@@ -873,10 +1005,43 @@ pylv_Style_set_outline_pad(PyObject *self, PyObject *args) {
 }
 
 static PyObject *
-pylv_Style_set_shadow_width(PyObject *self, PyObject *args) {
-    int value;
+pylv_Style_set_outline_blend_mode(PyObject *self, PyObject *args) {
+    unsigned char value;
     int state;
-    if (!PyArg_ParseTuple(args, "ii", &state, &value)) return NULL;
+    if (!PyArg_ParseTuple(args, "ib", &state, &value)) return NULL;
+    LVGL_LOCK
+    lv_style_set_outline_blend_mode(((StyleObject*)self)->style, state, value);
+    LVGL_UNLOCK
+    Py_RETURN_NONE;
+}
+
+static PyObject *
+pylv_Style_set_outline_color(PyObject *self, PyObject *args) {
+    lv_color16_t value;
+    int state;
+    if (!PyArg_ParseTuple(args, "iH", &state, &value.full)) return NULL;
+    LVGL_LOCK
+    lv_style_set_outline_color(((StyleObject*)self)->style, state, value);
+    LVGL_UNLOCK
+    Py_RETURN_NONE;
+}
+
+static PyObject *
+pylv_Style_set_outline_opa(PyObject *self, PyObject *args) {
+    unsigned char value;
+    int state;
+    if (!PyArg_ParseTuple(args, "ib", &state, &value)) return NULL;
+    LVGL_LOCK
+    lv_style_set_outline_opa(((StyleObject*)self)->style, state, value);
+    LVGL_UNLOCK
+    Py_RETURN_NONE;
+}
+
+static PyObject *
+pylv_Style_set_shadow_width(PyObject *self, PyObject *args) {
+    short int value;
+    int state;
+    if (!PyArg_ParseTuple(args, "ih", &state, &value)) return NULL;
     LVGL_LOCK
     lv_style_set_shadow_width(((StyleObject*)self)->style, state, value);
     LVGL_UNLOCK
@@ -885,9 +1050,9 @@ pylv_Style_set_shadow_width(PyObject *self, PyObject *args) {
 
 static PyObject *
 pylv_Style_set_shadow_ofs_x(PyObject *self, PyObject *args) {
-    int value;
+    short int value;
     int state;
-    if (!PyArg_ParseTuple(args, "ii", &state, &value)) return NULL;
+    if (!PyArg_ParseTuple(args, "ih", &state, &value)) return NULL;
     LVGL_LOCK
     lv_style_set_shadow_ofs_x(((StyleObject*)self)->style, state, value);
     LVGL_UNLOCK
@@ -896,9 +1061,9 @@ pylv_Style_set_shadow_ofs_x(PyObject *self, PyObject *args) {
 
 static PyObject *
 pylv_Style_set_shadow_ofs_y(PyObject *self, PyObject *args) {
-    int value;
+    short int value;
     int state;
-    if (!PyArg_ParseTuple(args, "ii", &state, &value)) return NULL;
+    if (!PyArg_ParseTuple(args, "ih", &state, &value)) return NULL;
     LVGL_LOCK
     lv_style_set_shadow_ofs_y(((StyleObject*)self)->style, state, value);
     LVGL_UNLOCK
@@ -907,9 +1072,9 @@ pylv_Style_set_shadow_ofs_y(PyObject *self, PyObject *args) {
 
 static PyObject *
 pylv_Style_set_shadow_spread(PyObject *self, PyObject *args) {
-    int value;
+    short int value;
     int state;
-    if (!PyArg_ParseTuple(args, "ii", &state, &value)) return NULL;
+    if (!PyArg_ParseTuple(args, "ih", &state, &value)) return NULL;
     LVGL_LOCK
     lv_style_set_shadow_spread(((StyleObject*)self)->style, state, value);
     LVGL_UNLOCK
@@ -917,10 +1082,98 @@ pylv_Style_set_shadow_spread(PyObject *self, PyObject *args) {
 }
 
 static PyObject *
-pylv_Style_set_value_letter_space(PyObject *self, PyObject *args) {
+pylv_Style_set_shadow_blend_mode(PyObject *self, PyObject *args) {
+    unsigned char value;
+    int state;
+    if (!PyArg_ParseTuple(args, "ib", &state, &value)) return NULL;
+    LVGL_LOCK
+    lv_style_set_shadow_blend_mode(((StyleObject*)self)->style, state, value);
+    LVGL_UNLOCK
+    Py_RETURN_NONE;
+}
+
+static PyObject *
+pylv_Style_set_shadow_color(PyObject *self, PyObject *args) {
+    lv_color16_t value;
+    int state;
+    if (!PyArg_ParseTuple(args, "iH", &state, &value.full)) return NULL;
+    LVGL_LOCK
+    lv_style_set_shadow_color(((StyleObject*)self)->style, state, value);
+    LVGL_UNLOCK
+    Py_RETURN_NONE;
+}
+
+static PyObject *
+pylv_Style_set_shadow_opa(PyObject *self, PyObject *args) {
+    unsigned char value;
+    int state;
+    if (!PyArg_ParseTuple(args, "ib", &state, &value)) return NULL;
+    LVGL_LOCK
+    lv_style_set_shadow_opa(((StyleObject*)self)->style, state, value);
+    LVGL_UNLOCK
+    Py_RETURN_NONE;
+}
+
+static PyObject *
+pylv_Style_set_pattern_repeat(PyObject *self, PyObject *args) {
     int value;
     int state;
-    if (!PyArg_ParseTuple(args, "ii", &state, &value)) return NULL;
+    if (!PyArg_ParseTuple(args, "ip", &state, &value)) return NULL;
+    LVGL_LOCK
+    lv_style_set_pattern_repeat(((StyleObject*)self)->style, state, value);
+    LVGL_UNLOCK
+    Py_RETURN_NONE;
+}
+
+static PyObject *
+pylv_Style_set_pattern_blend_mode(PyObject *self, PyObject *args) {
+    unsigned char value;
+    int state;
+    if (!PyArg_ParseTuple(args, "ib", &state, &value)) return NULL;
+    LVGL_LOCK
+    lv_style_set_pattern_blend_mode(((StyleObject*)self)->style, state, value);
+    LVGL_UNLOCK
+    Py_RETURN_NONE;
+}
+
+static PyObject *
+pylv_Style_set_pattern_recolor(PyObject *self, PyObject *args) {
+    lv_color16_t value;
+    int state;
+    if (!PyArg_ParseTuple(args, "iH", &state, &value.full)) return NULL;
+    LVGL_LOCK
+    lv_style_set_pattern_recolor(((StyleObject*)self)->style, state, value);
+    LVGL_UNLOCK
+    Py_RETURN_NONE;
+}
+
+static PyObject *
+pylv_Style_set_pattern_opa(PyObject *self, PyObject *args) {
+    unsigned char value;
+    int state;
+    if (!PyArg_ParseTuple(args, "ib", &state, &value)) return NULL;
+    LVGL_LOCK
+    lv_style_set_pattern_opa(((StyleObject*)self)->style, state, value);
+    LVGL_UNLOCK
+    Py_RETURN_NONE;
+}
+
+static PyObject *
+pylv_Style_set_pattern_recolor_opa(PyObject *self, PyObject *args) {
+    unsigned char value;
+    int state;
+    if (!PyArg_ParseTuple(args, "ib", &state, &value)) return NULL;
+    LVGL_LOCK
+    lv_style_set_pattern_recolor_opa(((StyleObject*)self)->style, state, value);
+    LVGL_UNLOCK
+    Py_RETURN_NONE;
+}
+
+static PyObject *
+pylv_Style_set_value_letter_space(PyObject *self, PyObject *args) {
+    short int value;
+    int state;
+    if (!PyArg_ParseTuple(args, "ih", &state, &value)) return NULL;
     LVGL_LOCK
     lv_style_set_value_letter_space(((StyleObject*)self)->style, state, value);
     LVGL_UNLOCK
@@ -929,9 +1182,9 @@ pylv_Style_set_value_letter_space(PyObject *self, PyObject *args) {
 
 static PyObject *
 pylv_Style_set_value_line_space(PyObject *self, PyObject *args) {
-    int value;
+    short int value;
     int state;
-    if (!PyArg_ParseTuple(args, "ii", &state, &value)) return NULL;
+    if (!PyArg_ParseTuple(args, "ih", &state, &value)) return NULL;
     LVGL_LOCK
     lv_style_set_value_line_space(((StyleObject*)self)->style, state, value);
     LVGL_UNLOCK
@@ -939,10 +1192,21 @@ pylv_Style_set_value_line_space(PyObject *self, PyObject *args) {
 }
 
 static PyObject *
-pylv_Style_set_value_ofs_x(PyObject *self, PyObject *args) {
-    int value;
+pylv_Style_set_value_blend_mode(PyObject *self, PyObject *args) {
+    unsigned char value;
     int state;
-    if (!PyArg_ParseTuple(args, "ii", &state, &value)) return NULL;
+    if (!PyArg_ParseTuple(args, "ib", &state, &value)) return NULL;
+    LVGL_LOCK
+    lv_style_set_value_blend_mode(((StyleObject*)self)->style, state, value);
+    LVGL_UNLOCK
+    Py_RETURN_NONE;
+}
+
+static PyObject *
+pylv_Style_set_value_ofs_x(PyObject *self, PyObject *args) {
+    short int value;
+    int state;
+    if (!PyArg_ParseTuple(args, "ih", &state, &value)) return NULL;
     LVGL_LOCK
     lv_style_set_value_ofs_x(((StyleObject*)self)->style, state, value);
     LVGL_UNLOCK
@@ -951,9 +1215,9 @@ pylv_Style_set_value_ofs_x(PyObject *self, PyObject *args) {
 
 static PyObject *
 pylv_Style_set_value_ofs_y(PyObject *self, PyObject *args) {
-    int value;
+    short int value;
     int state;
-    if (!PyArg_ParseTuple(args, "ii", &state, &value)) return NULL;
+    if (!PyArg_ParseTuple(args, "ih", &state, &value)) return NULL;
     LVGL_LOCK
     lv_style_set_value_ofs_y(((StyleObject*)self)->style, state, value);
     LVGL_UNLOCK
@@ -961,10 +1225,43 @@ pylv_Style_set_value_ofs_y(PyObject *self, PyObject *args) {
 }
 
 static PyObject *
-pylv_Style_set_text_letter_space(PyObject *self, PyObject *args) {
-    int value;
+pylv_Style_set_value_align(PyObject *self, PyObject *args) {
+    unsigned char value;
     int state;
-    if (!PyArg_ParseTuple(args, "ii", &state, &value)) return NULL;
+    if (!PyArg_ParseTuple(args, "ib", &state, &value)) return NULL;
+    LVGL_LOCK
+    lv_style_set_value_align(((StyleObject*)self)->style, state, value);
+    LVGL_UNLOCK
+    Py_RETURN_NONE;
+}
+
+static PyObject *
+pylv_Style_set_value_color(PyObject *self, PyObject *args) {
+    lv_color16_t value;
+    int state;
+    if (!PyArg_ParseTuple(args, "iH", &state, &value.full)) return NULL;
+    LVGL_LOCK
+    lv_style_set_value_color(((StyleObject*)self)->style, state, value);
+    LVGL_UNLOCK
+    Py_RETURN_NONE;
+}
+
+static PyObject *
+pylv_Style_set_value_opa(PyObject *self, PyObject *args) {
+    unsigned char value;
+    int state;
+    if (!PyArg_ParseTuple(args, "ib", &state, &value)) return NULL;
+    LVGL_LOCK
+    lv_style_set_value_opa(((StyleObject*)self)->style, state, value);
+    LVGL_UNLOCK
+    Py_RETURN_NONE;
+}
+
+static PyObject *
+pylv_Style_set_text_letter_space(PyObject *self, PyObject *args) {
+    short int value;
+    int state;
+    if (!PyArg_ParseTuple(args, "ih", &state, &value)) return NULL;
     LVGL_LOCK
     lv_style_set_text_letter_space(((StyleObject*)self)->style, state, value);
     LVGL_UNLOCK
@@ -973,9 +1270,9 @@ pylv_Style_set_text_letter_space(PyObject *self, PyObject *args) {
 
 static PyObject *
 pylv_Style_set_text_line_space(PyObject *self, PyObject *args) {
-    int value;
+    short int value;
     int state;
-    if (!PyArg_ParseTuple(args, "ii", &state, &value)) return NULL;
+    if (!PyArg_ParseTuple(args, "ih", &state, &value)) return NULL;
     LVGL_LOCK
     lv_style_set_text_line_space(((StyleObject*)self)->style, state, value);
     LVGL_UNLOCK
@@ -983,10 +1280,76 @@ pylv_Style_set_text_line_space(PyObject *self, PyObject *args) {
 }
 
 static PyObject *
-pylv_Style_set_line_width(PyObject *self, PyObject *args) {
-    int value;
+pylv_Style_set_text_decor(PyObject *self, PyObject *args) {
+    unsigned char value;
     int state;
-    if (!PyArg_ParseTuple(args, "ii", &state, &value)) return NULL;
+    if (!PyArg_ParseTuple(args, "ib", &state, &value)) return NULL;
+    LVGL_LOCK
+    lv_style_set_text_decor(((StyleObject*)self)->style, state, value);
+    LVGL_UNLOCK
+    Py_RETURN_NONE;
+}
+
+static PyObject *
+pylv_Style_set_text_blend_mode(PyObject *self, PyObject *args) {
+    unsigned char value;
+    int state;
+    if (!PyArg_ParseTuple(args, "ib", &state, &value)) return NULL;
+    LVGL_LOCK
+    lv_style_set_text_blend_mode(((StyleObject*)self)->style, state, value);
+    LVGL_UNLOCK
+    Py_RETURN_NONE;
+}
+
+static PyObject *
+pylv_Style_set_text_color(PyObject *self, PyObject *args) {
+    lv_color16_t value;
+    int state;
+    if (!PyArg_ParseTuple(args, "iH", &state, &value.full)) return NULL;
+    LVGL_LOCK
+    lv_style_set_text_color(((StyleObject*)self)->style, state, value);
+    LVGL_UNLOCK
+    Py_RETURN_NONE;
+}
+
+static PyObject *
+pylv_Style_set_text_sel_color(PyObject *self, PyObject *args) {
+    lv_color16_t value;
+    int state;
+    if (!PyArg_ParseTuple(args, "iH", &state, &value.full)) return NULL;
+    LVGL_LOCK
+    lv_style_set_text_sel_color(((StyleObject*)self)->style, state, value);
+    LVGL_UNLOCK
+    Py_RETURN_NONE;
+}
+
+static PyObject *
+pylv_Style_set_text_sel_bg_color(PyObject *self, PyObject *args) {
+    lv_color16_t value;
+    int state;
+    if (!PyArg_ParseTuple(args, "iH", &state, &value.full)) return NULL;
+    LVGL_LOCK
+    lv_style_set_text_sel_bg_color(((StyleObject*)self)->style, state, value);
+    LVGL_UNLOCK
+    Py_RETURN_NONE;
+}
+
+static PyObject *
+pylv_Style_set_text_opa(PyObject *self, PyObject *args) {
+    unsigned char value;
+    int state;
+    if (!PyArg_ParseTuple(args, "ib", &state, &value)) return NULL;
+    LVGL_LOCK
+    lv_style_set_text_opa(((StyleObject*)self)->style, state, value);
+    LVGL_UNLOCK
+    Py_RETURN_NONE;
+}
+
+static PyObject *
+pylv_Style_set_line_width(PyObject *self, PyObject *args) {
+    short int value;
+    int state;
+    if (!PyArg_ParseTuple(args, "ih", &state, &value)) return NULL;
     LVGL_LOCK
     lv_style_set_line_width(((StyleObject*)self)->style, state, value);
     LVGL_UNLOCK
@@ -994,10 +1357,21 @@ pylv_Style_set_line_width(PyObject *self, PyObject *args) {
 }
 
 static PyObject *
-pylv_Style_set_line_dash_width(PyObject *self, PyObject *args) {
-    int value;
+pylv_Style_set_line_blend_mode(PyObject *self, PyObject *args) {
+    unsigned char value;
     int state;
-    if (!PyArg_ParseTuple(args, "ii", &state, &value)) return NULL;
+    if (!PyArg_ParseTuple(args, "ib", &state, &value)) return NULL;
+    LVGL_LOCK
+    lv_style_set_line_blend_mode(((StyleObject*)self)->style, state, value);
+    LVGL_UNLOCK
+    Py_RETURN_NONE;
+}
+
+static PyObject *
+pylv_Style_set_line_dash_width(PyObject *self, PyObject *args) {
+    short int value;
+    int state;
+    if (!PyArg_ParseTuple(args, "ih", &state, &value)) return NULL;
     LVGL_LOCK
     lv_style_set_line_dash_width(((StyleObject*)self)->style, state, value);
     LVGL_UNLOCK
@@ -1006,9 +1380,9 @@ pylv_Style_set_line_dash_width(PyObject *self, PyObject *args) {
 
 static PyObject *
 pylv_Style_set_line_dash_gap(PyObject *self, PyObject *args) {
-    int value;
+    short int value;
     int state;
-    if (!PyArg_ParseTuple(args, "ii", &state, &value)) return NULL;
+    if (!PyArg_ParseTuple(args, "ih", &state, &value)) return NULL;
     LVGL_LOCK
     lv_style_set_line_dash_gap(((StyleObject*)self)->style, state, value);
     LVGL_UNLOCK
@@ -1016,10 +1390,87 @@ pylv_Style_set_line_dash_gap(PyObject *self, PyObject *args) {
 }
 
 static PyObject *
-pylv_Style_set_transition_time(PyObject *self, PyObject *args) {
+pylv_Style_set_line_rounded(PyObject *self, PyObject *args) {
     int value;
     int state;
-    if (!PyArg_ParseTuple(args, "ii", &state, &value)) return NULL;
+    if (!PyArg_ParseTuple(args, "ip", &state, &value)) return NULL;
+    LVGL_LOCK
+    lv_style_set_line_rounded(((StyleObject*)self)->style, state, value);
+    LVGL_UNLOCK
+    Py_RETURN_NONE;
+}
+
+static PyObject *
+pylv_Style_set_line_color(PyObject *self, PyObject *args) {
+    lv_color16_t value;
+    int state;
+    if (!PyArg_ParseTuple(args, "iH", &state, &value.full)) return NULL;
+    LVGL_LOCK
+    lv_style_set_line_color(((StyleObject*)self)->style, state, value);
+    LVGL_UNLOCK
+    Py_RETURN_NONE;
+}
+
+static PyObject *
+pylv_Style_set_line_opa(PyObject *self, PyObject *args) {
+    unsigned char value;
+    int state;
+    if (!PyArg_ParseTuple(args, "ib", &state, &value)) return NULL;
+    LVGL_LOCK
+    lv_style_set_line_opa(((StyleObject*)self)->style, state, value);
+    LVGL_UNLOCK
+    Py_RETURN_NONE;
+}
+
+static PyObject *
+pylv_Style_set_image_blend_mode(PyObject *self, PyObject *args) {
+    unsigned char value;
+    int state;
+    if (!PyArg_ParseTuple(args, "ib", &state, &value)) return NULL;
+    LVGL_LOCK
+    lv_style_set_image_blend_mode(((StyleObject*)self)->style, state, value);
+    LVGL_UNLOCK
+    Py_RETURN_NONE;
+}
+
+static PyObject *
+pylv_Style_set_image_recolor(PyObject *self, PyObject *args) {
+    lv_color16_t value;
+    int state;
+    if (!PyArg_ParseTuple(args, "iH", &state, &value.full)) return NULL;
+    LVGL_LOCK
+    lv_style_set_image_recolor(((StyleObject*)self)->style, state, value);
+    LVGL_UNLOCK
+    Py_RETURN_NONE;
+}
+
+static PyObject *
+pylv_Style_set_image_opa(PyObject *self, PyObject *args) {
+    unsigned char value;
+    int state;
+    if (!PyArg_ParseTuple(args, "ib", &state, &value)) return NULL;
+    LVGL_LOCK
+    lv_style_set_image_opa(((StyleObject*)self)->style, state, value);
+    LVGL_UNLOCK
+    Py_RETURN_NONE;
+}
+
+static PyObject *
+pylv_Style_set_image_recolor_opa(PyObject *self, PyObject *args) {
+    unsigned char value;
+    int state;
+    if (!PyArg_ParseTuple(args, "ib", &state, &value)) return NULL;
+    LVGL_LOCK
+    lv_style_set_image_recolor_opa(((StyleObject*)self)->style, state, value);
+    LVGL_UNLOCK
+    Py_RETURN_NONE;
+}
+
+static PyObject *
+pylv_Style_set_transition_time(PyObject *self, PyObject *args) {
+    short int value;
+    int state;
+    if (!PyArg_ParseTuple(args, "ih", &state, &value)) return NULL;
     LVGL_LOCK
     lv_style_set_transition_time(((StyleObject*)self)->style, state, value);
     LVGL_UNLOCK
@@ -1028,9 +1479,9 @@ pylv_Style_set_transition_time(PyObject *self, PyObject *args) {
 
 static PyObject *
 pylv_Style_set_transition_delay(PyObject *self, PyObject *args) {
-    int value;
+    short int value;
     int state;
-    if (!PyArg_ParseTuple(args, "ii", &state, &value)) return NULL;
+    if (!PyArg_ParseTuple(args, "ih", &state, &value)) return NULL;
     LVGL_LOCK
     lv_style_set_transition_delay(((StyleObject*)self)->style, state, value);
     LVGL_UNLOCK
@@ -1039,9 +1490,9 @@ pylv_Style_set_transition_delay(PyObject *self, PyObject *args) {
 
 static PyObject *
 pylv_Style_set_transition_prop_1(PyObject *self, PyObject *args) {
-    int value;
+    short int value;
     int state;
-    if (!PyArg_ParseTuple(args, "ii", &state, &value)) return NULL;
+    if (!PyArg_ParseTuple(args, "ih", &state, &value)) return NULL;
     LVGL_LOCK
     lv_style_set_transition_prop_1(((StyleObject*)self)->style, state, value);
     LVGL_UNLOCK
@@ -1050,9 +1501,9 @@ pylv_Style_set_transition_prop_1(PyObject *self, PyObject *args) {
 
 static PyObject *
 pylv_Style_set_transition_prop_2(PyObject *self, PyObject *args) {
-    int value;
+    short int value;
     int state;
-    if (!PyArg_ParseTuple(args, "ii", &state, &value)) return NULL;
+    if (!PyArg_ParseTuple(args, "ih", &state, &value)) return NULL;
     LVGL_LOCK
     lv_style_set_transition_prop_2(((StyleObject*)self)->style, state, value);
     LVGL_UNLOCK
@@ -1061,9 +1512,9 @@ pylv_Style_set_transition_prop_2(PyObject *self, PyObject *args) {
 
 static PyObject *
 pylv_Style_set_transition_prop_3(PyObject *self, PyObject *args) {
-    int value;
+    short int value;
     int state;
-    if (!PyArg_ParseTuple(args, "ii", &state, &value)) return NULL;
+    if (!PyArg_ParseTuple(args, "ih", &state, &value)) return NULL;
     LVGL_LOCK
     lv_style_set_transition_prop_3(((StyleObject*)self)->style, state, value);
     LVGL_UNLOCK
@@ -1072,9 +1523,9 @@ pylv_Style_set_transition_prop_3(PyObject *self, PyObject *args) {
 
 static PyObject *
 pylv_Style_set_transition_prop_4(PyObject *self, PyObject *args) {
-    int value;
+    short int value;
     int state;
-    if (!PyArg_ParseTuple(args, "ii", &state, &value)) return NULL;
+    if (!PyArg_ParseTuple(args, "ih", &state, &value)) return NULL;
     LVGL_LOCK
     lv_style_set_transition_prop_4(((StyleObject*)self)->style, state, value);
     LVGL_UNLOCK
@@ -1083,9 +1534,9 @@ pylv_Style_set_transition_prop_4(PyObject *self, PyObject *args) {
 
 static PyObject *
 pylv_Style_set_transition_prop_5(PyObject *self, PyObject *args) {
-    int value;
+    short int value;
     int state;
-    if (!PyArg_ParseTuple(args, "ii", &state, &value)) return NULL;
+    if (!PyArg_ParseTuple(args, "ih", &state, &value)) return NULL;
     LVGL_LOCK
     lv_style_set_transition_prop_5(((StyleObject*)self)->style, state, value);
     LVGL_UNLOCK
@@ -1094,9 +1545,9 @@ pylv_Style_set_transition_prop_5(PyObject *self, PyObject *args) {
 
 static PyObject *
 pylv_Style_set_transition_prop_6(PyObject *self, PyObject *args) {
-    int value;
+    short int value;
     int state;
-    if (!PyArg_ParseTuple(args, "ii", &state, &value)) return NULL;
+    if (!PyArg_ParseTuple(args, "ih", &state, &value)) return NULL;
     LVGL_LOCK
     lv_style_set_transition_prop_6(((StyleObject*)self)->style, state, value);
     LVGL_UNLOCK
@@ -1105,9 +1556,9 @@ pylv_Style_set_transition_prop_6(PyObject *self, PyObject *args) {
 
 static PyObject *
 pylv_Style_set_scale_width(PyObject *self, PyObject *args) {
-    int value;
+    short int value;
     int state;
-    if (!PyArg_ParseTuple(args, "ii", &state, &value)) return NULL;
+    if (!PyArg_ParseTuple(args, "ih", &state, &value)) return NULL;
     LVGL_LOCK
     lv_style_set_scale_width(((StyleObject*)self)->style, state, value);
     LVGL_UNLOCK
@@ -1116,9 +1567,9 @@ pylv_Style_set_scale_width(PyObject *self, PyObject *args) {
 
 static PyObject *
 pylv_Style_set_scale_border_width(PyObject *self, PyObject *args) {
-    int value;
+    short int value;
     int state;
-    if (!PyArg_ParseTuple(args, "ii", &state, &value)) return NULL;
+    if (!PyArg_ParseTuple(args, "ih", &state, &value)) return NULL;
     LVGL_LOCK
     lv_style_set_scale_border_width(((StyleObject*)self)->style, state, value);
     LVGL_UNLOCK
@@ -1127,9 +1578,9 @@ pylv_Style_set_scale_border_width(PyObject *self, PyObject *args) {
 
 static PyObject *
 pylv_Style_set_scale_end_border_width(PyObject *self, PyObject *args) {
-    int value;
+    short int value;
     int state;
-    if (!PyArg_ParseTuple(args, "ii", &state, &value)) return NULL;
+    if (!PyArg_ParseTuple(args, "ih", &state, &value)) return NULL;
     LVGL_LOCK
     lv_style_set_scale_end_border_width(((StyleObject*)self)->style, state, value);
     LVGL_UNLOCK
@@ -1138,9 +1589,9 @@ pylv_Style_set_scale_end_border_width(PyObject *self, PyObject *args) {
 
 static PyObject *
 pylv_Style_set_scale_end_line_width(PyObject *self, PyObject *args) {
-    int value;
+    short int value;
     int state;
-    if (!PyArg_ParseTuple(args, "ii", &state, &value)) return NULL;
+    if (!PyArg_ParseTuple(args, "ih", &state, &value)) return NULL;
     LVGL_LOCK
     lv_style_set_scale_end_line_width(((StyleObject*)self)->style, state, value);
     LVGL_UNLOCK
@@ -1148,10 +1599,32 @@ pylv_Style_set_scale_end_line_width(PyObject *self, PyObject *args) {
 }
 
 static PyObject *
-pylv_Style_set_pad_all(PyObject *self, PyObject *args) {
-    int value;
+pylv_Style_set_scale_grad_color(PyObject *self, PyObject *args) {
+    lv_color16_t value;
     int state;
-    if (!PyArg_ParseTuple(args, "ii", &state, &value)) return NULL;
+    if (!PyArg_ParseTuple(args, "iH", &state, &value.full)) return NULL;
+    LVGL_LOCK
+    lv_style_set_scale_grad_color(((StyleObject*)self)->style, state, value);
+    LVGL_UNLOCK
+    Py_RETURN_NONE;
+}
+
+static PyObject *
+pylv_Style_set_scale_end_color(PyObject *self, PyObject *args) {
+    lv_color16_t value;
+    int state;
+    if (!PyArg_ParseTuple(args, "iH", &state, &value.full)) return NULL;
+    LVGL_LOCK
+    lv_style_set_scale_end_color(((StyleObject*)self)->style, state, value);
+    LVGL_UNLOCK
+    Py_RETURN_NONE;
+}
+
+static PyObject *
+pylv_Style_set_pad_all(PyObject *self, PyObject *args) {
+    short int value;
+    int state;
+    if (!PyArg_ParseTuple(args, "ih", &state, &value)) return NULL;
     LVGL_LOCK
     lv_style_set_pad_all(((StyleObject*)self)->style, state, value);
     LVGL_UNLOCK
@@ -1160,9 +1633,9 @@ pylv_Style_set_pad_all(PyObject *self, PyObject *args) {
 
 static PyObject *
 pylv_Style_set_pad_hor(PyObject *self, PyObject *args) {
-    int value;
+    short int value;
     int state;
-    if (!PyArg_ParseTuple(args, "ii", &state, &value)) return NULL;
+    if (!PyArg_ParseTuple(args, "ih", &state, &value)) return NULL;
     LVGL_LOCK
     lv_style_set_pad_hor(((StyleObject*)self)->style, state, value);
     LVGL_UNLOCK
@@ -1171,9 +1644,9 @@ pylv_Style_set_pad_hor(PyObject *self, PyObject *args) {
 
 static PyObject *
 pylv_Style_set_pad_ver(PyObject *self, PyObject *args) {
-    int value;
+    short int value;
     int state;
-    if (!PyArg_ParseTuple(args, "ii", &state, &value)) return NULL;
+    if (!PyArg_ParseTuple(args, "ih", &state, &value)) return NULL;
     LVGL_LOCK
     lv_style_set_pad_ver(((StyleObject*)self)->style, state, value);
     LVGL_UNLOCK
@@ -1182,9 +1655,9 @@ pylv_Style_set_pad_ver(PyObject *self, PyObject *args) {
 
 static PyObject *
 pylv_Style_set_margin_all(PyObject *self, PyObject *args) {
-    int value;
+    short int value;
     int state;
-    if (!PyArg_ParseTuple(args, "ii", &state, &value)) return NULL;
+    if (!PyArg_ParseTuple(args, "ih", &state, &value)) return NULL;
     LVGL_LOCK
     lv_style_set_margin_all(((StyleObject*)self)->style, state, value);
     LVGL_UNLOCK
@@ -1193,9 +1666,9 @@ pylv_Style_set_margin_all(PyObject *self, PyObject *args) {
 
 static PyObject *
 pylv_Style_set_margin_hor(PyObject *self, PyObject *args) {
-    int value;
+    short int value;
     int state;
-    if (!PyArg_ParseTuple(args, "ii", &state, &value)) return NULL;
+    if (!PyArg_ParseTuple(args, "ih", &state, &value)) return NULL;
     LVGL_LOCK
     lv_style_set_margin_hor(((StyleObject*)self)->style, state, value);
     LVGL_UNLOCK
@@ -1204,9 +1677,9 @@ pylv_Style_set_margin_hor(PyObject *self, PyObject *args) {
 
 static PyObject *
 pylv_Style_set_margin_ver(PyObject *self, PyObject *args) {
-    int value;
+    short int value;
     int state;
-    if (!PyArg_ParseTuple(args, "ii", &state, &value)) return NULL;
+    if (!PyArg_ParseTuple(args, "ih", &state, &value)) return NULL;
     LVGL_LOCK
     lv_style_set_margin_ver(((StyleObject*)self)->style, state, value);
     LVGL_UNLOCK
@@ -1218,6 +1691,8 @@ static PyMethodDef Style_methods[] = {
 
     {"set_radius", (PyCFunction) pylv_Style_set_radius, METH_VARARGS, "test doc"},
 
+    {"set_clip_corner", (PyCFunction) pylv_Style_set_clip_corner, METH_VARARGS, "test doc"},
+
     {"set_size", (PyCFunction) pylv_Style_set_size, METH_VARARGS, "test doc"},
 
     {"set_transform_width", (PyCFunction) pylv_Style_set_transform_width, METH_VARARGS, "test doc"},
@@ -1227,6 +1702,8 @@ static PyMethodDef Style_methods[] = {
     {"set_transform_angle", (PyCFunction) pylv_Style_set_transform_angle, METH_VARARGS, "test doc"},
 
     {"set_transform_zoom", (PyCFunction) pylv_Style_set_transform_zoom, METH_VARARGS, "test doc"},
+
+    {"set_opa_scale", (PyCFunction) pylv_Style_set_opa_scale, METH_VARARGS, "test doc"},
 
     {"set_pad_top", (PyCFunction) pylv_Style_set_pad_top, METH_VARARGS, "test doc"},
 
@@ -1246,15 +1723,41 @@ static PyMethodDef Style_methods[] = {
 
     {"set_margin_right", (PyCFunction) pylv_Style_set_margin_right, METH_VARARGS, "test doc"},
 
+    {"set_bg_blend_mode", (PyCFunction) pylv_Style_set_bg_blend_mode, METH_VARARGS, "test doc"},
+
     {"set_bg_main_stop", (PyCFunction) pylv_Style_set_bg_main_stop, METH_VARARGS, "test doc"},
 
     {"set_bg_grad_stop", (PyCFunction) pylv_Style_set_bg_grad_stop, METH_VARARGS, "test doc"},
 
+    {"set_bg_grad_dir", (PyCFunction) pylv_Style_set_bg_grad_dir, METH_VARARGS, "test doc"},
+
+    {"set_bg_color", (PyCFunction) pylv_Style_set_bg_color, METH_VARARGS, "test doc"},
+
+    {"set_bg_grad_color", (PyCFunction) pylv_Style_set_bg_grad_color, METH_VARARGS, "test doc"},
+
+    {"set_bg_opa", (PyCFunction) pylv_Style_set_bg_opa, METH_VARARGS, "test doc"},
+
     {"set_border_width", (PyCFunction) pylv_Style_set_border_width, METH_VARARGS, "test doc"},
+
+    {"set_border_side", (PyCFunction) pylv_Style_set_border_side, METH_VARARGS, "test doc"},
+
+    {"set_border_blend_mode", (PyCFunction) pylv_Style_set_border_blend_mode, METH_VARARGS, "test doc"},
+
+    {"set_border_post", (PyCFunction) pylv_Style_set_border_post, METH_VARARGS, "test doc"},
+
+    {"set_border_color", (PyCFunction) pylv_Style_set_border_color, METH_VARARGS, "test doc"},
+
+    {"set_border_opa", (PyCFunction) pylv_Style_set_border_opa, METH_VARARGS, "test doc"},
 
     {"set_outline_width", (PyCFunction) pylv_Style_set_outline_width, METH_VARARGS, "test doc"},
 
     {"set_outline_pad", (PyCFunction) pylv_Style_set_outline_pad, METH_VARARGS, "test doc"},
+
+    {"set_outline_blend_mode", (PyCFunction) pylv_Style_set_outline_blend_mode, METH_VARARGS, "test doc"},
+
+    {"set_outline_color", (PyCFunction) pylv_Style_set_outline_color, METH_VARARGS, "test doc"},
+
+    {"set_outline_opa", (PyCFunction) pylv_Style_set_outline_opa, METH_VARARGS, "test doc"},
 
     {"set_shadow_width", (PyCFunction) pylv_Style_set_shadow_width, METH_VARARGS, "test doc"},
 
@@ -1264,23 +1767,75 @@ static PyMethodDef Style_methods[] = {
 
     {"set_shadow_spread", (PyCFunction) pylv_Style_set_shadow_spread, METH_VARARGS, "test doc"},
 
+    {"set_shadow_blend_mode", (PyCFunction) pylv_Style_set_shadow_blend_mode, METH_VARARGS, "test doc"},
+
+    {"set_shadow_color", (PyCFunction) pylv_Style_set_shadow_color, METH_VARARGS, "test doc"},
+
+    {"set_shadow_opa", (PyCFunction) pylv_Style_set_shadow_opa, METH_VARARGS, "test doc"},
+
+    {"set_pattern_repeat", (PyCFunction) pylv_Style_set_pattern_repeat, METH_VARARGS, "test doc"},
+
+    {"set_pattern_blend_mode", (PyCFunction) pylv_Style_set_pattern_blend_mode, METH_VARARGS, "test doc"},
+
+    {"set_pattern_recolor", (PyCFunction) pylv_Style_set_pattern_recolor, METH_VARARGS, "test doc"},
+
+    {"set_pattern_opa", (PyCFunction) pylv_Style_set_pattern_opa, METH_VARARGS, "test doc"},
+
+    {"set_pattern_recolor_opa", (PyCFunction) pylv_Style_set_pattern_recolor_opa, METH_VARARGS, "test doc"},
+
     {"set_value_letter_space", (PyCFunction) pylv_Style_set_value_letter_space, METH_VARARGS, "test doc"},
 
     {"set_value_line_space", (PyCFunction) pylv_Style_set_value_line_space, METH_VARARGS, "test doc"},
+
+    {"set_value_blend_mode", (PyCFunction) pylv_Style_set_value_blend_mode, METH_VARARGS, "test doc"},
 
     {"set_value_ofs_x", (PyCFunction) pylv_Style_set_value_ofs_x, METH_VARARGS, "test doc"},
 
     {"set_value_ofs_y", (PyCFunction) pylv_Style_set_value_ofs_y, METH_VARARGS, "test doc"},
 
+    {"set_value_align", (PyCFunction) pylv_Style_set_value_align, METH_VARARGS, "test doc"},
+
+    {"set_value_color", (PyCFunction) pylv_Style_set_value_color, METH_VARARGS, "test doc"},
+
+    {"set_value_opa", (PyCFunction) pylv_Style_set_value_opa, METH_VARARGS, "test doc"},
+
     {"set_text_letter_space", (PyCFunction) pylv_Style_set_text_letter_space, METH_VARARGS, "test doc"},
 
     {"set_text_line_space", (PyCFunction) pylv_Style_set_text_line_space, METH_VARARGS, "test doc"},
 
+    {"set_text_decor", (PyCFunction) pylv_Style_set_text_decor, METH_VARARGS, "test doc"},
+
+    {"set_text_blend_mode", (PyCFunction) pylv_Style_set_text_blend_mode, METH_VARARGS, "test doc"},
+
+    {"set_text_color", (PyCFunction) pylv_Style_set_text_color, METH_VARARGS, "test doc"},
+
+    {"set_text_sel_color", (PyCFunction) pylv_Style_set_text_sel_color, METH_VARARGS, "test doc"},
+
+    {"set_text_sel_bg_color", (PyCFunction) pylv_Style_set_text_sel_bg_color, METH_VARARGS, "test doc"},
+
+    {"set_text_opa", (PyCFunction) pylv_Style_set_text_opa, METH_VARARGS, "test doc"},
+
     {"set_line_width", (PyCFunction) pylv_Style_set_line_width, METH_VARARGS, "test doc"},
+
+    {"set_line_blend_mode", (PyCFunction) pylv_Style_set_line_blend_mode, METH_VARARGS, "test doc"},
 
     {"set_line_dash_width", (PyCFunction) pylv_Style_set_line_dash_width, METH_VARARGS, "test doc"},
 
     {"set_line_dash_gap", (PyCFunction) pylv_Style_set_line_dash_gap, METH_VARARGS, "test doc"},
+
+    {"set_line_rounded", (PyCFunction) pylv_Style_set_line_rounded, METH_VARARGS, "test doc"},
+
+    {"set_line_color", (PyCFunction) pylv_Style_set_line_color, METH_VARARGS, "test doc"},
+
+    {"set_line_opa", (PyCFunction) pylv_Style_set_line_opa, METH_VARARGS, "test doc"},
+
+    {"set_image_blend_mode", (PyCFunction) pylv_Style_set_image_blend_mode, METH_VARARGS, "test doc"},
+
+    {"set_image_recolor", (PyCFunction) pylv_Style_set_image_recolor, METH_VARARGS, "test doc"},
+
+    {"set_image_opa", (PyCFunction) pylv_Style_set_image_opa, METH_VARARGS, "test doc"},
+
+    {"set_image_recolor_opa", (PyCFunction) pylv_Style_set_image_recolor_opa, METH_VARARGS, "test doc"},
 
     {"set_transition_time", (PyCFunction) pylv_Style_set_transition_time, METH_VARARGS, "test doc"},
 
@@ -1305,6 +1860,10 @@ static PyMethodDef Style_methods[] = {
     {"set_scale_end_border_width", (PyCFunction) pylv_Style_set_scale_end_border_width, METH_VARARGS, "test doc"},
 
     {"set_scale_end_line_width", (PyCFunction) pylv_Style_set_scale_end_line_width, METH_VARARGS, "test doc"},
+
+    {"set_scale_grad_color", (PyCFunction) pylv_Style_set_scale_grad_color, METH_VARARGS, "test doc"},
+
+    {"set_scale_end_color", (PyCFunction) pylv_Style_set_scale_end_color, METH_VARARGS, "test doc"},
 
     {"set_pad_all", (PyCFunction) pylv_Style_set_pad_all, METH_VARARGS, "test doc"},
 

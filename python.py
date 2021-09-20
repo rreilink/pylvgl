@@ -66,7 +66,7 @@ class PythonObject(Object):
         object = self
         
         if isinstance(method, CustomMethod):
-            return '' # Custom implementation is in lvglmodule_template.c
+            return ''  # Custom implementation is in lvglmodule_template.c
     
         
         startCode = f'''
@@ -347,11 +347,26 @@ static int
         
         return bitfieldscode + code
 
+
 class PythonStyleSetter(StyleSetter):
+    # TODO: share with PythonObject
+    TYPES = {
+        'bool':      ('p', 'int', ''),
+        'int16_t':   ('h', 'short int', ''),
+        'uint8_t':   ('b', 'unsigned char', ''),
+        'lv_color16_t': ('H', 'lv_color16_t', '.full'), #TODO: accept lv_color_t object instead of integer
+
+    }
+    def __init__(self, name, decl, bindingsgenerator):
+        super().__init__(name, decl, bindingsgenerator)
+        self.type = bindingsgenerator.deref_typedef(type_repr(self.decl.type.args.params[2].type))
+        self.parsefmt, self.valuedtype, self.member = self.TYPES.get(self.type, (None, None, None))
+
     @property
-    def methodname(self): # The name of the attribute lv_style_set_radius -> set_radius
+    def methodname(self):  # The name of the attribute lv_style_set_radius -> set_radius
         return stripstart(self.name, 'lv_style_') 
-    
+
+
 class PythonBindingsGenerator(BindingsGenerator):
     templatefile = 'lvglmodule_template.c'
     objectclass = PythonObject
@@ -383,15 +398,21 @@ class PythonBindingsGenerator(BindingsGenerator):
         for function in skipfunctions:
             obj, method = re.match('lv_([A-Za-z0-9]+)_(\w+)$', function).groups()
             del objects[obj].methods[method]
-            
-        
-        removestylesetters = [name for name, stylesetter in self.stylesetters.items()
-            if type_repr(stylesetter.decl.type.args.params[2].type)!='lv_style_int_t']
-        
-        for name in removestylesetters:
+
+        # TODO: make StyleSetter class responsible for knowing wether or not it is supported
+        supported = {'uint8_t', 'bool', 'lv_color16_t', 'int16_t'}
+        removestylesetters = {name:stylesetter for name, stylesetter in self.stylesetters.items()
+            if stylesetter.type not in supported}
+
+        styletypes = set()
+        for name, stylesetter in removestylesetters.items():
+            styletypes.add(stylesetter.type)
+            print(name, stylesetter.type)
             del self.stylesetters[name]
                 
-        
+        print(styletypes)
+        #TODO: style setters type aware (e.g. bool, int16_t)
+
     @property
     def struct_inttypes(self):
         

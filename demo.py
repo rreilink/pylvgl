@@ -61,6 +61,7 @@ l1.set_style_local_text_letter_space(lvgl.BTN_PART.MAIN, lvgl.STATE.DEFAULT, 10)
 
 style = lvgl.Style()
 style.set_radius(lvgl.STATE.DEFAULT, 10)
+style.set_bg_color(lvgl.STATE.DEFAULT, lvgl.COLOR.AQUA.full)
 b1.add_style(lvgl.BTN_PART.MAIN, style)
 
 #b1.set_style_local_radius(lvgl.BTN_PART.MAIN, lvgl.STATE.DEFAULT, 10)

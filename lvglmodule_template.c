@@ -280,9 +280,9 @@ Style_init(StyleObject *self, PyObject *args, PyObject *kwds)
 <<<stylesetters:
 static PyObject *
 pylv_Style_{methodname}(PyObject *self, PyObject *args) {{
-    int value;
+    {valuedtype} value;
     int state;
-    if (!PyArg_ParseTuple(args, "ii", &state, &value)) return NULL;
+    if (!PyArg_ParseTuple(args, "i{parsefmt}", &state, &value{member})) return NULL;
     LVGL_LOCK
     {name}(((StyleObject*)self)->style, state, value);
     LVGL_UNLOCK

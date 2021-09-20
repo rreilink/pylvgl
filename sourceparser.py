@@ -127,7 +127,7 @@ class LvglSourceParser:
                     # typedef struct { ... } lv_struct_name_t;
                     try:
                         structs[stripstart(item.type.declname,'lv_')] = item.type.type
-                    except ValueError: # If name does not start with lv_
+                    except ValueError:  # If name does not start with lv_
                         pass
                     
                 elif (isinstance(item.type, c_ast.TypeDecl) and isinstance(item.type.type, c_ast.IdentifierType) and 
@@ -152,7 +152,7 @@ class LvglSourceParser:
         
         objects, global_functions = self.determine_objects(functions, typedefs)
         
-        # Transfer the lv_styl_xxx functions from global_functions to style_functions
+        # Transfer the lv_style_xxx functions from global_functions to style_functions
         style_functions_list = [name for name in global_functions if name.startswith('lv_style_')]
         style_functions = collections.OrderedDict()
         for name in style_functions_list:
