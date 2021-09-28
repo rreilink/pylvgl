@@ -77,37 +77,37 @@ lst.set_height(200)
 lst.set_scrlbar_mode(lvgl.SCROLLBAR_MODE.AUTO)
 
 # No spacing between items
-st1 = lvgl.style_t(lst.get_style(lvgl.LIST_STYLE.SCRL))
-st1.body.padding.inner = 0
-lst.set_style(lvgl.LIST_STYLE.SCRL, st1)
+#st1 = lvgl.style_t(lst.get_style(lvgl.LIST_STYLE.SCRL))
+#st1.body.padding.inner = 0
+#lst.set_style(lvgl.LIST_STYLE.SCRL, st1)
 
-style = lvgl.style_t(lvgl.style_plain)
-style.body.main_color = {'full' : 0xffff}
-style.body.grad_color = lvgl.COLOR.WHITE
-style.text.color = {'full': 0}
-style.body.padding.top = 0
-style.body.padding.bottom = 0
-style.body.padding.inner = 0
-
-
-for st in [lvgl.LIST_STYLE.BTN_PR, lvgl.LIST_STYLE.BTN_REL, lvgl.LIST_STYLE.BTN_TGL_PR, lvgl.LIST_STYLE.BTN_TGL_REL]:
-    lst.set_style(st, lvgl.style_plain)
+#style = lvgl.style_t(lvgl.style_plain)
+#style.body.main_color = {'full' : 0xffff}
+#style.body.grad_color = lvgl.COLOR.WHITE
+#style.text.color = {'full': 0}
+#style.body.padding.top = 0
+#style.body.padding.bottom = 0
+#style.body.padding.inner = 0
 
 
-items = [lst.add(None, f'Btn {i}', None) for i in range(20)]
+#for st in [lvgl.LIST_STYLE.BTN_PR, lvgl.LIST_STYLE.BTN_REL, lvgl.LIST_STYLE.BTN_TGL_PR, lvgl.LIST_STYLE.BTN_TGL_REL]:
+#    lst.set_style(st, lvgl.style_plain)
+
+
+items = [lst.add_btn(None, f'Btn {i}') for i in range(20)]
 
 
 
-symbolstyle = lvgl.style_t(lvgl.style_plain)
+#symbolstyle = lvgl.style_t(lvgl.style_plain)
 #symbolstyle.text_font = lvgl.font_symbol_40
-symbolstyle.text.color = {'full' : 0xffff}
+#symbolstyle.text.color = {'full' : 0xffff}
 
 class SymbolButton(lvgl.Btn):
     def __init__(self, symbol, text, *args, **kwds):
         super().__init__(*args, **kwds)
         self.symbol = lvgl.Label(self)
         self.symbol.set_text(symbol)
-        self.symbol.set_style(symbolstyle)
+        #self.symbol.set_style(symbolstyle)
         self.symbol.align(self, lvgl.ALIGN.CENTER,0,0)
 
         self.label = lvgl.Label(self)
@@ -145,8 +145,8 @@ class MainMenu(lvgl.Obj):
 
 s3 = MainMenu()
 
-s4 = lvgl.Obj()
-kb = lvgl.Kb(s4)
+#s4 = lvgl.Obj()
+#kb = lvgl.Kb(s4)
 lvgl.scr_load(s3)
 
 s3.btnPrint.set_event_cb(print)

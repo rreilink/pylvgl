@@ -390,7 +390,7 @@ class PythonBindingsGenerator(BindingsGenerator):
         objects = self.objects
         objects['obj'].customstructfields.extend(['PyObject_HEAD', 'PyObject *weakreflist;', 'lv_obj_t *ref;', 'PyObject *event_cb;', 'lv_signal_cb_t orig_signal_cb;'])
 
-        for custom in ('lv_obj_get_children', 'lv_obj_set_event_cb', 'lv_label_get_letter_pos', 'lv_label_get_letter_on', 'lv_obj_get_type', 'lv_list_focus'):
+        for custom in ('lv_obj_get_children', 'lv_obj_set_event_cb', 'lv_label_get_letter_pos', 'lv_label_get_letter_on', 'lv_obj_get_type', 'lv_list_focus', 'lv_list_add_btn'):
             
             obj, method = re.match('lv_([A-Za-z0-9]+)_(\w+)$', custom).groups()
             objects[obj].methods[method] = CustomMethod(custom)

@@ -652,6 +652,7 @@ Style_init(StyleObject *self, PyObject *args, PyObject *kwds)
 }
 
 
+
 static PyObject *
 pylv_Style_set_radius(PyObject *self, PyObject *args) {
     short int value;
@@ -1889,7 +1890,7 @@ static PyTypeObject Style_Type = {
     .tp_flags = Py_TPFLAGS_DEFAULT | Py_TPFLAGS_BASETYPE,
     .tp_new = PyType_GenericNew,
     .tp_init = (initproc) Style_init,
-    //.tp_dealloc = (destructor) Style_dealloc,
+    //.tp_dealloc = (destructor) Style_dealloc, //TODO free self->style
     .tp_repr = (reprfunc) Style_repr,
     .tp_methods = Style_methods
 };
@@ -11163,33 +11164,33 @@ pylv_label_get_letter_on(pylv_Label *self, PyObject *args, PyObject *kwds)
 }
 
 
-/*
+
 
 static PyObject*
-pylv_list_add(pylv_List *self, PyObject *args, PyObject *kwds)
+pylv_list_add_btn(pylv_List *self, PyObject *args, PyObject *kwds)
 {
     if (check_alive(self)) return NULL;
-    static char *kwlist[] = {"img_src", "txt", "rel_action", NULL};
+    static char *kwlist[] = {"img_src", "txt", NULL};
     PyObject *img_src;
     const char *txt;
     PyObject *rel_action;
     PyObject *ret;
     
-    if (!PyArg_ParseTupleAndKeywords(args, kwds, "OsO", kwlist , &img_src, &txt, &rel_action)) return NULL; 
+    if (!PyArg_ParseTupleAndKeywords(args, kwds, "Os", kwlist , &img_src, &txt)) return NULL; 
       
     if ( img_src!=Py_None || rel_action!=Py_None) {
-        PyErr_SetString(PyExc_ValueError, "only img_src == None and rel_action == None is currently supported");
+        PyErr_SetString(PyExc_ValueError, "only img_src == None is currently supported");
         return NULL;
     } 
 
     LVGL_LOCK
-    ret = pyobj_from_lv(lv_list_add(self->ref, NULL, txt, NULL));
+    ret = pyobj_from_lv(lv_list_add_btn(self->ref, NULL, txt, NULL));
     LVGL_UNLOCK
     
     return ret;
 
 }
-*/
+
 
 // lv_list_focus takes lv_obj_t* as first argument, but it is not the list itself!
 static PyObject*
@@ -17487,13 +17488,6 @@ pylv_list_clean(pylv_Obj *self, PyObject *args, PyObject *kwds)
 }
 
 static PyObject*
-pylv_list_add_btn(pylv_Obj *self, PyObject *args, PyObject *kwds)
-{
-    PyErr_SetString(PyExc_NotImplementedError, "not implemented: lv_list_add_btn: Parameter type not found >const void*< ");
-    return NULL;
-}
-
-static PyObject*
 pylv_list_remove(pylv_Obj *self, PyObject *args, PyObject *kwds)
 {
     if (check_alive(self)) return NULL;
@@ -17694,7 +17688,7 @@ pylv_list_down(pylv_Obj *self, PyObject *args, PyObject *kwds)
 
 static PyMethodDef pylv_list_methods[] = {
     {"clean", (PyCFunction) pylv_list_clean, METH_VARARGS | METH_KEYWORDS, "void lv_list_clean(lv_obj_t *list)"},
-    {"add_btn", (PyCFunction) pylv_list_add_btn, METH_VARARGS | METH_KEYWORDS, "lv_obj_t *lv_list_add_btn(lv_obj_t *list, const void *img_src, const char *txt)"},
+    {"add_btn", (PyCFunction) pylv_list_add_btn, METH_VARARGS | METH_KEYWORDS, ""},
     {"remove", (PyCFunction) pylv_list_remove, METH_VARARGS | METH_KEYWORDS, "bool lv_list_remove(const lv_obj_t *list, uint16_t index)"},
     {"focus_btn", (PyCFunction) pylv_list_focus_btn, METH_VARARGS | METH_KEYWORDS, "void lv_list_focus_btn(lv_obj_t *list, lv_obj_t *btn)"},
     {"set_layout", (PyCFunction) pylv_list_set_layout, METH_VARARGS | METH_KEYWORDS, "void lv_list_set_layout(lv_obj_t *list, lv_layout_t layout)"},

@@ -277,6 +277,7 @@ Style_init(StyleObject *self, PyObject *args, PyObject *kwds)
     return 0;
 }
 
+
 <<<stylesetters:
 static PyObject *
 pylv_Style_{methodname}(PyObject *self, PyObject *args) {{
@@ -306,7 +307,7 @@ static PyTypeObject Style_Type = {
     .tp_flags = Py_TPFLAGS_DEFAULT | Py_TPFLAGS_BASETYPE,
     .tp_new = PyType_GenericNew,
     .tp_init = (initproc) Style_init,
-    //.tp_dealloc = (destructor) Style_dealloc,
+    //.tp_dealloc = (destructor) Style_dealloc, //TODO free self->style
     .tp_repr = (reprfunc) Style_repr,
     .tp_methods = Style_methods
 };
@@ -917,33 +918,33 @@ pylv_label_get_letter_on(pylv_Label *self, PyObject *args, PyObject *kwds)
 }
 
 
-/*
+
 
 static PyObject*
-pylv_list_add(pylv_List *self, PyObject *args, PyObject *kwds)
+pylv_list_add_btn(pylv_List *self, PyObject *args, PyObject *kwds)
 {
     if (check_alive(self)) return NULL;
-    static char *kwlist[] = {"img_src", "txt", "rel_action", NULL};
+    static char *kwlist[] = {"img_src", "txt", NULL};
     PyObject *img_src;
     const char *txt;
     PyObject *rel_action;
     PyObject *ret;
     
-    if (!PyArg_ParseTupleAndKeywords(args, kwds, "OsO", kwlist , &img_src, &txt, &rel_action)) return NULL; 
+    if (!PyArg_ParseTupleAndKeywords(args, kwds, "Os", kwlist , &img_src, &txt)) return NULL; 
       
     if ( img_src!=Py_None || rel_action!=Py_None) {
-        PyErr_SetString(PyExc_ValueError, "only img_src == None and rel_action == None is currently supported");
+        PyErr_SetString(PyExc_ValueError, "only img_src == None is currently supported");
         return NULL;
     } 
 
     LVGL_LOCK
-    ret = pyobj_from_lv(lv_list_add(self->ref, NULL, txt, NULL));
+    ret = pyobj_from_lv(lv_list_add_btn(self->ref, NULL, txt, NULL));
     LVGL_UNLOCK
     
     return ret;
 
 }
-*/
+
 
 // lv_list_focus takes lv_obj_t* as first argument, but it is not the list itself!
 static PyObject*
