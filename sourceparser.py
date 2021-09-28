@@ -64,7 +64,7 @@ class LvglSourceParser:
             args = ['-Ipycparser/utils/fake_libc_include']
             cpp_path = r'C:\Program Files\LLVM\bin\clang.exe'
         else:
-            args = ['-I../pycparser/utils/fake_libc_include']
+            args = ['-I./pycparser/utils/fake_libc_include']
             cpp_path = 'gcc'
         
         # TODO: preprocessor for Windows
