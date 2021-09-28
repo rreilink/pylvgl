@@ -346,15 +346,19 @@ static PyObject* struct_dict;
 static PyObject *pystruct_from_lv(const void *c_struct) {
     PyObject *ret;
     PyObject *ptr;
+    
+    // Create a Ptr object from the c pointer
     ptr = PtrObject_fromptr(c_struct);
     if (!ptr) return NULL;
     
+    // Look it up in the dictionary
     ret = PyDict_GetItem(struct_dict, ptr);
     Py_DECREF(ptr);
 
     if (ret) {
         Py_INCREF(ret); // ret is a borrowed reference; so need to increase ref count
     } else {
+        // Not found in dict
         PyErr_SetString(PyExc_RuntimeError, "the returned C struct is unknown to Python");
     }
     return ret;
@@ -938,7 +942,7 @@ pylv_list_add_btn(pylv_List *self, PyObject *args, PyObject *kwds)
     } 
 
     LVGL_LOCK
-    ret = pyobj_from_lv(lv_list_add_btn(self->ref, NULL, txt, NULL));
+    ret = pyobj_from_lv(lv_list_add_btn(self->ref, NULL, txt));
     LVGL_UNLOCK
     
     return ret;

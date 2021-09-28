@@ -37,6 +37,9 @@ class PythonObject(Object):
 
     TYPECONV.update({'lv_style_t*':     ('O&', 'lv_style_t *')})
 
+    TYPECONV.update({'lv_font_t*':     ('O&', 'lv_font_t *')})
+    TYPECONV.update({'const lv_font_t*':     ('O&', 'const lv_font_t *')})
+
     TYPECONV_PARAMETER = TYPECONV.copy()
     TYPECONV_PARAMETER.update({'const lv_obj_t*': ('O!', 'pylv_Obj *')})
 
@@ -126,7 +129,7 @@ py{method.decl.name}(pylv_Obj *self, PyObject *args, PyObject *kwds)
                 crefvarlist += f', &pylv_obj_Type, &{name}'
                 cvarlist += f', {name}->ref'
             elif fmt == 'O&': # struct
-                crefvarlist += f', py{ctype.rstrip(" *")}_arg_converter, &{name}'
+                crefvarlist += f', py{ctype.lstrip("const ").rstrip(" *")}_arg_converter, &{name}'
                 cvarlist += f', {name}'
             else:
                 crefvarlist += f', &{name}'

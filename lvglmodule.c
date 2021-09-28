@@ -1929,15 +1929,19 @@ static PyObject* struct_dict;
 static PyObject *pystruct_from_lv(const void *c_struct) {
     PyObject *ret;
     PyObject *ptr;
+    
+    // Create a Ptr object from the c pointer
     ptr = PtrObject_fromptr(c_struct);
     if (!ptr) return NULL;
     
+    // Look it up in the dictionary
     ret = PyDict_GetItem(struct_dict, ptr);
     Py_DECREF(ptr);
 
     if (ret) {
         Py_INCREF(ret); // ret is a borrowed reference; so need to increase ref count
     } else {
+        // Not found in dict
         PyErr_SetString(PyExc_RuntimeError, "the returned C struct is unknown to Python");
     }
     return ret;
@@ -11184,7 +11188,7 @@ pylv_list_add_btn(pylv_List *self, PyObject *args, PyObject *kwds)
     } 
 
     LVGL_LOCK
-    ret = pyobj_from_lv(lv_list_add_btn(self->ref, NULL, txt, NULL));
+    ret = pyobj_from_lv(lv_list_add_btn(self->ref, NULL, txt));
     LVGL_UNLOCK
     
     return ret;
@@ -13886,15 +13890,31 @@ pylv_obj_set_style_local_value_opa(pylv_Obj *self, PyObject *args, PyObject *kwd
 static PyObject*
 pylv_obj_get_style_value_font(pylv_Obj *self, PyObject *args, PyObject *kwds)
 {
-    PyErr_SetString(PyExc_NotImplementedError, "not implemented: lv_obj_get_style_value_font: Return type not found >const lv_font_t*< ");
-    return NULL;
+    if (check_alive(self)) return NULL;
+    static char *kwlist[] = {"part", NULL};
+    unsigned char part;
+    if (!PyArg_ParseTupleAndKeywords(args, kwds, "b", kwlist , &part)) return NULL;
+
+    LVGL_LOCK        
+    const lv_font_t* result = lv_obj_get_style_value_font(self->ref, part);
+    LVGL_UNLOCK
+    return pystruct_from_lv(result);            
 }
 
 static PyObject*
 pylv_obj_set_style_local_value_font(pylv_Obj *self, PyObject *args, PyObject *kwds)
 {
-    PyErr_SetString(PyExc_NotImplementedError, "not implemented: lv_obj_set_style_local_value_font: Parameter type not found >const lv_font_t*< ");
-    return NULL;
+    if (check_alive(self)) return NULL;
+    static char *kwlist[] = {"part", "state", "value", NULL};
+    unsigned char part;
+    unsigned char state;
+    const lv_font_t * value;
+    if (!PyArg_ParseTupleAndKeywords(args, kwds, "bbO&", kwlist , &part, &state, pylv_font_t_arg_converter, &value)) return NULL;
+
+    LVGL_LOCK         
+    lv_obj_set_style_local_value_font(self->ref, part, state, value);
+    LVGL_UNLOCK
+    Py_RETURN_NONE;
 }
 
 static PyObject*
@@ -14122,15 +14142,31 @@ pylv_obj_set_style_local_text_opa(pylv_Obj *self, PyObject *args, PyObject *kwds
 static PyObject*
 pylv_obj_get_style_text_font(pylv_Obj *self, PyObject *args, PyObject *kwds)
 {
-    PyErr_SetString(PyExc_NotImplementedError, "not implemented: lv_obj_get_style_text_font: Return type not found >const lv_font_t*< ");
-    return NULL;
+    if (check_alive(self)) return NULL;
+    static char *kwlist[] = {"part", NULL};
+    unsigned char part;
+    if (!PyArg_ParseTupleAndKeywords(args, kwds, "b", kwlist , &part)) return NULL;
+
+    LVGL_LOCK        
+    const lv_font_t* result = lv_obj_get_style_text_font(self->ref, part);
+    LVGL_UNLOCK
+    return pystruct_from_lv(result);            
 }
 
 static PyObject*
 pylv_obj_set_style_local_text_font(pylv_Obj *self, PyObject *args, PyObject *kwds)
 {
-    PyErr_SetString(PyExc_NotImplementedError, "not implemented: lv_obj_set_style_local_text_font: Parameter type not found >const lv_font_t*< ");
-    return NULL;
+    if (check_alive(self)) return NULL;
+    static char *kwlist[] = {"part", "state", "value", NULL};
+    unsigned char part;
+    unsigned char state;
+    const lv_font_t * value;
+    if (!PyArg_ParseTupleAndKeywords(args, kwds, "bbO&", kwlist , &part, &state, pylv_font_t_arg_converter, &value)) return NULL;
+
+    LVGL_LOCK         
+    lv_obj_set_style_local_text_font(self->ref, part, state, value);
+    LVGL_UNLOCK
+    Py_RETURN_NONE;
 }
 
 static PyObject*
