@@ -931,12 +931,11 @@ pylv_list_add_btn(pylv_List *self, PyObject *args, PyObject *kwds)
     static char *kwlist[] = {"img_src", "txt", NULL};
     PyObject *img_src;
     const char *txt;
-    PyObject *rel_action;
     PyObject *ret;
     
     if (!PyArg_ParseTupleAndKeywords(args, kwds, "Os", kwlist , &img_src, &txt)) return NULL; 
       
-    if ( img_src!=Py_None || rel_action!=Py_None) {
+    if (img_src!=Py_None) {
         PyErr_SetString(PyExc_ValueError, "only img_src == None is currently supported");
         return NULL;
     } 
