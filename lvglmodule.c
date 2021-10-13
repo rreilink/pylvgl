@@ -10,12 +10,12 @@
 
 /* Note on the lvgl lock and the GIL:
  *
- * Any attempt to aquire the lock should be with the GIL released. Otherwise,
+ * Any attempt to acquire the lock should be with the GIL released. Otherwise,
  * The following situation could occur:
  *
  * Thread 1:                    Thread 2 (lv_poll called)
  *   has the GIL                  has the lvgl lock
- *   waits for lvgl lock          process callback --> aquire GIL
+ *   waits for lvgl lock          process callback --> acquire GIL
  *
  * This would be a deadlock situation
  */
@@ -494,7 +494,7 @@ PyObject *PtrObject_fromptr(const void *ptr) {
 
 
 /****************************************************************
- * Helper functons                                              *  
+ * Helper functions                                              *
  ****************************************************************/
 
 static void (*lock)(void*) = NULL;
@@ -1997,7 +1997,7 @@ static PyBufferProcs Struct_bufferprocs = {
 //
 // Also, if lvgl takes or releases a reference to a C struct, a reference to the
 // associated Python object should be taken resp. freed. This requires all
-// C structure pointers to be referrable to Python objects
+// C structure pointers to be referable to Python objects
 //
 // returns 0 on success, -1 on error with exception set
 static int Struct_register(StructObject *obj) {
@@ -25057,7 +25057,7 @@ PyInit_lvgl(void) {
     Py_INCREF(&Style_Type);
     PyModule_AddObject(module, "Style", (PyObject *) &Style_Type);
 
-    // refcount for typesdict is initally 1; it is used by pyobj_from_lv
+    // refcount for typesdict is initially 1; it is used by pyobj_from_lv
     // refcounts to py{name}_Type objects are incremented due to "O" format
     typesdict = Py_BuildValue("{sOsOsOsOsOsOsOsOsOsOsOsOsOsOsOsOsOsOsOsOsOsOsOsOsOsOsOsOsOsOsOsOsOsO}",
         "lv_obj", &pylv_obj_Type,
@@ -25119,4 +25119,3 @@ error:
     Py_XDECREF(module);
     return NULL;
 }
-
