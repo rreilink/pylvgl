@@ -1,12 +1,11 @@
+from bindingsgen import BindingsGenerator, c_ast, CustomMethod, flatten_struct, generate_c, MissingConversionException, Object, \
+    stripstart, Struct, StyleSetter, type_repr
 import collections
-import re
 import keyword
-
-from bindingsgen import Object, Struct, StyleSetter, BindingsGenerator, c_ast, stripstart, generate_c, CustomMethod, type_repr, flatten_struct, MissingConversionException
+import re
 
 # TODO: should be common for all bindings generators
 skipfunctions = {
-    
     # Just use Python attributes for custom properties of objects
     'lv_obj_allocate_ext_attr',
     'lv_obj_get_ext_attr',
@@ -15,12 +14,10 @@ skipfunctions = {
     # lv_obj_getchildren is implemented instead which returns a list
     'lv_obj_get_child',
     'lv_obj_get_child_back',
-    
 }
 
 
 class PythonObject(Object):
-        
     TYPECONV = {
         'lv_obj_t*': ('O!', 'pylv_Obj *'),     # special case: conversion from/to Python object
         'bool':      ('p', 'int'),
@@ -47,13 +44,12 @@ class PythonObject(Object):
     TYPECONV_RETURN.update({'char*':     ('s', 'char *')})
     
     def init(self):
-        
         if self.name == 'obj':
             self.base = 'NULL'
         else:
             self.base = '&pylv_' + self.ancestor.name + '_Type'
 
-    def get_structfields(self, recurse = False):
+    def get_structfields(self, recurse=False):
         myfields = self.customstructfields
         
         if not myfields and not recurse:
@@ -61,14 +57,10 @@ class PythonObject(Object):
         
         return (self.ancestor.get_structfields(True) if self.ancestor else []) + myfields
 
-
     def build_methodcode(self, method):
-        object = self
-        
         if isinstance(method, CustomMethod):
             return ''  # Custom implementation is in lvglmodule_template.c
     
-        
         startCode = f'''
 static PyObject*
 py{method.decl.name}(pylv_Obj *self, PyObject *args, PyObject *kwds)
@@ -87,7 +79,8 @@ py{method.decl.name}(pylv_Obj *self, PyObject *args, PyObject *kwds)
             paramtype_derefed = self.bindingsgenerator.deref_typedef(paramtype)
             
             # For params, if the param type is e.g. "lv_obj_t*", "const lv_obj_t*" is allowed, too
-            # However, we do not add "const lv_obj_t*" to the TYPECONV dict, since "const lv_obj_t*" would not be a valid return type
+            # However, we do not add "const lv_obj_t*" to the TYPECONV dict, since "const lv_obj_t*" would not 
+            # be a valid return type
             
             try:
                 fmt, ctype = self.TYPECONV_PARAMETER[paramtype_derefed]
@@ -116,7 +109,7 @@ py{method.decl.name}(pylv_Obj *self, PyObject *args, PyObject *kwds)
         
         code = startCode
         kwlist = ''.join('"%s", ' % name for name in paramnames)
-        code += f'    static char *kwlist[] = {{{kwlist}NULL}};\n';
+        code += f'    static char *kwlist[] = {{{kwlist}NULL}};\n'
         
         crefvarlist = ''
         cvarlist = ''
@@ -172,11 +165,8 @@ py{method.decl.name}(pylv_Obj *self, PyObject *args, PyObject *kwds)
                 code += '    if (result) {Py_RETURN_TRUE;} else {Py_RETURN_FALSE;}\n'
             else:
                 code += f'    return Py_BuildValue("{resfmt}", result);\n'
-   
-            
-        
-        return code + '}\n';
 
+        return code + '}\n'
 
     @property
     def pyname(self): # The name of the class in Python lv_obj --> Obj
@@ -224,9 +214,9 @@ py{method.decl.name}(pylv_Obj *self, PyObject *args, PyObject *kwds)
             alias = methodname
             if keyword.iskeyword(alias):
                 alias += '_'
-            methodtablecode += f'    {{"{alias}", (PyCFunction) py{method.decl.name}, METH_VARARGS | METH_KEYWORDS, "{generate_c(method.decl)}"}},\n'
+            methodtablecode += f'    {{"{alias}", (PyCFunction) py{method.decl.name}, METH_VARARGS | METH_KEYWORDS, ' \
+                               f'"{generate_c(method.decl)}"}},\n'
 
-    
         return methodtablecode
 
 
@@ -254,12 +244,12 @@ class PythonStruct(Struct):
         self.subpath = subpath
     
     def get_flattened_decls(self):
-        '''
+        """
         In case of a union { struct { ... } }, that struct can have no name,
         and its members are to be regarded as members of the union for the
         bindings. This generator function yields the 'normal' self.decls,
         combined with the decls of inner structs that are unnamed.
-        '''
+        """
         for decl in self.decls:
             if decl.name is None:
                 yield from decl.type.decls
@@ -267,44 +257,43 @@ class PythonStruct(Struct):
                 yield decl
     
     def get_substructs(self):
-        '''
+        """
         yield the PythonStruct's for all members of this struct that are again structs.
         
         This is done recursively
-        '''
+        """
         for decl in self.get_flattened_decls():
             if isinstance(decl.type.type, (c_ast.Struct, c_ast.Union)):
-                substruct = PythonStruct(self.name + '_' + decl.name, decl.type.type, self.bindingsgenerator, basename=self.basename, subpath=self.subpath + decl.name + '.')
+                substruct = PythonStruct(self.name + '_' + decl.name, decl.type.type, self.bindingsgenerator, 
+                                         basename=self.basename, subpath=self.subpath + decl.name + '.')
                 yield substruct
                 yield from substruct.get_substructs()
 
     @property
     def getset(self):
-   
-        
         code = f'static PyGetSetDef pylv_{self.name}_getset[] = {{\n'
         bitfieldscode = ''
         
-
         for decl in self.get_flattened_decls():
             assert decl.name
             if self.subpath:
-                offsetcode = f'(offsetof(lv_{self.basename}, {self.subpath}{decl.name})-offsetof(lv_{self.basename}, {self.subpath[:-1]}))'
+                offsetcode = f'(offsetof(lv_{self.basename}, {self.subpath}{decl.name})-offsetof(lv_{self.basename}, ' \
+                             f'{self.subpath[:-1]}))'
             else:
                 offsetcode = f'offsetof(lv_{self.basename}, {decl.name})'
-            
- 
-            
+
             if isinstance(decl.type.type, (c_ast.Struct, c_ast.Union)):
                 getter, setter = 'struct_get_struct', 'struct_set_struct'
                 # the closure for struct & blob is a struct of PyTypObject*, offset (w.r.t. base type), size (in bytes)
-                closure = f'& ((struct_closure_t){{ &pylv_{self.name}_{decl.name}_Type, {offsetcode}, sizeof(((lv_{self.basename} *)0)->{self.subpath}{decl.name})}})'
+                closure = f'& ((struct_closure_t){{ &pylv_{self.name}_{decl.name}_Type, {offsetcode}, ' \
+                          f'sizeof(((lv_{self.basename} *)0)->{self.subpath}{decl.name})}})'
             elif decl.bitsize is not None:
                 # Needs a custom getter & setter function
                 getsetname = f'struct_bitfield_{self.name}_{decl.name}'
                 getter, setter = 'get_' + getsetname, 'set_' + getsetname
                 closure = 'NULL'
-                assert(self.bindingsgenerator.deref_typedef(generate_c(decl.type.type)) in ('uint8_t', 'uint16_t', 'uint32_t')) # the following only supports unsigned values for bitfields
+                assert(self.bindingsgenerator.deref_typedef(generate_c(decl.type.type)) in 
+                       ('uint8_t', 'uint16_t', 'uint32_t')) # the following only supports unsigned values for bitfields
                 bitfieldscode += f'''
 
 static PyObject *
@@ -322,29 +311,27 @@ static int
     return 0;
 }}
 
-'''
-                    
+'''      
             else:
                 typestr = self.bindingsgenerator.deref_typedef(type_repr(decl.type))
 
                 if typestr in self.TYPES:
                     getter, setter = self.TYPES[typestr]
                     closure = f'(void*){offsetcode}'
-                elif typestr.startswith('lv_') and (stripstart(typestr,'lv_') in self.bindingsgenerator.structs):
+                elif typestr.startswith('lv_') and (stripstart(typestr, 'lv_') in self.bindingsgenerator.structs):
                     getter, setter = 'struct_get_struct', 'struct_set_struct'
                     closure = f'& ((struct_closure_t){{ &py{typestr}_Type, {offsetcode}, sizeof({typestr})}})'
                 else:
                     # default: blob type
                     getter, setter = 'struct_get_struct', 'struct_set_struct'
-                    closure = f'& ((struct_closure_t){{ &Blob_Type, {offsetcode}, sizeof(((lv_{self.basename} *)0)->{self.subpath}{decl.name})}})'
+                    closure = f'& ((struct_closure_t){{ &Blob_Type, {offsetcode}, ' \
+                              f'sizeof(((lv_{self.basename} *)0)->{self.subpath}{decl.name})}})'
 
-            
             typedoc = generate_c(decl.type).replace('\n', ' ') + (f':{decl.bitsize.value}' if decl.bitsize else '')
             code += f'    {{"{decl.name}", (getter) {getter}, (setter) {setter}, "{typedoc} {decl.name}", {closure}}},\n'
         
         code += '    {NULL}\n};\n'
 
-        
         return bitfieldscode + code
 
 
@@ -357,6 +344,7 @@ class PythonStyleSetter(StyleSetter):
         'lv_color16_t': ('H', 'lv_color16_t', '.full'), #TODO: accept lv_color_t object instead of integer
 
     }
+
     def __init__(self, name, decl, bindingsgenerator):
         super().__init__(name, decl, bindingsgenerator)
         self.type = bindingsgenerator.deref_typedef(type_repr(self.decl.type.args.params[2].type))
@@ -377,7 +365,7 @@ class PythonBindingsGenerator(BindingsGenerator):
 
     def customize(self):
         del self.structs['style_t']
-        # Create self.substructs , which is a collection of derived structs (i.e. structs within structs like lv_style_t_body_border)
+        # Create self.substructs which is a collection of derived structs, i.e. structs within structs like lv_style_t_body_border
         self.substructs = collections.OrderedDict()
         for struct in self.structs.values():
             self.substructs.update((sub.name, sub) for sub in struct.get_substructs())
@@ -386,12 +374,12 @@ class PythonBindingsGenerator(BindingsGenerator):
         self.allstructs = self.structs.copy()
         self.allstructs.update(self.substructs)
         
-        
         objects = self.objects
-        objects['obj'].customstructfields.extend(['PyObject_HEAD', 'PyObject *weakreflist;', 'lv_obj_t *ref;', 'PyObject *event_cb;', 'lv_signal_cb_t orig_signal_cb;'])
+        objects['obj'].customstructfields.extend(['PyObject_HEAD', 'PyObject *weakreflist;', 'lv_obj_t *ref;', 
+                                                  'PyObject *event_cb;', 'lv_signal_cb_t orig_signal_cb;'])
 
-        for custom in ('lv_obj_get_children', 'lv_obj_set_event_cb', 'lv_label_get_letter_pos', 'lv_label_get_letter_on', 'lv_obj_get_type', 'lv_list_focus', 'lv_list_add_btn'):
-            
+        for custom in ('lv_obj_get_children', 'lv_obj_set_event_cb', 'lv_label_get_letter_pos', 'lv_label_get_letter_on', 
+                       'lv_obj_get_type', 'lv_list_focus', 'lv_list_add_btn'):
             obj, method = re.match('lv_([A-Za-z0-9]+)_(\w+)$', custom).groups()
             objects[obj].methods[method] = CustomMethod(custom)
 
@@ -399,10 +387,10 @@ class PythonBindingsGenerator(BindingsGenerator):
             obj, method = re.match('lv_([A-Za-z0-9]+)_(\w+)$', function).groups()
             del objects[obj].methods[method]
 
-        # TODO: make StyleSetter class responsible for knowing wether or not it is supported
+        # TODO: make StyleSetter class responsible for knowing whether or not it is supported
         supported = {'uint8_t', 'bool', 'lv_color16_t', 'int16_t'}
-        removestylesetters = {name:stylesetter for name, stylesetter in self.stylesetters.items()
-            if stylesetter.type not in supported}
+        removestylesetters = {name: stylesetter for name, stylesetter in self.stylesetters.items()
+                              if stylesetter.type not in supported}
 
         styletypes = set()
         for name, stylesetter in removestylesetters.items():
@@ -411,21 +399,20 @@ class PythonBindingsGenerator(BindingsGenerator):
             del self.stylesetters[name]
                 
         print(styletypes)
-        #TODO: style setters type aware (e.g. bool, int16_t)
+        # TODO: style setters type aware (e.g. bool, int16_t)
 
     @property
     def struct_inttypes(self):
-        
-        types = [{'type': f'uint{x}','min' : 0, 'max': (1<<x)-1} for x in (8,16,32)] + \
-            [{'type': f'int{x}','min' : -(1<<(x-1)), 'max': (1<<(x-1))-1} for x in (8,16,32)]
+        types = [{'type': f'uint{x}', 'min' : 0, 'max': (1 << x)-1} for x in (8, 16, 32)] + \
+            [{'type': f'int{x}', 'min' : -(1 << (x-1)), 'max': (1 << (x-1))-1} for x in (8, 16, 32)]
             
         return {type['type']: type for type in types}
     
     def deref_typedef(self, typestr):
-        '''
+        """
         Given a type as string representation (e.g. lv_opa_t), recursively
         dereference it using the typedefs in self.parseresult
-        '''
+        """
         while True:
             typedef = self.parseresult.typedefs.get(typestr)
             if typedef:
@@ -436,28 +423,26 @@ class PythonBindingsGenerator(BindingsGenerator):
                     return 'int' # Enum is represented by an int
             
             return typestr
-    
            
     def get_ENUM_ASSIGNMENTS(self):
         ret = ''    
         for enumname, enum in self.parseresult.enums.items():
-
             items = ''.join(f', "{name}", {value}' for name, value in enum.items())
             ret += f'    PyModule_AddObject(module, "{enumname}", build_constclass(\'d\', "{enumname}"{items}, NULL));\n'
         return ret
 
     def get_SYMBOL_ASSIGNMENTS(self):
-        
         skip = {'LV_SYMBOL_DEF_H', 'LV_SYMBOL_GLYPH_FIRST', 'LV_SYMBOL_GLYPH_LAST'}
         
-        items = ''.join(f', "{name[10:]}", {name}' for name in self.parseresult.defines if name.startswith('LV_SYMBOL_') and name not in skip)
+        items = ''.join(f', "{name[10:]}", {name}' for name in self.parseresult.defines if name.startswith('LV_SYMBOL_') and 
+                        name not in skip)
         return f'    PyModule_AddObject(module, "SYMBOL", build_constclass(\'s\', "SYMBOL"{items}, NULL));\n'
 
     def get_COLOR_ASSIGNMENTS(self):
-        
         skip = {'LV_COLOR_H', 'LV_COLOR_MAKE'}
         
-        items = ''.join(f', "{name[9:]}", {name}' for name in self.parseresult.defines if name.startswith('LV_COLOR_') and name not in skip)
+        items = ''.join(f', "{name[9:]}", {name}' for name in self.parseresult.defines if name.startswith('LV_COLOR_') and 
+                        name not in skip)
         return f'    PyModule_AddObject(module, "COLOR", build_constclass(\'C\', "COLOR"{items}, NULL));\n'
     
     def get_LV_COLOR_TYPE(self):
@@ -467,9 +452,11 @@ class PythonBindingsGenerator(BindingsGenerator):
         code = ''
         for name, type in self.parseresult.declarations.items():
             typename = type_repr(type, noqualifiers=True)
-            code += f'   PyModule_AddObject(module, "{name}", pystruct_from_c(&py{typename}_Type, &{type.declname}, sizeof({typename}), 0));\n'
+            code += f'   PyModule_AddObject(module, "{name}", pystruct_from_c(&py{typename}_Type, &{type.declname}, ' \
+                    f'sizeof({typename}), 0));\n'
             
         return code
+
 
 if __name__ == '__main__':
     import sourceparser
