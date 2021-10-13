@@ -32,22 +32,19 @@ class PythonObject(Object):
         'uint32_t':  ('I', 'unsigned int'),
         'int32_t':   ('I', 'int'),
         'int':       ('I', 'int'),
+        'lv_style_t*': ('O&', 'lv_style_t *'),
+        'lv_font_t*': ('O&', 'lv_font_t *'),
+        'const lv_font_t*': ('O&', 'const lv_font_t *'),
         }
     # TODO: from structs!
 
-    TYPECONV.update({'lv_style_t*':     ('O&', 'lv_style_t *')})
-
-    TYPECONV.update({'lv_font_t*':     ('O&', 'lv_font_t *')})
-    TYPECONV.update({'const lv_font_t*':     ('O&', 'const lv_font_t *')})
-
+    # Parameter types are based on the default types list
     TYPECONV_PARAMETER = TYPECONV.copy()
     TYPECONV_PARAMETER.update({'const lv_obj_t*': ('O!', 'pylv_Obj *')})
 
-    
+    # Return types are based on the default types list
     TYPECONV_RETURN = TYPECONV.copy()
     TYPECONV_RETURN.update({'char*':     ('s', 'char *')})
-    
-
     
     def init(self):
         
