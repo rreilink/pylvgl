@@ -1,5 +1,5 @@
 '''
-Generate the Python bindings module for LittlevGL
+Generate the Python bindings module for LVGL
 
 
 This script requires Python >=3.6 for formatted string literals
