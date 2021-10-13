@@ -1,3 +1,4 @@
+#!/usr/bin/env python3
 import sys
 import os
 import shutil
@@ -25,4 +26,3 @@ dist = setup (name = 'lvgl',
 
 for output in dist.get_command_obj('build_ext').get_outputs():
     shutil.copy(output, '.')
-
