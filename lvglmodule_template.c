@@ -1,3 +1,4 @@
+#define PY_SSIZE_T_CLEAN    /* For all # variants of formats (s#, y#, etc.) use Py_ssize_t rather than int */
 #include "Python.h"
 #include "structmember.h"
 #include "lvgl/lvgl.h"
