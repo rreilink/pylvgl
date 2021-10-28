@@ -514,7 +514,7 @@ static int struct_check_readonly(StructObject *self) {
 static PyObject *
 struct_get_{type}(StructObject *self, void *closure)
 {{
-    return PyLong_FromLong(*(({type}_t*)((char*)self->data + (int)closure) ));
+    return PyLong_FromLong(*(({type}_t*)((char*)self->data + (uintptr_t)closure) ));
 }}
 
 static int
@@ -524,7 +524,7 @@ struct_set_{type}(StructObject *self, PyObject *value, void *closure)
     if (struct_check_readonly(self)) return -1;
     if (long_to_int(value, &v, {min}, {max})) return -1;
     
-    *(({type}_t*)((char*)self->data + (int)closure) ) = v;
+    *(({type}_t*)((char*)self->data + (uintptr_t)closure) ) = v;
     return 0;
 }}
 >>>

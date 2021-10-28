@@ -2097,7 +2097,7 @@ static int struct_check_readonly(StructObject *self) {
 static PyObject *
 struct_get_uint8(StructObject *self, void *closure)
 {
-    return PyLong_FromLong(*((uint8_t*)((char*)self->data + (int)closure) ));
+    return PyLong_FromLong(*((uint8_t*)((char*)self->data + (uintptr_t)closure) ));
 }
 
 static int
@@ -2107,14 +2107,14 @@ struct_set_uint8(StructObject *self, PyObject *value, void *closure)
     if (struct_check_readonly(self)) return -1;
     if (long_to_int(value, &v, 0, 255)) return -1;
     
-    *((uint8_t*)((char*)self->data + (int)closure) ) = v;
+    *((uint8_t*)((char*)self->data + (uintptr_t)closure) ) = v;
     return 0;
 }
 
 static PyObject *
 struct_get_uint16(StructObject *self, void *closure)
 {
-    return PyLong_FromLong(*((uint16_t*)((char*)self->data + (int)closure) ));
+    return PyLong_FromLong(*((uint16_t*)((char*)self->data + (uintptr_t)closure) ));
 }
 
 static int
@@ -2124,14 +2124,14 @@ struct_set_uint16(StructObject *self, PyObject *value, void *closure)
     if (struct_check_readonly(self)) return -1;
     if (long_to_int(value, &v, 0, 65535)) return -1;
     
-    *((uint16_t*)((char*)self->data + (int)closure) ) = v;
+    *((uint16_t*)((char*)self->data + (uintptr_t)closure) ) = v;
     return 0;
 }
 
 static PyObject *
 struct_get_uint32(StructObject *self, void *closure)
 {
-    return PyLong_FromLong(*((uint32_t*)((char*)self->data + (int)closure) ));
+    return PyLong_FromLong(*((uint32_t*)((char*)self->data + (uintptr_t)closure) ));
 }
 
 static int
@@ -2141,14 +2141,14 @@ struct_set_uint32(StructObject *self, PyObject *value, void *closure)
     if (struct_check_readonly(self)) return -1;
     if (long_to_int(value, &v, 0, 4294967295)) return -1;
     
-    *((uint32_t*)((char*)self->data + (int)closure) ) = v;
+    *((uint32_t*)((char*)self->data + (uintptr_t)closure) ) = v;
     return 0;
 }
 
 static PyObject *
 struct_get_int8(StructObject *self, void *closure)
 {
-    return PyLong_FromLong(*((int8_t*)((char*)self->data + (int)closure) ));
+    return PyLong_FromLong(*((int8_t*)((char*)self->data + (uintptr_t)closure) ));
 }
 
 static int
@@ -2158,14 +2158,14 @@ struct_set_int8(StructObject *self, PyObject *value, void *closure)
     if (struct_check_readonly(self)) return -1;
     if (long_to_int(value, &v, -128, 127)) return -1;
     
-    *((int8_t*)((char*)self->data + (int)closure) ) = v;
+    *((int8_t*)((char*)self->data + (uintptr_t)closure) ) = v;
     return 0;
 }
 
 static PyObject *
 struct_get_int16(StructObject *self, void *closure)
 {
-    return PyLong_FromLong(*((int16_t*)((char*)self->data + (int)closure) ));
+    return PyLong_FromLong(*((int16_t*)((char*)self->data + (uintptr_t)closure) ));
 }
 
 static int
@@ -2175,14 +2175,14 @@ struct_set_int16(StructObject *self, PyObject *value, void *closure)
     if (struct_check_readonly(self)) return -1;
     if (long_to_int(value, &v, -32768, 32767)) return -1;
     
-    *((int16_t*)((char*)self->data + (int)closure) ) = v;
+    *((int16_t*)((char*)self->data + (uintptr_t)closure) ) = v;
     return 0;
 }
 
 static PyObject *
 struct_get_int32(StructObject *self, void *closure)
 {
-    return PyLong_FromLong(*((int32_t*)((char*)self->data + (int)closure) ));
+    return PyLong_FromLong(*((int32_t*)((char*)self->data + (uintptr_t)closure) ));
 }
 
 static int
@@ -2192,7 +2192,7 @@ struct_set_int32(StructObject *self, PyObject *value, void *closure)
     if (struct_check_readonly(self)) return -1;
     if (long_to_int(value, &v, -2147483648, 2147483647)) return -1;
     
-    *((int32_t*)((char*)self->data + (int)closure) ) = v;
+    *((int32_t*)((char*)self->data + (uintptr_t)closure) ) = v;
     return 0;
 }
 
