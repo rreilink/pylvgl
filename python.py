@@ -65,7 +65,7 @@ class PythonObject(Object):
 static PyObject*
 py{method.decl.name}(pylv_Obj *self, PyObject *args, PyObject *kwds)
 {{
-    if (check_alive(self)) return NULL;
+    if (!is_alive(self)) return NULL;
 '''
        
         paramnames = []

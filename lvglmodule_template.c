@@ -188,12 +188,14 @@ static lv_res_t pylv_signal_cb(lv_obj_t * obj, lv_signal_t sign, void * param)
     return orig_signal_cb(obj, sign, param);
 }
 
-int check_alive(pylv_Obj* obj) {
+/* Returns true when the underlying C-object still exists.
+ */
+bool is_alive(pylv_Obj* obj) {
     if (!obj->ref) {
         PyErr_SetString(PyExc_RuntimeError, "the underlying C object has been deleted");
-        return -1;
+        return false;
     }
-    return 0;
+    return true;
 }
 
 static void install_signal_cb(pylv_Obj * py_obj) {
@@ -794,7 +796,7 @@ error:
 static PyObject*
 pylv_obj_get_children(pylv_Obj *self, PyObject *args, PyObject *kwds)
 {
-    if (check_alive(self)) return NULL;
+    if (!is_alive(self)) return NULL;
     lv_obj_t *child = NULL;
     PyObject *pychild;
     PyObject *ret = PyList_New(0);
@@ -824,7 +826,7 @@ pylv_obj_get_children(pylv_Obj *self, PyObject *args, PyObject *kwds)
 static PyObject*
 pylv_obj_get_type(pylv_Obj *self, PyObject *args, PyObject *kwds)
 {
-    if (check_alive(self)) return NULL;
+    if (!is_alive(self)) return NULL;
     lv_obj_type_t result;
     PyObject *list = NULL;
     PyObject *str = NULL;
@@ -869,7 +871,7 @@ void pylv_event_cb(lv_obj_t *obj, lv_event_t event) {
 
 static PyObject *
 pylv_obj_set_event_cb(pylv_Obj *self, PyObject *args, PyObject *kwds) {
-    if (check_alive(self)) return NULL;
+    if (!is_alive(self)) return NULL;
     static char *kwlist[] = {"event_cb", NULL};
     PyObject *callback, *old_callback;
     if (!PyArg_ParseTupleAndKeywords(args, kwds, "O", kwlist, &callback)) return NULL;
@@ -890,7 +892,7 @@ pylv_obj_set_event_cb(pylv_Obj *self, PyObject *args, PyObject *kwds) {
 static PyObject*
 pylv_label_get_letter_pos(pylv_Label *self, PyObject *args, PyObject *kwds)
 {
-    if (check_alive(self)) return NULL;
+    if (!is_alive(self)) return NULL;
     static char *kwlist[] = {"index", NULL};
     int index;
     lv_point_t pos;
@@ -906,7 +908,7 @@ pylv_label_get_letter_pos(pylv_Label *self, PyObject *args, PyObject *kwds)
 static PyObject*
 pylv_label_get_letter_on(pylv_Label *self, PyObject *args, PyObject *kwds)
 {
-    if (check_alive(self)) return NULL;
+    if (!is_alive(self)) return NULL;
     static char *kwlist[] = {"pos", NULL};
     int x, y, index;
     lv_point_t pos;
@@ -928,7 +930,7 @@ pylv_label_get_letter_on(pylv_Label *self, PyObject *args, PyObject *kwds)
 static PyObject*
 pylv_list_add_btn(pylv_List *self, PyObject *args, PyObject *kwds)
 {
-    if (check_alive(self)) return NULL;
+    if (!is_alive(self)) return NULL;
     static char *kwlist[] = {"img_src", "txt", NULL};
     PyObject *img_src;
     const char *txt;
@@ -954,7 +956,7 @@ pylv_list_add_btn(pylv_List *self, PyObject *args, PyObject *kwds)
 static PyObject*
 pylv_list_focus(pylv_List *self, PyObject *args, PyObject *kwds)
 {
-    if (check_alive(self)) return NULL;
+    if (!is_alive(self)) return NULL;
     static char *kwlist[] = {"obj", "anim_en", NULL};
     pylv_Btn * obj;
     lv_obj_t *parent;
