@@ -193,7 +193,7 @@ py{method.decl.name}(pylv_Obj *self, PyObject *args, PyObject *kwds)
             try:
                 code += self.build_methodcode(method)
             except MissingConversionException as e:
-                print(e)
+                print(f"Missing conversion for: {e}")
                 code += f'''
 static PyObject*
 py{method.decl.name}(pylv_Obj *self, PyObject *args, PyObject *kwds)
@@ -378,6 +378,7 @@ class PythonBindingsGenerator(BindingsGenerator):
         objects['obj'].customstructfields.extend(['PyObject_HEAD', 'PyObject *weakreflist;', 'lv_obj_t *ref;', 
                                                   'PyObject *event_cb;', 'lv_signal_cb_t orig_signal_cb;'])
 
+        # Custom functions
         for custom in ('lv_obj_get_children', 'lv_obj_set_event_cb', 'lv_label_get_letter_pos', 'lv_label_get_letter_on', 
                        'lv_obj_get_type', 'lv_list_focus', 'lv_list_add_btn'):
             obj, method = re.match('lv_([A-Za-z0-9]+)_(\w+)$', custom).groups()
@@ -387,6 +388,7 @@ class PythonBindingsGenerator(BindingsGenerator):
             obj, method = re.match('lv_([A-Za-z0-9]+)_(\w+)$', function).groups()
             del objects[obj].methods[method]
 
+        # Style setting functions
         # TODO: make StyleSetter class responsible for knowing whether or not it is supported
         supported = {'uint8_t', 'bool', 'lv_color16_t', 'int16_t'}
         removestylesetters = {name: stylesetter for name, stylesetter in self.stylesetters.items()
@@ -395,10 +397,10 @@ class PythonBindingsGenerator(BindingsGenerator):
         styletypes = set()
         for name, stylesetter in removestylesetters.items():
             styletypes.add(stylesetter.type)
-            print(name, stylesetter.type)
+            print(f"style function: {name}, {stylesetter.type}")
             del self.stylesetters[name]
                 
-        print(styletypes)
+        print(f"style types: {styletypes}")
         # TODO: style setters type aware (e.g. bool, int16_t)
 
     @property

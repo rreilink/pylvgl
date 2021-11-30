@@ -142,7 +142,7 @@ class LvglSourceParser:
                     
             elif isinstance(item, c_ast.Decl) and isinstance(item.type, c_ast.TypeDecl):
                 if not item.type.declname.startswith('lv_'):
-                    print(item.type.declname)
+                    print(f"unrecognized: {item.type.declname}")
                 else:
                     declarations[stripstart(item.type.declname, 'lv_')] = item.type
                 
