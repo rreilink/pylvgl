@@ -990,13 +990,16 @@ pylv_list_focus(pylv_List *self, PyObject *args, PyObject *kwds)
 static void
 pylv_{name}_dealloc(pylv_{pyname} *self) 
 {{
-
     // the accompanying lv_obj holds a reference to the Python object, so
     // dealloc can only take place if the lv_obj has already been deleted using
-    // Obj.del_() or .clean() on ints parents. 
-    
+    // Obj.del_() or .clean() on its parents.
+
+    // Clear weakrefs first before calling any destructors
     if (self->weakreflist != NULL)
         PyObject_ClearWeakRefs((PyObject *) self);
+
+    // Release callback object
+    Py_XDECREF(self->event_cb);
 
     Py_TYPE(self)->tp_free((PyObject *) self);
 
