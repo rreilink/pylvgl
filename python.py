@@ -439,7 +439,7 @@ class PythonBindingsGenerator(BindingsGenerator):
         return f'    PyModule_AddObject(module, "SYMBOL", build_constclass(\'s\', "SYMBOL"{items}, NULL));\n'
 
     def get_COLOR_ASSIGNMENTS(self):
-        skip = {'LV_COLOR_H', 'LV_COLOR_MAKE'}
+        skip = {'LV_COLOR_H', 'LV_COLOR_MAKE', 'LV_COLOR_MIX_ROUND_OFS', 'LV_COLOR_SIZE'}
         
         items = ''.join(f', "{name[9:]}", {name}' for name in self.parseresult.defines if name.startswith('LV_COLOR_') and 
                         name not in skip)
