@@ -1,10 +1,10 @@
-'''
+"""
 This script checks whether all function definitions match with their declarations
 
 It also checks whether all defined functions have been declared before use (except
 for static functions), and whether all functions which are declared, are defined
 somewhere.
-'''
+"""
 
 from sourceparser import LvglSourceParser, pycparser, c_ast
 from bindingsgen import generate_c, astnode_equals
@@ -50,8 +50,8 @@ for filename in glob.glob('lvgl/**', recursive=True):
 
 print('The following declared functions are not defined:')
 for name, decl in alldecls.items():
-    if not name in alldefs:
-        print (generate_c(decl))
+    if name not in alldefs:
+        print(generate_c(decl))
         
 
 print('The following enum items are named inconsistently:')
@@ -61,7 +61,4 @@ for enumname, enum in parseresult.enums.items():
     assert enumname.endswith('_t')
     inconsistent_names = [k for k in enum if not k.lower().startswith(enumname[:-1])]
     if innconsistent_names:
-        print (enumname, ': ', ','.join(incorrect_names))
-
-
-
+        print(enumname, ': ', ','.join(incorrect_names))

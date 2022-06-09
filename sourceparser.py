@@ -16,13 +16,16 @@ def generate_c(node):
     return c_generator.CGenerator().visit(node)
 
 
-def type_repr(arg):
+def type_repr(arg, noqualifiers=False):
     ptrs = ''
     while isinstance(arg, c_ast.PtrDecl):
         ptrs += '*'
         arg = arg.type
     
-    quals = ''.join('%s ' % qual for qual in sorted(arg.quals)) if hasattr(arg, 'quals') else ''
+    if noqualifiers:
+        quals=''
+    else:
+        quals = ''.join('%s ' % qual for qual in sorted(arg.quals)) if hasattr(arg, 'quals') else ''
     
     return f'{quals}{generate_c(arg)}{ptrs}'
 
@@ -33,7 +36,7 @@ def stripstart(s, start):
 
 
 
-ParseResult = collections.namedtuple('ParseResult', 'enums functions declarations typedefs structs objects global_functions defines')
+ParseResult = collections.namedtuple('ParseResult', 'enums functions declarations typedefs structs objects global_functions style_functions defines')
 
 LvglObject = collections.namedtuple('LvglObject', 'name methods ancestor')
 
@@ -61,7 +64,7 @@ class LvglSourceParser:
             args = ['-Ipycparser/utils/fake_libc_include']
             cpp_path = r'C:\Program Files\LLVM\bin\clang.exe'
         else:
-            args = ['-I../pycparser/utils/fake_libc_include']
+            args = ['-I./pycparser/utils/fake_libc_include']
             cpp_path = 'gcc'
         
         # TODO: preprocessor for Windows
@@ -124,7 +127,7 @@ class LvglSourceParser:
                     # typedef struct { ... } lv_struct_name_t;
                     try:
                         structs[stripstart(item.type.declname,'lv_')] = item.type.type
-                    except ValueError: # If name does not start with lv_
+                    except ValueError:  # If name does not start with lv_
                         pass
                     
                 elif (isinstance(item.type, c_ast.TypeDecl) and isinstance(item.type.type, c_ast.IdentifierType) and 
@@ -138,24 +141,38 @@ class LvglSourceParser:
                                             
                     
             elif isinstance(item, c_ast.Decl) and isinstance(item.type, c_ast.TypeDecl):
-                declarations[stripstart(item.type.declname, 'lv_')] = item.type
+                if not item.type.declname.startswith('lv_'):
+                    print(f"unrecognized: {item.type.declname}")
+                else:
+                    declarations[stripstart(item.type.declname, 'lv_')] = item.type
+                
 
             previous_item = item
     
         
         objects, global_functions = self.determine_objects(functions, typedefs)
         
+        # Transfer the lv_style_xxx functions from global_functions to style_functions
+        style_functions_list = [name for name in global_functions if name.startswith('lv_style_')]
+        style_functions = collections.OrderedDict()
+        for name in style_functions_list:
+            style_functions[name] = global_functions.pop(name)
+        
+        
         
         # Find defines in color.h and symbol_def.h
         defines = collections.OrderedDict() # There is no OrderedSet in Python, so let's use OrderedDict with None values
-        for filename in 'src/lv_misc/lv_color.h', 'src/lv_misc/lv_symbol_def.h':
+        for filename in 'src/lv_misc/lv_color.h', 'src/lv_font/lv_symbol_def.h':
             with open(os.path.join(path, filename), 'rt', encoding='utf-8') as file:
                 code = file.read()
-                for define in re.findall('^\s*#define\s+(\w+)', code,flags = re.MULTILINE):
+                
+                # TODO: proper way to filter out e.g. LV_COLOR_SET_R(...)
+                # original regexp was '^\s*#define\s+(\w+)'
+                for define in re.findall(r'^\s*#define\s+(\w+)\s', code,flags = re.MULTILINE):
                     if not define.startswith('_'):
                         defines[define] = None
         
-        return ParseResult(enums, functions, declarations, typedefs, structs, objects, global_functions, defines)
+        return ParseResult(enums, functions, declarations, typedefs, structs, objects, global_functions, style_functions, defines)
 
   
     @classmethod
@@ -222,6 +239,11 @@ if __name__ == '__main__':
     result = LvglSourceParser().parse_sources('lvgl')
 
 
+    def args_to_str(args):
+        return ','.join(
+                ('...' if isinstance(param, pycparser.c_ast.EllipsisParam) else
+                type_repr(param.type)+ ' ' + param.name )
+                for param in args.params) 
 
     print ('##################################')
     print ('#            OBJECTS             #')
@@ -229,11 +251,7 @@ if __name__ == '__main__':
     for object in result.objects.values():
         print (f'{object.name}({object.ancestor.name if object.ancestor else ""})')
         for methodname, method in object.methods.items():
-            args = ','.join(
-                type_repr(param.type)+ ' ' + param.name 
-                for param in method.decl.type.args.params)
-            
-            print(f'  {methodname}({args})')
+            print(f'  {methodname}({args_to_str(method.decl.type.args)})')
 
     print ('##################################')
     print ('#             ENUMS              #')
@@ -249,3 +267,9 @@ if __name__ == '__main__':
     for name, value in result.defines.items():
         print (name, '=', value)
 
+    print ('##################################')
+    print ('#        STYLE FUNCTIONS         #')
+    print ('##################################')
+
+    for name, function in result.style_functions.items():
+        print (f'{name}({args_to_str(function.decl.type.args)})')
