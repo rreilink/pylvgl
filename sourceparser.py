@@ -64,7 +64,7 @@ class LvglSourceParser:
             args = ['-Ipycparser/utils/fake_libc_include']
             cpp_path = r'C:\Program Files\LLVM\bin\clang.exe'
         else:
-            args = ['-I../pycparser/utils/fake_libc_include']
+            args = ['-I./pycparser/utils/fake_libc_include']
             cpp_path = 'gcc'
         
         # TODO: preprocessor for Windows
@@ -142,7 +142,7 @@ class LvglSourceParser:
                     
             elif isinstance(item, c_ast.Decl) and isinstance(item.type, c_ast.TypeDecl):
                 if not item.type.declname.startswith('lv_'):
-                    print(item.type.declname)
+                    print(f"unrecognized: {item.type.declname}")
                 else:
                     declarations[stripstart(item.type.declname, 'lv_')] = item.type
                 

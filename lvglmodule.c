@@ -1,3 +1,4 @@
+#define PY_SSIZE_T_CLEAN    /* For all # variants of formats (s#, y#, etc.) use Py_ssize_t rather than int */
 #include "Python.h"
 #include "structmember.h"
 #include "lvgl/lvgl.h"
@@ -10,12 +11,12 @@
 
 /* Note on the lvgl lock and the GIL:
  *
- * Any attempt to aquire the lock should be with the GIL released. Otherwise,
+ * Any attempt to acquire the lock should be with the GIL released. Otherwise,
  * The following situation could occur:
  *
  * Thread 1:                    Thread 2 (lv_poll called)
  *   has the GIL                  has the lvgl lock
- *   waits for lvgl lock          process callback --> aquire GIL
+ *   waits for lvgl lock          process callback --> acquire GIL
  *
  * This would be a deadlock situation
  */
@@ -494,7 +495,7 @@ PyObject *PtrObject_fromptr(const void *ptr) {
 
 
 /****************************************************************
- * Helper functons                                              *  
+ * Helper functions                                              *
  ****************************************************************/
 
 static void (*lock)(void*) = NULL;
@@ -1997,7 +1998,7 @@ static PyBufferProcs Struct_bufferprocs = {
 //
 // Also, if lvgl takes or releases a reference to a C struct, a reference to the
 // associated Python object should be taken resp. freed. This requires all
-// C structure pointers to be referrable to Python objects
+// C structure pointers to be referable to Python objects
 //
 // returns 0 on success, -1 on error with exception set
 static int Struct_register(StructObject *obj) {
@@ -2096,7 +2097,7 @@ static int struct_check_readonly(StructObject *self) {
 static PyObject *
 struct_get_uint8(StructObject *self, void *closure)
 {
-    return PyLong_FromLong(*((uint8_t*)((char*)self->data + (int)closure) ));
+    return PyLong_FromLong(*((uint8_t*)((char*)self->data + (uintptr_t)closure) ));
 }
 
 static int
@@ -2106,14 +2107,14 @@ struct_set_uint8(StructObject *self, PyObject *value, void *closure)
     if (struct_check_readonly(self)) return -1;
     if (long_to_int(value, &v, 0, 255)) return -1;
     
-    *((uint8_t*)((char*)self->data + (int)closure) ) = v;
+    *((uint8_t*)((char*)self->data + (uintptr_t)closure) ) = v;
     return 0;
 }
 
 static PyObject *
 struct_get_uint16(StructObject *self, void *closure)
 {
-    return PyLong_FromLong(*((uint16_t*)((char*)self->data + (int)closure) ));
+    return PyLong_FromLong(*((uint16_t*)((char*)self->data + (uintptr_t)closure) ));
 }
 
 static int
@@ -2123,14 +2124,14 @@ struct_set_uint16(StructObject *self, PyObject *value, void *closure)
     if (struct_check_readonly(self)) return -1;
     if (long_to_int(value, &v, 0, 65535)) return -1;
     
-    *((uint16_t*)((char*)self->data + (int)closure) ) = v;
+    *((uint16_t*)((char*)self->data + (uintptr_t)closure) ) = v;
     return 0;
 }
 
 static PyObject *
 struct_get_uint32(StructObject *self, void *closure)
 {
-    return PyLong_FromLong(*((uint32_t*)((char*)self->data + (int)closure) ));
+    return PyLong_FromLong(*((uint32_t*)((char*)self->data + (uintptr_t)closure) ));
 }
 
 static int
@@ -2140,14 +2141,14 @@ struct_set_uint32(StructObject *self, PyObject *value, void *closure)
     if (struct_check_readonly(self)) return -1;
     if (long_to_int(value, &v, 0, 4294967295)) return -1;
     
-    *((uint32_t*)((char*)self->data + (int)closure) ) = v;
+    *((uint32_t*)((char*)self->data + (uintptr_t)closure) ) = v;
     return 0;
 }
 
 static PyObject *
 struct_get_int8(StructObject *self, void *closure)
 {
-    return PyLong_FromLong(*((int8_t*)((char*)self->data + (int)closure) ));
+    return PyLong_FromLong(*((int8_t*)((char*)self->data + (uintptr_t)closure) ));
 }
 
 static int
@@ -2157,14 +2158,14 @@ struct_set_int8(StructObject *self, PyObject *value, void *closure)
     if (struct_check_readonly(self)) return -1;
     if (long_to_int(value, &v, -128, 127)) return -1;
     
-    *((int8_t*)((char*)self->data + (int)closure) ) = v;
+    *((int8_t*)((char*)self->data + (uintptr_t)closure) ) = v;
     return 0;
 }
 
 static PyObject *
 struct_get_int16(StructObject *self, void *closure)
 {
-    return PyLong_FromLong(*((int16_t*)((char*)self->data + (int)closure) ));
+    return PyLong_FromLong(*((int16_t*)((char*)self->data + (uintptr_t)closure) ));
 }
 
 static int
@@ -2174,14 +2175,14 @@ struct_set_int16(StructObject *self, PyObject *value, void *closure)
     if (struct_check_readonly(self)) return -1;
     if (long_to_int(value, &v, -32768, 32767)) return -1;
     
-    *((int16_t*)((char*)self->data + (int)closure) ) = v;
+    *((int16_t*)((char*)self->data + (uintptr_t)closure) ) = v;
     return 0;
 }
 
 static PyObject *
 struct_get_int32(StructObject *self, void *closure)
 {
-    return PyLong_FromLong(*((int32_t*)((char*)self->data + (int)closure) ));
+    return PyLong_FromLong(*((int32_t*)((char*)self->data + (uintptr_t)closure) ));
 }
 
 static int
@@ -2191,7 +2192,7 @@ struct_set_int32(StructObject *self, PyObject *value, void *closure)
     if (struct_check_readonly(self)) return -1;
     if (long_to_int(value, &v, -2147483648, 2147483647)) return -1;
     
-    *((int32_t*)((char*)self->data + (int)closure) ) = v;
+    *((int32_t*)((char*)self->data + (uintptr_t)closure) ) = v;
     return 0;
 }
 
@@ -11177,12 +11178,11 @@ pylv_list_add_btn(pylv_List *self, PyObject *args, PyObject *kwds)
     static char *kwlist[] = {"img_src", "txt", NULL};
     PyObject *img_src;
     const char *txt;
-    PyObject *rel_action;
     PyObject *ret;
     
     if (!PyArg_ParseTupleAndKeywords(args, kwds, "Os", kwlist , &img_src, &txt)) return NULL; 
       
-    if ( img_src!=Py_None || rel_action!=Py_None) {
+    if (img_src!=Py_None) {
         PyErr_SetString(PyExc_ValueError, "only img_src == None is currently supported");
         return NULL;
     } 
@@ -25057,7 +25057,7 @@ PyInit_lvgl(void) {
     Py_INCREF(&Style_Type);
     PyModule_AddObject(module, "Style", (PyObject *) &Style_Type);
 
-    // refcount for typesdict is initally 1; it is used by pyobj_from_lv
+    // refcount for typesdict is initially 1; it is used by pyobj_from_lv
     // refcounts to py{name}_Type objects are incremented due to "O" format
     typesdict = Py_BuildValue("{sOsOsOsOsOsOsOsOsOsOsOsOsOsOsOsOsOsOsOsOsOsOsOsOsOsOsOsOsOsOsOsOsOsO}",
         "lv_obj", &pylv_obj_Type,
@@ -25119,4 +25119,3 @@ error:
     Py_XDECREF(module);
     return NULL;
 }
-

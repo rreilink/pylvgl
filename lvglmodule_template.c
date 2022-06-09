@@ -1,3 +1,4 @@
+#define PY_SSIZE_T_CLEAN    /* For all # variants of formats (s#, y#, etc.) use Py_ssize_t rather than int */
 #include "Python.h"
 #include "structmember.h"
 #include "lvgl/lvgl.h"
@@ -10,12 +11,12 @@
 
 /* Note on the lvgl lock and the GIL:
  *
- * Any attempt to aquire the lock should be with the GIL released. Otherwise,
+ * Any attempt to acquire the lock should be with the GIL released. Otherwise,
  * The following situation could occur:
  *
  * Thread 1:                    Thread 2 (lv_poll called)
  *   has the GIL                  has the lvgl lock
- *   waits for lvgl lock          process callback --> aquire GIL
+ *   waits for lvgl lock          process callback --> acquire GIL
  *
  * This would be a deadlock situation
  */
@@ -120,7 +121,7 @@ PyObject *PtrObject_fromptr(const void *ptr) {
 
 
 /****************************************************************
- * Helper functons                                              *  
+ * Helper functions                                              *
  ****************************************************************/
 
 static void (*lock)(void*) = NULL;
@@ -187,12 +188,14 @@ static lv_res_t pylv_signal_cb(lv_obj_t * obj, lv_signal_t sign, void * param)
     return orig_signal_cb(obj, sign, param);
 }
 
-int check_alive(pylv_Obj* obj) {
+/* Returns true when the underlying C-object still exists.
+ */
+bool is_alive(pylv_Obj* obj) {
     if (!obj->ref) {
         PyErr_SetString(PyExc_RuntimeError, "the underlying C object has been deleted");
-        return -1;
+        return false;
     }
-    return 0;
+    return true;
 }
 
 static void install_signal_cb(pylv_Obj * py_obj) {
@@ -414,7 +417,7 @@ static PyBufferProcs Struct_bufferprocs = {
 //
 // Also, if lvgl takes or releases a reference to a C struct, a reference to the
 // associated Python object should be taken resp. freed. This requires all
-// C structure pointers to be referrable to Python objects
+// C structure pointers to be referable to Python objects
 //
 // returns 0 on success, -1 on error with exception set
 static int Struct_register(StructObject *obj) {
@@ -513,7 +516,7 @@ static int struct_check_readonly(StructObject *self) {
 static PyObject *
 struct_get_{type}(StructObject *self, void *closure)
 {{
-    return PyLong_FromLong(*(({type}_t*)((char*)self->data + (int)closure) ));
+    return PyLong_FromLong(*(({type}_t*)((char*)self->data + (uintptr_t)closure) ));
 }}
 
 static int
@@ -523,7 +526,7 @@ struct_set_{type}(StructObject *self, PyObject *value, void *closure)
     if (struct_check_readonly(self)) return -1;
     if (long_to_int(value, &v, {min}, {max})) return -1;
     
-    *(({type}_t*)((char*)self->data + (int)closure) ) = v;
+    *(({type}_t*)((char*)self->data + (uintptr_t)closure) ) = v;
     return 0;
 }}
 >>>
@@ -793,7 +796,7 @@ error:
 static PyObject*
 pylv_obj_get_children(pylv_Obj *self, PyObject *args, PyObject *kwds)
 {
-    if (check_alive(self)) return NULL;
+    if (!is_alive(self)) return NULL;
     lv_obj_t *child = NULL;
     PyObject *pychild;
     PyObject *ret = PyList_New(0);
@@ -823,7 +826,7 @@ pylv_obj_get_children(pylv_Obj *self, PyObject *args, PyObject *kwds)
 static PyObject*
 pylv_obj_get_type(pylv_Obj *self, PyObject *args, PyObject *kwds)
 {
-    if (check_alive(self)) return NULL;
+    if (!is_alive(self)) return NULL;
     lv_obj_type_t result;
     PyObject *list = NULL;
     PyObject *str = NULL;
@@ -868,7 +871,7 @@ void pylv_event_cb(lv_obj_t *obj, lv_event_t event) {
 
 static PyObject *
 pylv_obj_set_event_cb(pylv_Obj *self, PyObject *args, PyObject *kwds) {
-    if (check_alive(self)) return NULL;
+    if (!is_alive(self)) return NULL;
     static char *kwlist[] = {"event_cb", NULL};
     PyObject *callback, *old_callback;
     if (!PyArg_ParseTupleAndKeywords(args, kwds, "O", kwlist, &callback)) return NULL;
@@ -889,7 +892,7 @@ pylv_obj_set_event_cb(pylv_Obj *self, PyObject *args, PyObject *kwds) {
 static PyObject*
 pylv_label_get_letter_pos(pylv_Label *self, PyObject *args, PyObject *kwds)
 {
-    if (check_alive(self)) return NULL;
+    if (!is_alive(self)) return NULL;
     static char *kwlist[] = {"index", NULL};
     int index;
     lv_point_t pos;
@@ -905,7 +908,7 @@ pylv_label_get_letter_pos(pylv_Label *self, PyObject *args, PyObject *kwds)
 static PyObject*
 pylv_label_get_letter_on(pylv_Label *self, PyObject *args, PyObject *kwds)
 {
-    if (check_alive(self)) return NULL;
+    if (!is_alive(self)) return NULL;
     static char *kwlist[] = {"pos", NULL};
     int x, y, index;
     lv_point_t pos;
@@ -927,16 +930,15 @@ pylv_label_get_letter_on(pylv_Label *self, PyObject *args, PyObject *kwds)
 static PyObject*
 pylv_list_add_btn(pylv_List *self, PyObject *args, PyObject *kwds)
 {
-    if (check_alive(self)) return NULL;
+    if (!is_alive(self)) return NULL;
     static char *kwlist[] = {"img_src", "txt", NULL};
     PyObject *img_src;
     const char *txt;
-    PyObject *rel_action;
     PyObject *ret;
     
     if (!PyArg_ParseTupleAndKeywords(args, kwds, "Os", kwlist , &img_src, &txt)) return NULL; 
       
-    if ( img_src!=Py_None || rel_action!=Py_None) {
+    if (img_src!=Py_None) {
         PyErr_SetString(PyExc_ValueError, "only img_src == None is currently supported");
         return NULL;
     } 
@@ -954,7 +956,7 @@ pylv_list_add_btn(pylv_List *self, PyObject *args, PyObject *kwds)
 static PyObject*
 pylv_list_focus(pylv_List *self, PyObject *args, PyObject *kwds)
 {
-    if (check_alive(self)) return NULL;
+    if (!is_alive(self)) return NULL;
     static char *kwlist[] = {"obj", "anim_en", NULL};
     pylv_Btn * obj;
     lv_obj_t *parent;
@@ -988,13 +990,16 @@ pylv_list_focus(pylv_List *self, PyObject *args, PyObject *kwds)
 static void
 pylv_{name}_dealloc(pylv_{pyname} *self) 
 {{
-
     // the accompanying lv_obj holds a reference to the Python object, so
     // dealloc can only take place if the lv_obj has already been deleted using
-    // Obj.del_() or .clean() on ints parents. 
-    
+    // Obj.del_() or .clean() on its parents.
+
+    // Clear weakrefs first before calling any destructors
     if (self->weakreflist != NULL)
         PyObject_ClearWeakRefs((PyObject *) self);
+
+    // Release callback object
+    Py_XDECREF(self->event_cb);
 
     Py_TYPE(self)->tp_free((PyObject *) self);
 
@@ -1226,7 +1231,7 @@ PyInit_lvgl(void) {
     Py_INCREF(&Style_Type);
     PyModule_AddObject(module, "Style", (PyObject *) &Style_Type);
 
-    // refcount for typesdict is initally 1; it is used by pyobj_from_lv
+    // refcount for typesdict is initially 1; it is used by pyobj_from_lv
     // refcounts to py{name}_Type objects are incremented due to "O" format
     typesdict = Py_BuildValue("{<<<objects:sO>>>}"<<<objects:,
         "lv_{name}", &pylv_{name}_Type>>>);
@@ -1255,4 +1260,3 @@ error:
     Py_XDECREF(module);
     return NULL;
 }
-

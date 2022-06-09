@@ -1,4 +1,4 @@
-
+#!/usr/bin/env python3
 import sourceparser
 from micropython import MicroPythonBindingsGenerator
 from python import PythonBindingsGenerator
